@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MotionGuide } from "./MotionGuide";
 import {
   categoryClass,
   exercises,
@@ -69,11 +70,11 @@ const sectionLabels: Record<SectionKey, string> = {
 };
 
 const sectionMeta: Record<SectionKey, string> = {
-  warmup: "1 round • 45s work / 15s transition",
+  warmup: "Dynamic • 1 round • 45s work / 15s transition",
   pre: "2 rounds • 40s work / 20s rest",
   core: "3 rounds • 40s work / 20s rest",
   skill: "5 rounds • 30s practice / 30s complete rest",
-  reset: "2 positions • 30s each",
+  reset: "Choose from 8 recovery options • 30s each",
 };
 
 const timeline = [
@@ -141,8 +142,10 @@ function buildPlan(
   addSection("pre", day.pre, 2);
   addSection("core", day.core, 3);
   addSection("skill", [day.skill], 5);
-  day.cooldown.forEach((label, index) => {
+  day.cooldown.forEach((baseExerciseId, index) => {
     const slotId = `reset-${index}`;
+    const exerciseId = swaps[slotId] ?? baseExerciseId;
+    const exercise = exercises[exerciseId];
     plan.push({
       id: `${slotId}-work`,
       kind: "work",
@@ -150,12 +153,64 @@ function buildPlan(
       section: "reset",
       sectionLabel: sectionLabels.reset,
       slotId,
-      label,
+      exerciseId,
+      label: exercise.name,
       round: index + 1,
       rounds: 2,
     });
   });
   return plan;
+}
+
+const keyframeSource = (image: string, frame: "start" | "finish") =>
+  image.replace(/exercises\/(.+)\.gif$/, `keyframes/$1_${frame}.webp`);
+
+function ExerciseDemo({
+  exercise,
+  compact = false,
+  dimmed = false,
+}: {
+  exercise: Exercise;
+  compact?: boolean;
+  dimmed?: boolean;
+}) {
+  if (exercise.video) {
+    return (
+      <div className={`exercise-demo exercise-demo-video ${dimmed ? "demo-dimmed" : ""}`}>
+        <video autoPlay loop muted playsInline preload="metadata" aria-label={`${exercise.name} smooth demonstration`}>
+          <source src={exercise.video} type="video/mp4" />
+        </video>
+        {!compact && <span className="loop-pill"><RefreshCw /> smooth motion</span>}
+      </div>
+    );
+  }
+
+  if (exercise.motion) {
+    return (
+      <div className={`exercise-demo exercise-demo-motion ${dimmed ? "demo-dimmed" : ""}`}>
+        <MotionGuide preset={exercise.motion} compact={compact} />
+      </div>
+    );
+  }
+
+  if (!exercise.image) return null;
+  const start = keyframeSource(exercise.image, "start");
+  const finish = keyframeSource(exercise.image, "finish");
+
+  if (exercise.hold) {
+    return (
+      <div className={`exercise-demo exercise-demo-hold ${dimmed ? "demo-dimmed" : ""}`}>
+        <img src={start} alt={`${exercise.name} hold position`} />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`exercise-demo keyframe-demo ${compact ? "keyframe-demo-compact" : ""} ${dimmed ? "demo-dimmed" : ""}`}>
+      <figure><img src={start} alt={`${exercise.name} start position`} /></figure>
+      <figure><img src={finish} alt={`${exercise.name} finish position`} /></figure>
+    </div>
+  );
 }
 
 function SectionIcon({ section }: { section: SectionKey }) {
@@ -231,9 +286,7 @@ function ExerciseCard({
       animate={{ opacity: 1, y: 0 }}
     >
       <div className="exercise-visual">
-        {/* Native animated GIFs are deliberately used for broad iPhone support. */}
-        <img src={exercise.image} alt={`${exercise.name} start and finish demonstration`} />
-        <span className="loop-pill"><RefreshCw /> looping demo</span>
+        <ExerciseDemo exercise={exercise} />
       </div>
       <div className="exercise-copy">
         <div className="exercise-heading">
@@ -254,7 +307,7 @@ function ExerciseCard({
             <Shuffle /> Swap
           </button>
           <button type="button" className="action-button" onClick={onEdit}>
-            <Settings2 /> {timing.work}s / {timing.rest}s
+            <Settings2 /> {section === "reset" ? `${timing.work}s` : `${timing.work}s / ${timing.rest}s`}
           </button>
         </div>
       </div>
@@ -512,7 +565,7 @@ export default function Home() {
           <p className="eyebrow"><span /> YOUR BUILT-IN TRAINING PARTNER</p>
           <h1>Stronger core.<br /><em>Calmer handstands.</em></h1>
           <p className="hero-intro">
-            Five focused, beginner-smart sessions for medium-height parallettes—guided by a precise timer and clear looping demonstrations.
+            Five focused, beginner-smart sessions for medium-height parallettes—guided by a precise timer, smooth motion guides and technically exact key positions.
           </p>
           <div className="hero-actions">
             <button type="button" className="primary-button" onClick={startWorkout}>
@@ -524,7 +577,7 @@ export default function Home() {
           </div>
           <div className="hero-proof">
             <span><Check /> Exact {formatTime(totalSeconds)}</span>
-            <span><Check /> 5 same-level swaps</span>
+            <span><Check /> Same-level swaps</span>
             <span><Check /> iPhone ready</span>
           </div>
         </div>
@@ -573,6 +626,14 @@ export default function Home() {
             <Clock3 />
             <div><span>Session total</span><strong>{formatTime(totalSeconds)}</strong></div>
             {!defaultTotal && <button type="button" onClick={resetAllTimings}>Reset to 25:00</button>}
+          </div>
+        </div>
+
+        <div className="demo-standard">
+          <Info />
+          <div>
+            <strong>Motion when motion helps. Key positions when precision matters.</strong>
+            <span>Warm-ups, cooldowns and common core drills animate smoothly. Parallette and wall drills show large START / FINISH panels so hand, foot and bar contact stay technically exact.</span>
           </div>
         </div>
 
@@ -642,22 +703,33 @@ export default function Home() {
               </section>
             ))}
 
-            <section className="reset-card">
-              <div className="section-icon icon-reset"><RefreshCw /></div>
-              <div>
-                <span>05</span>
-                <h2>Cooldown reset</h2>
-                <p>24:00–25:00 • 30 seconds each</p>
+            <section className="exercise-section cooldown-section">
+              <div className="exercise-section-title">
+                <div className="section-icon icon-reset"><RefreshCw /></div>
+                <div>
+                  <span>05</span>
+                  <h2>Cooldown reset</h2>
+                  <p>{sectionMeta.reset}</p>
+                </div>
               </div>
-              {day.cooldown.map((position, index) => (
-                <button
-                  type="button"
-                  key={position}
-                  onClick={() => setEditSlot({ slotId: `reset-${index}`, section: "reset" })}
-                >
-                  <strong>{index + 1}</strong><span>{position}</span><Settings2 />
-                </button>
-              ))}
+              <div className="exercise-grid">
+                {day.cooldown.map((baseExerciseId, index) => {
+                  const slotId = `reset-${index}`;
+                  const exercise = exercises[activeSwaps[slotId] ?? baseExerciseId];
+                  return (
+                    <ExerciseCard
+                      key={slotId}
+                      slotId={slotId}
+                      section="reset"
+                      exercise={exercise}
+                      rounds={1}
+                      timing={getTiming(slotId, "reset", timings)}
+                      onSwap={() => setSwapSlot({ slotId, section: "reset" })}
+                      onEdit={() => setEditSlot({ slotId, section: "reset" })}
+                    />
+                  );
+                })}
+              </div>
             </section>
           </motion.div>
         </AnimatePresence>
@@ -694,9 +766,12 @@ export default function Home() {
 
       <AnimatePresence>
         {swapSlot && (() => {
-          const currentId = activeSwaps[swapSlot.slotId] ?? swapSlot.slotId;
+          const baseId = swapSlot.section === "reset"
+            ? day.cooldown[Number(swapSlot.slotId.split("-")[1])]
+            : swapSlot.slotId;
+          const currentId = activeSwaps[swapSlot.slotId] ?? baseId;
           const currentItem = exercises[currentId];
-          const options = [swapSlot.slotId, ...currentItem.swaps]
+          const options = [baseId, ...exercises[baseId].swaps, ...currentItem.swaps]
             .filter((id, index, array) => exercises[id] && array.indexOf(id) === index);
           return (
             <Drawer
@@ -715,7 +790,7 @@ export default function Home() {
                       key={exerciseId}
                       onClick={() => chooseSwap(swapSlot.slotId, exerciseId)}
                     >
-                      <img src={option.image} alt="" />
+                      <div className="swap-demo"><ExerciseDemo exercise={option} compact /></div>
                       <div><span className={`category-tag ${categoryClass[option.category]}`}>{option.category}</span><strong>{option.name}</strong><small>{option.target}</small></div>
                       {selected ? <Check /> : <ChevronRight />}
                     </button>
@@ -729,7 +804,7 @@ export default function Home() {
         {editSlot && (() => {
           const timing = getTiming(editSlot.slotId, editSlot.section, timings);
           const name = editSlot.section === "reset"
-            ? day.cooldown[Number(editSlot.slotId.split("-")[1])]
+            ? exercises[activeSwaps[editSlot.slotId] ?? day.cooldown[Number(editSlot.slotId.split("-")[1])]].name
             : resolveExercise(editSlot.slotId).name;
           return (
             <Drawer
@@ -796,11 +871,11 @@ export default function Home() {
                 <div className="player-layout">
                   <div className="player-demo">
                     {current.kind === "work" && currentExercise ? (
-                      <img src={currentExercise.image} alt={`${currentExercise.name} demonstration`} />
+                      <ExerciseDemo exercise={currentExercise} />
                     ) : current.kind === "work" ? (
                       <div className="reset-visual"><RefreshCw /><span>Breathe slowly</span></div>
                     ) : nextExercise ? (
-                      <><img className="rest-preview" src={nextExercise.image} alt="" /><span className="up-next-label">UP NEXT • {nextExercise.name}</span></>
+                      <><ExerciseDemo exercise={nextExercise} dimmed /><span className="up-next-label">UP NEXT • {nextExercise.name}</span></>
                     ) : (
                       <div className="reset-visual"><RefreshCw /><span>Almost done</span></div>
                     )}
