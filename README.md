@@ -2,6 +2,8 @@
 
 A mobile-first workout app containing five guided 25-minute parallette core and handstand sessions. It includes animated exercise demonstrations, equal-difficulty swaps, editable work/rest intervals, a full-screen countdown timer, audio cues, and iPhone Home Screen support.
 
+**Live app:** https://kyriakos243.github.io/parallettes/
+
 ## Local development
 
 Requirements: Node.js 22+ and pnpm 11.
