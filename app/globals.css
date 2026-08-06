@@ -201,11 +201,7 @@ img { display: block; max-width: 100%; }
 .exercise-demo, .motion-guide { position: relative; width: 100%; height: 100%; overflow: hidden; }
 .motion-guide svg { width: 100%; height: 100%; display: block; }
 .exercise-demo-video video { display: block; width: 100%; height: 100%; object-fit: cover; }
-.exercise-demo-hold img { width: 100%; height: 100%; object-fit: cover; }
-.keyframe-demo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; background: #16352f; }
-.keyframe-demo figure { position: relative; min-width: 0; height: 100%; margin: 0; overflow: hidden; background: var(--cream); }
-.keyframe-demo figure img { width: 100%; height: 100%; object-fit: cover; }
-.keyframe-demo figure > span { position: absolute; top: 10px; left: 10px; border-radius: 999px; padding: 6px 9px; background: rgba(13,41,35,.86); color: white; font-size: 9px; font-weight: 850; letter-spacing: .1em; }
+.exercise-demo-gif img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .loop-pill { position: absolute; left: 10px; bottom: 10px; padding: 6px 8px; border-radius: 999px; color: white; background: rgba(13,41,35,.8); font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 5px; backdrop-filter: blur(8px); }
 .loop-pill svg { width: 11px; height: 11px; animation: rotate 2.2s linear infinite; }
 .position-pill { position: absolute; left: 10px; bottom: 10px; max-width: calc(100% - 20px); padding: 7px 10px; border-radius: 999px; color: white; background: rgba(13,41,35,.86); font-size: 9px; font-weight: 800; letter-spacing: .045em; text-transform: uppercase; backdrop-filter: blur(8px); }
@@ -260,7 +256,7 @@ footer { min-height: 100px; padding: 25px max(28px, calc((100vw - 1164px) / 2));
 .swap-list button { width: 100%; border: 1px solid var(--line); border-radius: 15px; padding: 8px; background: white; display: grid; grid-template-columns: 86px 1fr auto; gap: 12px; align-items: center; text-align: left; cursor: pointer; }
 .swap-list button:hover, .swap-list button.selected { border-color: var(--teal); background: #f5fbf9; }
 .swap-demo { width: 86px; height: 70px; border-radius: 10px; overflow: hidden; background: var(--cream); }
-.swap-demo .position-pill, .swap-demo .loop-pill, .swap-demo .keyframe-demo figure > span { display: none; }
+.swap-demo .position-pill, .swap-demo .loop-pill { display: none; }
 .swap-list button > div:not(.swap-demo) { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
 .swap-list button strong { font-size: 14px; }
 .swap-list button small { color: var(--muted); }

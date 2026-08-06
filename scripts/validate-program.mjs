@@ -20,7 +20,7 @@ runModule(loaded.exports, loaded, () => {
 
 const { exercises, universalWarmup, workouts } = loaded.exports;
 const failures = [];
-const media = { motion: 0, keyframes: 0, video: 0 };
+const media = { motion: 0, gifs: 0, video: 0 };
 
 for (const exercise of Object.values(exercises)) {
   if (!exercise.target || !exercise.easier || exercise.cues.length !== 2) {
@@ -32,16 +32,14 @@ for (const exercise of Object.values(exercises)) {
   if (exercise.motion) media.motion += 1;
   if (exercise.video) media.video += 1;
 
-  if (exercise.image && !exercise.motion && !exercise.video) {
-    media.keyframes += 1;
+  if (exercise.image) {
+    media.gifs += 1;
     const match = exercise.image.match(/exercises\/(.+)\.gif$/);
     if (!match) {
       failures.push(`${exercise.id}: invalid image path`);
     } else {
-      for (const frame of ["start", "finish"]) {
-        const asset = join(projectRoot, "public/keyframes", `${match[1]}_${frame}.webp`);
-        if (!existsSync(asset)) failures.push(`${exercise.id}: missing ${frame} keyframe`);
-      }
+      const asset = join(projectRoot, "public/exercises", `${match[1]}.gif`);
+      if (!existsSync(asset)) failures.push(`${exercise.id}: missing original GIF`);
     }
   }
 
@@ -76,7 +74,7 @@ const presetCount = new Set(
 console.log(dayResults.join("\n"));
 console.log(
   `${Object.keys(exercises).length} exercises; ${presetCount} smooth motion guides; ` +
-  `${media.keyframes} key-position guides; ${media.video} licensed videos`,
+  `${media.gifs} original GIF guides; ${media.video} licensed videos`,
 );
 
 if (failures.length) {

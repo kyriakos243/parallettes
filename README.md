@@ -7,11 +7,10 @@ A mobile-first workout app containing five guided 25-minute parallette core and 
 ## Demonstration system
 
 - Dynamic warm-ups, cooldowns and common floor-core movements use lightweight continuous vector motion that remains sharp on an iPhone or iPad.
-- Parallette- and wall-specific drills use large, separate **START** and **FINISH** panels. They are intentionally not presented as fake two-frame GIFs.
-- Static holds use one clear alignment image.
+- Parallette- and wall-specific drills use their original full animated GIF demonstrations, including static-position guides.
 - The media component also supports muted, looping, inline MP4 clips for any professionally licensed animation pack added later. MP4 is preferred to GIF for smoother playback and smaller downloads on mobile.
 
-Do not add GIFs from scraped exercise repositories unless the original asset license explicitly permits redistribution. Many public repositories expose GymVisual or other commercial artwork without transferable rights.
+Do not add third-party GIFs from scraped exercise repositories unless the original asset license explicitly permits redistribution. Many public repositories expose GymVisual or other commercial artwork without transferable rights.
 
 **Live app:** https://kyriakos243.github.io/parallettes/
 

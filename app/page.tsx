@@ -162,9 +162,6 @@ function buildPlan(
   return plan;
 }
 
-const keyframeSource = (image: string, frame: "start" | "finish") =>
-  image.replace(/exercises\/(.+)\.gif$/, `keyframes/$1_${frame}.webp`);
-
 function ExerciseDemo({
   exercise,
   compact = false,
@@ -194,21 +191,10 @@ function ExerciseDemo({
   }
 
   if (!exercise.image) return null;
-  const start = keyframeSource(exercise.image, "start");
-  const finish = keyframeSource(exercise.image, "finish");
-
-  if (exercise.hold) {
-    return (
-      <div className={`exercise-demo exercise-demo-hold ${dimmed ? "demo-dimmed" : ""}`}>
-        <img src={start} alt={`${exercise.name} hold position`} />
-      </div>
-    );
-  }
-
   return (
-    <div className={`exercise-demo keyframe-demo ${compact ? "keyframe-demo-compact" : ""} ${dimmed ? "demo-dimmed" : ""}`}>
-      <figure><img src={start} alt={`${exercise.name} start position`} /></figure>
-      <figure><img src={finish} alt={`${exercise.name} finish position`} /></figure>
+    <div className={`exercise-demo exercise-demo-gif ${dimmed ? "demo-dimmed" : ""}`}>
+      <img src={exercise.image} alt={`${exercise.name} animated demonstration`} />
+      {!compact && <span className="loop-pill"><RefreshCw /> animated guide</span>}
     </div>
   );
 }
