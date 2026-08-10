@@ -521,6 +521,23 @@ export default function Home() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!("scrollRestoration" in window.history)) return;
+    const previousRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = "manual";
+    if (window.location.hash) return () => { window.history.scrollRestoration = previousRestoration; };
+
+    const alignToTop = () => window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    alignToTop();
+    const frame = window.requestAnimationFrame(alignToTop);
+    const timer = window.setTimeout(alignToTop, 80);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+      window.history.scrollRestoration = previousRestoration;
+    };
+  }, []);
+
   const historyForProfile = (next: ProfileRecord): HistoryEntry[] => next.history.map((item) => ({
     id: item.id,
     completedAt: item.completedAt,
@@ -1087,18 +1104,18 @@ export default function Home() {
   if (auditParams?.has("rig-approval")) return <RigApprovalPage />;
 
   return (
-    <main>
+    <main id="app-top">
       <header className="site-header">
-        <a className="brand" href="#top" aria-label="Parallette 25+ home">
+        <a className="brand" href="#app-top" aria-label="Parallette 25+ home">
           <span className="brand-mark"><i /><i /></span>
           <span><strong>PARALLETTE</strong><b>25+</b></span>
         </a>
         <div className="header-actions">
-          <button type="button" className="header-button profile-button" onClick={() => setProfileOpen(true)}><span className="profile-dot">{(profile?.username ?? "G").slice(0, 1).toUpperCase()}</span><span>{profile?.username ?? "Guest"}</span></button>
-          <button type="button" className="header-button" onClick={() => setSettings((previous) => ({ ...previous, soundOn: !previous.soundOn }))}>
+          <button type="button" className="header-button profile-button" aria-label={`Open profile: ${profile?.username ?? "Guest"}`} onClick={() => setProfileOpen(true)}><span className="profile-dot">{(profile?.username ?? "G").slice(0, 1).toUpperCase()}</span><span>{profile?.username ?? "Guest"}</span></button>
+          <button type="button" className="header-button" aria-label={settings.soundOn ? "Turn sound off" : "Turn sound on"} onClick={() => setSettings((previous) => ({ ...previous, soundOn: !previous.soundOn }))}>
             {settings.soundOn ? <Volume2 /> : <VolumeX />}<span>{settings.soundOn ? "Sound on" : "Sound off"}</span>
           </button>
-          <button type="button" className="header-button" onClick={() => setInstallOpen(true)}><Smartphone /><span>Use on iPhone</span></button>
+          <button type="button" className="header-button" aria-label="Installation instructions" onClick={() => setInstallOpen(true)}><Smartphone /><span>Use on iPhone</span></button>
         </div>
       </header>
 
@@ -1107,7 +1124,7 @@ export default function Home() {
         <div className="mode-actions"><button type="button" className="secondary-button compact" onClick={() => setCustomOpen(true)}><WandSparkles /> Build Custom Session</button><button type="button" className="secondary-button compact" onClick={() => setReadinessOpen(true)}><ShieldCheck /> Skills</button></div>
       </section>
 
-      <section className="hero" id="top">
+      <section className="hero">
         <div className="hero-copy">
           <p className="eyebrow"><span /> YOUR BUILT-IN TRAINING PARTNER</p>
           <h1>Stronger core.<br /><em>Skills that grow.</em></h1>
