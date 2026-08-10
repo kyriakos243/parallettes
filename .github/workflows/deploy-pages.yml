@@ -32,6 +32,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Validate programme and types
+        run: pnpm check
       - name: Build static site
         run: pnpm build
       - name: Configure Pages

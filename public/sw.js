@@ -1,8 +1,15 @@
-const CACHE = "parallette-25-v2";
+const CACHE = "parallette-25-v4";
 const base = new URL("./", self.registration.scope);
+const shell = [
+  base.href,
+  new URL("manifest.webmanifest", base).href,
+  new URL("icon-192.png", base).href,
+  new URL("icon-512.png", base).href,
+  new URL("apple-touch-icon.png", base).href,
+];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.add(base.href)));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(shell)));
   self.skipWaiting();
 });
 
@@ -29,13 +36,20 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  event.respondWith(
-    fetch(event.request).then((response) => {
-        if (response.ok) {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
-        }
-        return response;
-      }).catch(() => caches.match(event.request)),
-  );
+  event.respondWith((async () => {
+    const cached = await caches.match(event.request);
+    if (cached) {
+      event.waitUntil(fetch(event.request).then((response) => {
+        if (response.ok) return caches.open(CACHE).then((cache) => cache.put(event.request, response));
+        return undefined;
+      }).catch(() => undefined));
+      return cached;
+    }
+    const response = await fetch(event.request);
+    if (response.ok) {
+      const copy = response.clone();
+      event.waitUntil(caches.open(CACHE).then((cache) => cache.put(event.request, copy)));
+    }
+    return response;
+  })());
 });

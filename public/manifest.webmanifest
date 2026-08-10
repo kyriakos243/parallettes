@@ -1,13 +1,15 @@
 {
-  "name": "Parallette 25 — Core & Handstand Training",
-  "short_name": "Parallette 25",
-  "description": "Five guided 25-minute parallette workouts with animated demos and a built-in timer.",
+  "id": "/parallettes/",
+  "name": "Parallette 25+ — Core, Handstand & Calisthenics",
+  "short_name": "Parallette 25+",
+  "description": "Five guided 25-minute parallette workouts, three levels, optional 5-minute skill labs, swaps and an offline-ready timer.",
   "start_url": "/parallettes/",
   "scope": "/parallettes/",
   "display": "standalone",
   "orientation": "portrait-primary",
   "background_color": "#fffdf9",
   "theme_color": "#0d2923",
+  "categories": ["fitness", "sports", "health"],
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
