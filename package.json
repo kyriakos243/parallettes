@@ -10,7 +10,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "check": "node scripts/validate-program.mjs",
+    "validate": "node scripts/validate-program.mjs && node scripts/validate-custom.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm validate && pnpm typecheck",
     "preview": "vite preview"
   },
   "dependencies": {
