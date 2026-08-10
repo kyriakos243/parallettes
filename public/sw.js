@@ -1,4 +1,4 @@
-const CACHE = "parallette-25-v4";
+const CACHE = "parallette-25-v7";
 const base = new URL("./", self.registration.scope);
 const shell = [
   base.href,
@@ -9,7 +9,17 @@ const shell = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(shell)));
+  event.waitUntil(caches.open(CACHE).then(async (cache) => {
+    await cache.addAll(shell);
+    // Cache the current hashed CSS/JS bundle during installation so the very
+    // first successful visit is enough for a later offline Home Screen launch.
+    const html = await fetch(base.href).then((response) => response.text());
+    const assets = [...html.matchAll(/(?:src|href)="([^"]+)"/gu)]
+      .map((match) => new URL(match[1], base))
+      .filter((url) => url.origin === base.origin && url.href.startsWith(base.href))
+      .map((url) => url.href);
+    await cache.addAll([...new Set(assets)]);
+  }));
   self.skipWaiting();
 });
 

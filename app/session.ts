@@ -1,7 +1,7 @@
 /**
  * Pure session planning primitives.
  *
- * Workout content lives in workouts.ts. This module deliberately contains no
+ * Workout content lives in program.ts. This module deliberately contains no
  * React or browser dependencies so plan timing, swaps, persistence and timer
  * catch-up can be validated without rendering the app.
  */
@@ -19,12 +19,18 @@ const exerciseLevelRank = (level: ExerciseLevel): number =>
 export const TRAINING_BLOCKS = [
   "warmup",
   "pre",
-  "core",
   "handstand",
   "lab",
+  "core",
   "cooldown",
 ] as const;
 export type TrainingBlock = (typeof TRAINING_BLOCKS)[number];
+
+/** Authoritative display and execution order across Recommended and Custom sessions. */
+export const sessionBlockOrder = (includeLab: boolean): readonly TrainingBlock[] =>
+  includeLab
+    ? ["warmup", "pre", "handstand", "lab", "core", "cooldown"]
+    : ["warmup", "pre", "handstand", "core", "cooldown"];
 
 export type ExerciseId = string;
 export type GateId = string;
@@ -43,6 +49,8 @@ export type ExerciseCompatibility = {
   compatibleDays?: readonly number[] | "all";
   gate?: GateId;
   fallbackId?: ExerciseId;
+  requiredEquipment?: readonly string[];
+  progressionFamily?: string;
 };
 
 export type ExerciseLibrary<T extends ExerciseCompatibility = ExerciseCompatibility> =
@@ -57,7 +65,7 @@ export type WorkoutVariant = Readonly<{
   pre: readonly [ExerciseId, ExerciseId];
   core: readonly [ExerciseId, ExerciseId, ExerciseId, ExerciseId];
   handstand: ExerciseId;
-  /** Level 2 and 3 variants provide two drills, sequenced A/B/A/B/A. */
+  /** Level 2 and 3 variants provide a recommended drill plus an alternate. */
   lab?: LabPair;
   cooldown: readonly [ExerciseId, ExerciseId];
 }>;
@@ -68,13 +76,13 @@ export const STABLE_SLOT_IDS = [
   "warmup-3",
   "pre-1",
   "pre-2",
+  "handstand-1",
+  "lab-a",
+  "lab-b",
   "core-1",
   "core-2",
   "core-3",
   "core-4",
-  "handstand-1",
-  "lab-a",
-  "lab-b",
   "cooldown-1",
   "cooldown-2",
 ] as const;
@@ -164,7 +172,9 @@ export const isExerciseStructurallyCompatible = (
   day: number,
 ): boolean =>
   exercise.eligibleBlocks.includes(slot.block) &&
-  exercise.primaryFocus === slot.primaryFocus &&
+  // Lab is an explicitly selected extra skill track. Unlike a programmed
+  // core slot, its purpose may change from L-sit to planche or pushing.
+  (slot.block === "lab" || exercise.primaryFocus === slot.primaryFocus) &&
   supportsDay(exercise, day);
 
 export const isExerciseCompatible = (
@@ -211,10 +221,6 @@ const makeSlots = (
     ["warmup-3", "warmup", 2, variant.warmup[2]],
     ["pre-1", "pre", 0, variant.pre[0]],
     ["pre-2", "pre", 1, variant.pre[1]],
-    ["core-1", "core", 0, variant.core[0]],
-    ["core-2", "core", 1, variant.core[1]],
-    ["core-3", "core", 2, variant.core[2]],
-    ["core-4", "core", 3, variant.core[3]],
     ["handstand-1", "handstand", 0, variant.handstand],
   ];
 
@@ -222,11 +228,17 @@ const makeSlots = (
     if (!variant.lab) {
       throw new Error(`Day ${variant.day} Level ${variant.level} has no Calisthenics Lab`);
     }
-    raw.push(
-      ["lab-a", "lab", 0, variant.lab.a],
-      ["lab-b", "lab", 1, variant.lab.b],
-    );
+    // The V2.1 Lab is one selected skill repeated for five quality rounds.
+    // `lab.b` remains an authored alternate surfaced through the swap picker.
+    raw.push(["lab-a", "lab", 0, variant.lab.a]);
   }
+
+  raw.push(
+    ["core-1", "core", 0, variant.core[0]],
+    ["core-2", "core", 1, variant.core[1]],
+    ["core-3", "core", 2, variant.core[2]],
+    ["core-4", "core", 3, variant.core[3]],
+  );
 
   raw.push(
     ["cooldown-1", "cooldown", 0, variant.cooldown[0]],
@@ -324,9 +336,9 @@ export function buildSessionPlan(options: BuildSessionOptions): SessionPlan {
   const byBlock = (block: TrainingBlock) => slots.filter((slot) => slot.block === block);
   const intervals: PlanInterval[] = [];
 
-  // Handstand is a motor-control skill: keep it before the fatigue-heavy
-  // strength/core circuit in every generated session.
-  for (const block of ["warmup", "pre", "handstand", "core"] as const) {
+  // Complete preparation and motor-control work before either optional Lab
+  // practice or the fatigue-heavy Abs/Core circuit.
+  for (const block of ["warmup", "pre", "handstand"] as const) {
     const rounds = BLOCK_ROUNDS[block];
     for (let round = 1; round <= rounds; round += 1) {
       for (const slot of byBlock(block)) {
@@ -345,19 +357,33 @@ export function buildSessionPlan(options: BuildSessionOptions): SessionPlan {
   if (includeLab) {
     const labSlots = byBlock("lab");
     const labA = labSlots.find((slot) => slot.id === "lab-a");
-    const labB = labSlots.find((slot) => slot.id === "lab-b");
-    if (!labA || !labB) throw new Error("Calisthenics Lab requires A and B slots");
-    const pattern = [labA, labB, labA, labB, labA];
-    pattern.forEach((slot, index) => {
+    if (!labA) throw new Error("Calisthenics Lab requires one selected skill");
+    Array.from({ length: 5 }).forEach((_, index) => {
       appendInterval(
         intervals,
-        slot,
-        assignmentFor(slot, options),
-        timingFor(slot, options.timings),
+        labA,
+        assignmentFor(labA, options),
+        timingFor(labA, options.timings),
         index + 1,
-        pattern.length,
+        5,
       );
     });
+  }
+
+  for (const block of ["core"] as const) {
+    const rounds = BLOCK_ROUNDS[block];
+    for (let round = 1; round <= rounds; round += 1) {
+      for (const slot of byBlock(block)) {
+        appendInterval(
+          intervals,
+          slot,
+          assignmentFor(slot, options),
+          timingFor(slot, options.timings),
+          round,
+          rounds,
+        );
+      }
+    }
   }
 
   for (const slot of byBlock("cooldown")) {
@@ -391,7 +417,13 @@ export type CompatibleSwapOptions = Readonly<{
   readiness?: Readiness;
   difficulty?: SwapDifficulty;
   includeLocked?: boolean;
+  equipment?: readonly string[];
 }>;
+
+const supportsEquipment = (
+  exercise: ExerciseCompatibility,
+  equipment: readonly string[] | undefined,
+): boolean => !equipment || (exercise.requiredEquipment ?? []).every((item) => equipment.includes(item));
 
 export function compatibleSwaps(options: CompatibleSwapOptions): ExerciseCompatibility[] {
   const base = options.exercises[options.slot.defaultExerciseId];
@@ -402,6 +434,7 @@ export function compatibleSwaps(options: CompatibleSwapOptions): ExerciseCompati
     .filter((exercise) =>
       isExerciseStructurallyCompatible(exercise, options.slot, options.day))
     .filter((exercise) => supportsLevel(exercise, options.level))
+    .filter((exercise) => supportsEquipment(exercise, options.equipment))
     .filter((exercise) => {
       if (options.includeLocked || !exercise.gate) return true;
       return hasGate(options.readiness, exercise.gate);
@@ -416,8 +449,48 @@ export function compatibleSwaps(options: CompatibleSwapOptions): ExerciseCompati
       if (difficulty === "easier") return distance === -1;
       return distance === 1;
     })
-    .sort((a, b) => exerciseLevelRank(a.level) - exerciseLevelRank(b.level) ||
+    .sort((a, b) => Number(b.progressionFamily === base.progressionFamily) - Number(a.progressionFamily === base.progressionFamily) ||
+      exerciseLevelRank(a.level) - exerciseLevelRank(b.level) ||
       (a.name ?? a.id).localeCompare(b.name ?? b.id));
+}
+
+export type EquipmentAdaptation = Readonly<{
+  swaps: SwapSelections;
+  unavailable: readonly StableSlotId[];
+}>;
+
+/** Keep the authored slot role, but transparently choose an available safe variation when possible. */
+export function adaptSwapsForEquipment(options: Readonly<{
+  slots: readonly SessionSlot[];
+  exercises: ExerciseLibrary;
+  swaps?: SwapSelections;
+  day: number;
+  level: SessionLevel;
+  readiness?: Readiness;
+  equipment: readonly string[];
+}>): EquipmentAdaptation {
+  const swaps: Partial<Record<StableSlotId, string>> = { ...(options.swaps ?? {}) };
+  const unavailable: StableSlotId[] = [];
+  for (const slot of options.slots) {
+    const currentId = swaps[slot.id] ?? slot.defaultExerciseId;
+    const current = options.exercises[currentId];
+    if (!current) { unavailable.push(slot.id); continue; }
+    const resolved = resolveGatedExercise(currentId, options.exercises, options.readiness);
+    if (supportsEquipment(resolved, options.equipment)) continue;
+    const candidates = compatibleSwaps({
+      slot,
+      exercises: options.exercises,
+      day: options.day,
+      level: options.level,
+      readiness: options.readiness,
+      difficulty: "all",
+      equipment: options.equipment,
+    });
+    const replacement = candidates.find((item) => item.level === current.level || item.level === "ALL") ?? candidates[0];
+    if (replacement) swaps[slot.id] = replacement.id;
+    else unavailable.push(slot.id);
+  }
+  return { swaps, unavailable };
 }
 
 export const slotsForVariant = (

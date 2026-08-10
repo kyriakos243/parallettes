@@ -1,0 +1,13 @@
+name = "parallette25-profile-api"
+main = "worker.js"
+compatibility_date = "2026-08-10"
+
+[observability]
+enabled = true
+
+[vars]
+ALLOWED_ORIGIN = "https://kyriakos243.github.io"
+
+[[kv_namespaces]]
+binding = "PROFILES"
+id = "f88ca998e55f4e4088fba334e78eb802"
