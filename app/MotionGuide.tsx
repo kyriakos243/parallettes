@@ -788,9 +788,30 @@ const hasEquipment = (guide: Guide, item: Equipment) =>
     ? guide.equipment.includes(item)
     : guide.equipment === item;
 
-const hairPath = (pose: Pose) => pose.head.y > pose.neck.y
-  ? `M ${pose.head.x - 25} ${pose.head.y + 6} Q ${pose.head.x} ${pose.head.y + 34} ${pose.head.x + 22} ${pose.head.y + 7}`
-  : `M ${pose.head.x - 25} ${pose.head.y - 6} Q ${pose.head.x} ${pose.head.y - 34} ${pose.head.x + 22} ${pose.head.y - 7}`;
+/**
+ * Draw the hair on the back half of the head, opposite the face/gaze vector.
+ * This keeps the avatar readable when upright, horizontal or inverted instead
+ * of making the hair look permanently attached to the top of the screen.
+ */
+const hairPath = (pose: Pose, gaze: Point) => {
+  const magnitude = Math.hypot(gaze.x, gaze.y) || 1;
+  const face = p(gaze.x / magnitude, gaze.y / magnitude);
+  const back = p(-face.x, -face.y);
+  const tangent = p(-face.y, face.x);
+  const start = p(
+    pose.head.x + back.x * 5 + tangent.x * 20,
+    pose.head.y + back.y * 5 + tangent.y * 20,
+  );
+  const control = p(
+    pose.head.x + back.x * 32,
+    pose.head.y + back.y * 32,
+  );
+  const end = p(
+    pose.head.x + back.x * 5 - tangent.x * 20,
+    pose.head.y + back.y * 5 - tangent.y * 20,
+  );
+  return `M ${start.x} ${start.y} Q ${control.x} ${control.y} ${end.x} ${end.y}`;
+};
 
 function EquipmentLayer({ guide, preset }: { guide: Guide; preset: string }) {
   return (
@@ -886,9 +907,9 @@ export function MotionGuide({ preset, compact = false }: { preset: MotionPreset;
             transition={transition}
           />
           <motion.path
-            d={hairPath(poses[0])}
+            d={hairPath(poses[0], gaze)}
             animate={{
-              d: poses.map(hairPath),
+              d: poses.map((pose) => hairPath(pose, gaze)),
             }}
             transition={transition}
             fill="none"
