@@ -32,7 +32,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExerciseDemo } from "./ExerciseDemo";
 import { MotionGuide, type MotionPreset } from "./MotionGuide";
-import { buildCustomSession, type CustomDifficulty, type CustomFocus } from "./custom";
+import { buildCustomSession, type CustomBlocks, type CustomDifficulty, type CustomFocus } from "./custom";
 import { deleteProfile, exportProfile, importProfile, listProfiles, newProfile, remoteSyncAvailable, saveProfile, syncProfile, type ProfileRecord, type SaveMode } from "./profileStore";
 import {
   exercises,
@@ -52,7 +52,9 @@ import {
 } from "./program";
 import {
   DEFAULT_BLOCK_TIMING,
+  adaptSwapsForEquipment,
   buildSessionPlan,
+  sessionBlockOrder,
   compatibleSwaps,
   defaultStoredAppState,
   locateTimerPosition,
@@ -73,6 +75,7 @@ import {
 const STORAGE_KEY = "parallette25-settings-v2";
 const LEGACY_STORAGE_KEY = "parallette25-settings";
 const HISTORY_KEY = "parallette25-history-v1";
+const scopedKey = (base: string, profileId?: string) => `${base}:${profileId ?? "guest"}`;
 
 type HistoryEntry = {
   id: string;
@@ -82,27 +85,47 @@ type HistoryEntry = {
   title: string;
   seconds: number;
   lab: boolean;
+  mode?: SaveMode;
+  status?: "complete" | "modified" | "partial";
 };
 
 type TimelineItem = readonly [string, string, string, WorkoutBlock];
 type TodayTimingMode = "shorter" | "reallocate";
+type LabTrack = "lsit" | "planche" | "pushing" | "support";
+
+const labTrackLabels: Record<LabTrack, string> = {
+  lsit: "L-Sit / Compression",
+  planche: "Planche Foundation",
+  pushing: "Pushing Strength",
+  support: "Support / Transition",
+};
+
+const labTrackFor = (exercise: Exercise): LabTrack | null => {
+  const focuses = [exercise.primaryFocus, ...(exercise.secondaryFocus ?? [])];
+  if (focuses.includes("lsit") || focuses.includes("compression")) return "lsit";
+  if (focuses.includes("planche")) return "planche";
+  if (focuses.includes("horizontal-push") || focuses.includes("vertical-push")) return "pushing";
+  if (focuses.includes("support") || focuses.includes("transition") || focuses.includes("balance")) return "support";
+  return null;
+};
 
 const blockLabels: Record<WorkoutBlock, string> = {
   warmup: "Dynamic warm-up",
   pre: "Pre-handstand preparation",
-  core: "Abs & core circuit",
+  core: "Abs / Core circuit",
   handstand: "Handstand skill",
   lab: "Calisthenics Lab",
-  cooldown: "Cooldown reset",
+  cooldown: "Cooldown & stretching",
 };
+const displayBlockLabel = (block: WorkoutBlock, custom = false) => custom && block === "handstand" ? "Skill practice" : blockLabels[block];
 
 const blockMeta: Record<WorkoutBlock, string> = {
   warmup: "1 round • 45s work / 15s transition",
   pre: "2 rounds • 40s work / 20s rest",
   core: "3 rounds • 40s work / 20s rest",
   handstand: "5 rounds • 30s practice / 30s complete rest",
-  lab: "Optional • A/B/A/B/A • 30s practice / 30s complete rest",
-  cooldown: "2 recovery positions • 30s each",
+  lab: "Optional • one selected skill × 5 rounds • 30s practice / 30s complete rest",
+  cooldown: "2 static recovery holds • 30s each",
 };
 
 const categoryClass: Record<Category, string> = {
@@ -112,6 +135,7 @@ const categoryClass: Record<Category, string> = {
   Core: "tag-core",
   Handstand: "tag-handstand",
   Calisthenics: "tag-lab",
+  Conditioning: "tag-conditioning",
   Cooldown: "tag-cooldown",
 };
 
@@ -129,16 +153,16 @@ const timelineFor = (withLab: boolean): TimelineItem[] => withLab
       ["0:00", "3:00", "Warm-up", "warmup"],
       ["3:00", "7:00", "Prepare", "pre"],
       ["7:00", "12:00", "Handstand", "handstand"],
-      ["12:00", "24:00", "Core", "core"],
-      ["24:00", "29:00", "Skill Lab", "lab"],
-      ["29:00", "30:00", "Reset", "cooldown"],
+      ["12:00", "17:00", "Skill Lab", "lab"],
+      ["17:00", "29:00", "Abs / Core", "core"],
+      ["29:00", "30:00", "Cooldown / Stretch", "cooldown"],
     ]
   : [
       ["0:00", "3:00", "Warm-up", "warmup"],
       ["3:00", "7:00", "Prepare", "pre"],
       ["7:00", "12:00", "Handstand", "handstand"],
-      ["12:00", "24:00", "Core", "core"],
-      ["24:00", "25:00", "Reset", "cooldown"],
+      ["12:00", "24:00", "Abs / Core", "core"],
+      ["24:00", "25:00", "Cooldown / Stretch", "cooldown"],
     ];
 
 const formatTime = (seconds: number) => {
@@ -164,8 +188,13 @@ const modifyTodayPlan = (
   if (mode === "shorter" || kept.length === 0) {
     return { ...plan, intervals: kept, totalSeconds: kept.reduce((sum, interval) => sum + interval.duration, 0) };
   }
-  const adjustable = kept.filter((interval) => interval.block !== "cooldown");
-  const fixedSeconds = kept.filter((interval) => interval.block === "cooldown").reduce((sum, interval) => sum + interval.duration, 0);
+  const preferredBlocks: WorkoutBlock[] = kept.some((interval) => interval.block === "core")
+    ? ["core"]
+    : kept.some((interval) => interval.block === "lab")
+      ? ["lab", "handstand"]
+      : ["handstand"];
+  const adjustable = kept.filter((interval) => preferredBlocks.includes(interval.block));
+  const fixedSeconds = kept.filter((interval) => !preferredBlocks.includes(interval.block)).reduce((sum, interval) => sum + interval.duration, 0);
   const currentAdjustable = adjustable.reduce((sum, interval) => sum + interval.duration, 0);
   if (currentAdjustable === 0 || plan.totalSeconds <= fixedSeconds) {
     return { ...plan, intervals: kept, totalSeconds: kept.reduce((sum, interval) => sum + interval.duration, 0) };
@@ -289,6 +318,7 @@ function ExerciseCard({
   onEdit,
   feedback,
   onFeedback,
+  equipmentAdjusted = false,
 }: {
   slot: SessionSlot;
   exercise: Exercise;
@@ -300,6 +330,7 @@ function ExerciseCard({
   onEdit: () => void;
   feedback?: "easy" | "right" | "hard";
   onFeedback: (value: "easy" | "right" | "hard") => void;
+  equipmentAdjusted?: boolean;
 }) {
   const substituted = requested.id !== exercise.id;
   return (
@@ -329,6 +360,7 @@ function ExerciseCard({
             <LockKeyhole /> {requested.name} is readiness-gated, so this safe regression is active.
           </p>
         )}
+        {equipmentAdjusted && <p className="substitution-note"><Check /> Adapted to today’s available equipment while keeping the same training role.</p>}
         <div className="exercise-actions">
           <button type="button" className="action-button" onClick={onSwap}><Shuffle /> Swap</button>
           <button type="button" className="action-button" onClick={onEdit}>
@@ -394,20 +426,32 @@ export default function Home() {
   const [customizeTodayOpen, setCustomizeTodayOpen] = useState(false);
   const [todaySkippedByVariant, setTodaySkippedByVariant] = useState<Record<string, StableSlotId[]>>({});
   const [todayTimingMode, setTodayTimingMode] = useState<TodayTimingMode>("shorter");
+  const [todayLevelByDay, setTodayLevelByDay] = useState<Partial<Record<DayNumber, DifficultyLevel>>>({});
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
   const [profile, setProfile] = useState<ProfileRecord | null>(null);
+  const [newProfileName, setNewProfileName] = useState("");
+  const [profileSearch, setProfileSearch] = useState("");
   const [syncStatus, setSyncStatus] = useState<"saved" | "syncing" | "offline" | "error">("saved");
   const [customFocuses, setCustomFocuses] = useState<CustomFocus[]>(["core"]);
   const [customDifficulty, setCustomDifficulty] = useState<CustomDifficulty>("recommended");
   const [customSeconds, setCustomSeconds] = useState(900);
   const [customEquipment, setCustomEquipment] = useState(["parallettes", "floor", "wall"]);
+  const [todayEquipment, setTodayEquipment] = useState(["parallettes", "floor", "wall"]);
   const [customPlan, setCustomPlan] = useState<ReturnType<typeof buildCustomSession> | null>(null);
+  const [customAdvanced, setCustomAdvanced] = useState(false);
+  const [customPreferProgression, setCustomPreferProgression] = useState(true);
+  const [customPreferVariety, setCustomPreferVariety] = useState(true);
+  const [customBlocks, setCustomBlocks] = useState<CustomBlocks>({ warmup: true, preparation: true, skill: true, strength: true, cooldown: true, lab: false });
+  const [undoSwaps, setUndoSwaps] = useState<{ key: string; swaps: Partial<Record<StableSlotId, string>> } | null>(null);
   const [saveMode, setSaveMode] = useState<SaveMode>("normal");
   const [playerOpen, setPlayerOpen] = useState(false);
   const [activePlan, setActivePlan] = useState<SessionPlan | null>(null);
   const [timerPosition, setTimerPosition] = useState<TimerPosition | null>(null);
   const [running, setRunning] = useState(false);
   const [complete, setComplete] = useState(false);
+  const [activeSessionModified, setActiveSessionModified] = useState(false);
+  const [sessionFeedback, setSessionFeedback] = useState<Record<string, "easy" | "right" | "hard">>({});
+  const [sessionCleanTargets, setSessionCleanTargets] = useState<Record<string, boolean>>({});
   const anchorRef = useRef(0);
   const elapsedBaseRef = useRef(0);
   const lastIntervalRef = useRef(-1);
@@ -415,7 +459,8 @@ export default function Home() {
   const audioRef = useRef<AudioContext | null>(null);
 
   const day = workouts.find((item) => item.day === settings.selectedDay) ?? workouts[0];
-  const level = settings.levelsByDay[String(day.day)] ?? "L1";
+  const preferredLevel = settings.levelsByDay[String(day.day)] ?? "L1";
+  const level = todayLevelByDay[day.day] ?? preferredLevel;
   const includeLab = level !== "L1" && settings.labByDay[String(day.day)] === true;
   const key = variantKey(day.day, level);
   const variant = useMemo(() => toSessionVariant(day.day, level), [day.day, level]);
@@ -423,34 +468,42 @@ export default function Home() {
   const activeTimings = settings.timingsByVariant[key] ?? {};
   const ready = useMemo(() => effectiveReadiness(settings.readiness), [settings.readiness]);
 
-  const basePreviewPlan = useMemo(() => buildSessionPlan({
-    variant,
-    exercises,
-    includeLab,
-    swaps: activeSwaps,
-    timings: activeTimings,
-    readiness: ready,
-  }), [activeSwaps, activeTimings, includeLab, ready, variant]);
-  const skippedToday = useMemo(() => new Set(todaySkippedByVariant[key] ?? []), [key, todaySkippedByVariant]);
-  const previewPlan = useMemo(
-    () => modifyTodayPlan(basePreviewPlan, skippedToday, todayTimingMode),
-    [basePreviewPlan, skippedToday, todayTimingMode],
-  );
-
   const slots = useMemo(
     () => slotsForVariant(variant, exercises, includeLab),
     [includeLab, variant],
   );
+  const equipmentAdaptation = useMemo(() => adaptSwapsForEquipment({
+    slots, exercises, swaps: activeSwaps, day: day.day, level, readiness: ready, equipment: todayEquipment,
+  }), [activeSwaps, day.day, level, ready, slots, todayEquipment]);
+  const equipmentSwaps = equipmentAdaptation.swaps;
+
+  const basePreviewPlan = useMemo(() => buildSessionPlan({
+    variant,
+    exercises,
+    includeLab,
+    swaps: equipmentSwaps,
+    timings: activeTimings,
+    readiness: ready,
+  }), [activeTimings, equipmentSwaps, includeLab, ready, variant]);
+  const skippedToday = useMemo(() => new Set(todaySkippedByVariant[key] ?? []), [key, todaySkippedByVariant]);
+  const unavailableToday = useMemo(() => new Set(equipmentAdaptation.unavailable), [equipmentAdaptation]);
+  const previewPlan = useMemo(
+    () => modifyTodayPlan(basePreviewPlan, new Set([...skippedToday, ...unavailableToday]), todayTimingMode),
+    [basePreviewPlan, skippedToday, todayTimingMode, unavailableToday],
+  );
+  const previewModified = level !== preferredLevel || skippedToday.size > 0 || unavailableToday.size > 0 ||
+    Object.keys(activeSwaps).length > 0 || Object.keys(activeTimings).length > 0 ||
+    slots.some((slot) => equipmentSwaps[slot.id] !== activeSwaps[slot.id]);
   const timeline = timelineFor(includeLab);
   const expectedSeconds = includeLab ? 1800 : 1500;
   const exactDefault = previewPlan.totalSeconds === expectedSeconds;
 
   useEffect(() => {
-    const current = localStorage.getItem(STORAGE_KEY);
+    const current = localStorage.getItem(scopedKey(STORAGE_KEY));
     const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
     setSettings(parseStoredAppState(current ?? legacy));
     try {
-      const storedHistory = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
+      const storedHistory = JSON.parse(localStorage.getItem(scopedKey(HISTORY_KEY)) ?? "[]");
       if (Array.isArray(storedHistory)) setHistory(storedHistory.slice(0, 12));
     } catch {
       setHistory([]);
@@ -460,23 +513,76 @@ export default function Home() {
       setProfiles(items);
       const lastId = localStorage.getItem("parallette25-last-profile");
       const last = items.find((item) => item.profileId === lastId) ?? items[0] ?? null;
-      if (last) setProfile(last);
+      if (last) void openProfile(last);
+      else setProfileOpen(true);
     });
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => undefined);
     }
   }, []);
 
+  const historyForProfile = (next: ProfileRecord): HistoryEntry[] => next.history.map((item) => ({
+    id: item.id,
+    completedAt: item.completedAt,
+    day: item.day ?? 0,
+    level: (item as { level?: DifficultyLevel }).level ?? "L1",
+    title: (item as { title?: string }).title ?? (item.day ? `Day ${item.day}` : "Custom Session"),
+    seconds: item.seconds ?? 0,
+    lab: (item as { lab?: boolean }).lab === true,
+    mode: item.mode as SaveMode | undefined,
+    status: item.status,
+  })).slice(-12).reverse();
+
   const openProfile = async (next: ProfileRecord) => {
+    const savedState = localStorage.getItem(scopedKey(STORAGE_KEY, next.profileId));
+    const preferenceState = (next.preferences as { appState?: unknown }).appState;
+    const nextSettings = parseStoredAppState(savedState ?? preferenceState ?? defaultStoredAppState(), exercises);
+    nextSettings.selectedDay = next.nextProgramDay >= 1 && next.nextProgramDay <= 5 ? next.nextProgramDay : nextSettings.selectedDay;
+    nextSettings.readiness = { ...nextSettings.readiness, ...next.readiness };
+    setSettings(nextSettings);
+    const savedHistory = localStorage.getItem(scopedKey(HISTORY_KEY, next.profileId));
+    if (savedHistory) {
+      try { setHistory(JSON.parse(savedHistory) as HistoryEntry[]); }
+      catch { setHistory(historyForProfile(next)); }
+    } else setHistory(historyForProfile(next));
+    setCustomEquipment(next.equipment.length ? next.equipment : ["parallettes", "floor", "wall"]);
+    setTodayEquipment(next.equipment.length ? next.equipment : ["parallettes", "floor", "wall"]);
+    const preferredSaveMode = (next.preferences as { saveMode?: SaveMode }).saveMode;
+    setSaveMode(preferredSaveMode === "practice" || preferredSaveMode === "guest" ? preferredSaveMode : "normal");
     setProfile(next);
     localStorage.setItem("parallette25-last-profile", next.profileId);
     setProfileOpen(false);
   };
+  const openGuest = () => {
+    const guestState = parseStoredAppState(localStorage.getItem(scopedKey(STORAGE_KEY)), exercises);
+    setSettings(guestState);
+    try { setHistory(JSON.parse(localStorage.getItem(scopedKey(HISTORY_KEY)) ?? "[]") as HistoryEntry[]); }
+    catch { setHistory([]); }
+    setCustomEquipment(["parallettes", "floor", "wall"]);
+    setTodayEquipment(["parallettes", "floor", "wall"]);
+    setProfile(null);
+    setSaveMode("guest");
+    localStorage.removeItem("parallette25-last-profile");
+    setProfileOpen(false);
+  };
+  const selectExistingProfile = (next: ProfileRecord) => {
+    if (profile?.profileId !== next.profileId && !window.confirm(`Open existing profile “${next.username}”?\n\nThere is no password in V2. Usernames identify saved training data but are not authentication.`)) return;
+    void openProfile(next);
+  };
   const createProfile = async () => {
-    const name = window.prompt("Choose a username for this device", "Athlete");
-    if (!name?.trim()) return;
-    const next = newProfile(name);
-    await saveProfile(next);
+    const name = newProfileName.trim();
+    if (!name) return;
+    if (profiles.some((item) => item.username.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      window.alert(`The username “${name}” already exists. Choose it above or use a different name.`);
+      return;
+    }
+    const next = await saveProfile(newProfile(name));
+    if (next.syncError?.toLocaleLowerCase().includes("username already exists")) {
+      await deleteProfile(next.profileId);
+      window.alert(`The username “${name}” already exists. Refresh the list and choose that profile, or use a different name.`);
+      return;
+    }
+    setNewProfileName("");
     setProfiles(await listProfiles());
     await openProfile(next);
   };
@@ -489,6 +595,10 @@ export default function Home() {
     if (!profile) return;
     const username = window.prompt("Rename this profile", profile.username)?.trim();
     if (!username) return;
+    if (profiles.some((item) => item.profileId !== profile.profileId && item.username.toLocaleLowerCase() === username.toLocaleLowerCase())) {
+      window.alert(`The username “${username}” already exists.`);
+      return;
+    }
     await saveProfile({ ...profile, username: username.slice(0, 32) });
     await refreshProfiles(profile.profileId);
   };
@@ -498,9 +608,9 @@ export default function Home() {
     setSyncStatus("syncing");
     try {
       const next = await syncProfile(profile);
-      await saveProfile(next);
+      setProfile(next);
       await refreshProfiles(next.profileId);
-      setSyncStatus("saved");
+      setSyncStatus(next.pendingSync ? "error" : "saved");
     } catch { setSyncStatus("error"); }
   };
   const importProfileFile = async (file: File) => {
@@ -522,22 +632,109 @@ export default function Home() {
     if (!profile) return;
     const phrase = window.prompt(`Type ${profile.username} to permanently delete this profile.`);
     if (phrase !== profile.username) return;
-    await deleteProfile(profile.profileId);
-    setProfile(null);
-    localStorage.removeItem("parallette25-last-profile");
-    await refreshProfiles();
+    try {
+      await deleteProfile(profile.profileId);
+      setProfile(null);
+      setHistory([]);
+      localStorage.removeItem("parallette25-last-profile");
+      await refreshProfiles();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The profile could not be deleted. Please reconnect and try again.");
+    }
   };
-  const generateCustom = () => setCustomPlan(buildCustomSession({ focuses: customFocuses, equipment: customEquipment as never, seconds: customSeconds, difficulty: customDifficulty, recentIds: settings.recentExerciseIds, readiness: ready }));
+  const toggleDefaultEquipment = async (item: string) => {
+    if (!profile) return;
+    const current = profile.equipment.length ? profile.equipment : ["parallettes", "floor", "wall"];
+    const equipment = current.includes(item)
+      ? (current.length > 1 ? current.filter((value) => value !== item) : current)
+      : [...current, item];
+    const updated = await saveProfile({ ...profile, equipment });
+    setProfile(updated);
+    setCustomEquipment(equipment);
+    setTodayEquipment(equipment);
+    await refreshProfiles(updated.profileId);
+  };
+  const generateCustom = () => setCustomPlan(buildCustomSession({
+    focuses: customFocuses,
+    equipment: customEquipment as never,
+    seconds: customSeconds,
+    difficulty: customDifficulty,
+    blocks: customAdvanced ? customBlocks : undefined,
+    recentIds: settings.recentExerciseIds,
+    readiness: ready,
+    preferNextProgression: customPreferProgression,
+    preferVariety: customPreferVariety,
+    feedbackByExercise: settings.feedbackByExercise,
+    progressionEvidence: profile?.progression,
+  }));
+
+  const openChallenge = (focus?: CustomFocus) => {
+    if (!focus) {
+      setTodayLevel("L3");
+      setReadinessOpen(false);
+      setCustomizeTodayOpen(true);
+      return;
+    }
+    setCustomFocuses([focus]);
+    setCustomDifficulty("hard");
+    setCustomPreferProgression(true);
+    setCustomAdvanced(true);
+    setReadinessOpen(false);
+    setCustomOpen(true);
+    setCustomPlan(null);
+  };
 
   useEffect(() => {
     if (!hydrated) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  }, [hydrated, settings]);
+    localStorage.setItem(scopedKey(STORAGE_KEY, profile?.profileId), JSON.stringify(settings));
+  }, [hydrated, profile?.profileId, settings]);
 
   useEffect(() => {
     if (!hydrated) return;
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 12)));
-  }, [history, hydrated]);
+    localStorage.setItem(scopedKey(HISTORY_KEY, profile?.profileId), JSON.stringify(history.slice(0, 12)));
+  }, [history, hydrated, profile?.profileId]);
+
+  useEffect(() => {
+    if (!hydrated || !profile) return;
+    const profileId = profile.profileId;
+    const timer = window.setTimeout(() => {
+      void saveProfile({
+        ...profile,
+        readiness: settings.readiness,
+        equipment: profile.equipment,
+        preferences: { ...profile.preferences, appState: settings, saveMode },
+      }).then((updated) => {
+        setProfiles((current) => current.map((item) => item.profileId === profileId ? updated : item));
+        setProfile((current) => current?.profileId === profileId ? updated : current);
+        setSyncStatus(updated.pendingSync ? "offline" : "saved");
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [hydrated, profile?.profileId, saveMode, settings]);
+
+  useEffect(() => {
+    if (!profile || !remoteSyncAvailable || !profile.pendingSync) return;
+    let cancelled = false;
+    const retryPendingSync = () => {
+      if (!navigator.onLine) return;
+      setSyncStatus("syncing");
+      void syncProfile(profile).then((updated) => {
+        if (cancelled) return;
+        setProfile(updated);
+        setProfiles((current) => current.map((item) => item.profileId === updated.profileId ? updated : item));
+        setSyncStatus(updated.pendingSync ? "error" : "saved");
+      });
+    };
+    const onVisibility = () => { if (document.visibilityState === "visible") retryPendingSync(); };
+    window.addEventListener("online", retryPendingSync);
+    document.addEventListener("visibilitychange", onVisibility);
+    retryPendingSync();
+    return () => {
+      cancelled = true;
+      window.removeEventListener("online", retryPendingSync);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [profile?.pendingSync, profile?.profileId, profile?.updatedAt]);
 
   const beep = useCallback((high = false) => {
     if (!settings.soundOn) return;
@@ -585,56 +782,86 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [activePlan, beep, complete, running]);
 
-  useEffect(() => {
-    if (!complete || !activePlan || completionRecordedRef.current) return;
+  const recordSessionOutcome = useCallback((
+    plan: SessionPlan,
+    status: "complete" | "modified" | "partial",
+    performedSeconds: number,
+    performedExerciseIds: string[],
+  ) => {
+    if (completionRecordedRef.current) return;
     completionRecordedRef.current = true;
-    const activeDay = workouts.find((item) => item.day === activePlan.day) ?? day;
-    const exerciseIds = Array.from(new Set(activePlan.intervals
-      .filter((interval) => interval.kind === "work" && interval.exerciseId)
-      .map((interval) => interval.exerciseId as string)));
+    const activeDay = workouts.find((item) => item.day === plan.day) ?? day;
+    const exerciseIds = Array.from(new Set(performedExerciseIds));
     const entry: HistoryEntry = {
-      id: `${Date.now()}-${activePlan.day}`,
+      id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${plan.day}`,
       completedAt: new Date().toISOString(),
-      day: activePlan.day,
-      level: activePlan.level,
-      title: activePlan.day === 0 ? "Custom Session" : activeDay.title,
-      seconds: activePlan.totalSeconds,
-      lab: activePlan.includeLab,
+      day: plan.day,
+      level: plan.level,
+      title: plan.day === 0 ? "Custom Session" : activeDay.title,
+      seconds: performedSeconds,
+      lab: plan.includeLab,
+      mode: saveMode,
+      status,
     };
-    if (saveMode !== "guest") setHistory((previous) => [entry, ...previous].slice(0, 12));
-    setSettings((previous) => ({
-      ...previous,
-      recentExerciseIds: [...previous.recentExerciseIds, ...exerciseIds].slice(-50),
-    }));
+    if (saveMode !== "guest") {
+      setHistory((previous) => [entry, ...previous].slice(0, 12));
+      setSettings((previous) => ({
+        ...previous,
+        recentExerciseIds: [...previous.recentExerciseIds, ...exerciseIds].slice(-50),
+      }));
+    }
     if (profile && saveMode !== "guest") {
       const progression = { ...profile.progression };
       if (saveMode === "normal") {
         exerciseIds.forEach((exerciseId) => {
-          const feedback = settings.feedbackByExercise[exerciseId];
-          if (!feedback) return;
+          const feedback = sessionFeedback[exerciseId];
+          const clean = sessionCleanTargets[exerciseId] === true;
+          if (!feedback && !clean) return;
           const previous = progression[exerciseId] ?? { cleanSessions: 0 };
           progression[exerciseId] = {
-            cleanSessions: feedback === "hard" ? previous.cleanSessions : Math.min(2, previous.cleanSessions + 1),
-            lastFeedback: feedback,
+            cleanSessions: clean && feedback !== "hard"
+              ? Math.min(2, previous.cleanSessions + 1)
+              : previous.cleanSessions,
+            ...(feedback ? { lastFeedback: feedback } : previous.lastFeedback ? { lastFeedback: previous.lastFeedback } : {}),
           };
         });
       }
-      const nextProfile = { ...profile, nextProgramDay: activePlan.day > 0 ? (activePlan.day % 5) + 1 : profile.nextProgramDay, history: [...profile.history, { ...entry, mode: saveMode, exerciseIds }], progression };
+      const nextProgramDay = saveMode === "normal" && status !== "partial" && plan.day > 0 ? (plan.day % 5) + 1 : profile.nextProgramDay;
+      const nextProfile = { ...profile, nextProgramDay, history: [...profile.history, { ...entry, mode: saveMode, status, exerciseIds, completedExerciseIds: exerciseIds }], progression };
       setProfile(nextProfile);
-      void saveProfile(nextProfile);
+      if (saveMode === "normal" && status !== "partial" && plan.day > 0) {
+        setSettings((previous) => ({ ...previous, selectedDay: nextProgramDay }));
+      }
+      void saveProfile(nextProfile).then(setProfile);
     }
-  }, [activePlan, complete, day, profile, saveMode, settings.feedbackByExercise]);
+  }, [day, profile, saveMode, sessionCleanTargets, sessionFeedback]);
+
+  useEffect(() => {
+    if (!complete || !activePlan || completionRecordedRef.current) return;
+    const exerciseIds = activePlan.intervals
+      .filter((interval) => interval.kind === "work" && interval.exerciseId)
+      .map((interval) => interval.exerciseId as string);
+    recordSessionOutcome(activePlan, activeSessionModified ? "modified" : "complete", activePlan.totalSeconds, exerciseIds);
+  }, [activePlan, activeSessionModified, complete, recordSessionOutcome]);
 
   const setDay = (nextDay: DayNumber) => setSettings((previous) => ({ ...previous, selectedDay: nextDay }));
 
-  const setLevel = (nextLevel: DifficultyLevel) => setSettings((previous) => ({
-    ...previous,
-    levelsByDay: { ...previous.levelsByDay, [String(day.day)]: nextLevel },
-    labByDay: {
-      ...previous.labByDay,
-      ...(nextLevel === "L1" ? { [String(day.day)]: false } : {}),
-    },
-  }));
+  const setLevel = (nextLevel: DifficultyLevel) => {
+    setTodayLevelByDay((previous) => {
+      const next = { ...previous };
+      delete next[day.day];
+      return next;
+    });
+    setSettings((previous) => ({
+      ...previous,
+      levelsByDay: { ...previous.levelsByDay, [String(day.day)]: nextLevel },
+      labByDay: {
+        ...previous.labByDay,
+        ...(nextLevel === "L1" ? { [String(day.day)]: false } : {}),
+      },
+    }));
+  };
+  const setTodayLevel = (nextLevel: DifficultyLevel) => setTodayLevelByDay((previous) => ({ ...previous, [day.day]: nextLevel }));
 
   const toggleLab = () => {
     if (level === "L1") return;
@@ -670,7 +897,7 @@ export default function Home() {
     if (slot.block === "cooldown") return template.cooldown[slot.position];
     const lab = day.labs[level];
     if (!lab) return undefined;
-    return slot.id === "lab-a" ? lab.a : lab.b;
+    return lab.a;
   };
 
   const targetFor = (slot: SessionSlot, exercise: Exercise, requestedId: string) => {
@@ -725,11 +952,25 @@ export default function Home() {
         level,
         readiness: ready,
         difficulty: "same",
+        equipment: todayEquipment,
       }).filter((item) => item.id !== current);
       const fresh = options.filter((item) => !recent.has(item.id));
       const pool = fresh.length ? fresh : options;
-      if (pool.length) next[slot.id] = pool[Math.floor(Math.random() * pool.length)].id;
+      if (pool.length) {
+        const scored = pool.map((candidate) => {
+          const detailed = exercises[candidate.id];
+          let score = Math.random();
+          if (settings.feedbackByExercise[candidate.id] === "hard") score -= 8;
+          if (settings.feedbackByExercise[candidate.id] === "right") score += 2;
+          if (detailed.easierId && settings.feedbackByExercise[detailed.easierId] === "easy") score += 8;
+          if (detailed.harderId && settings.feedbackByExercise[detailed.harderId] === "hard") score += 8;
+          if (detailed.easierId && (profile?.progression[detailed.easierId]?.cleanSessions ?? 0) >= 2) score += 6;
+          return { candidate, score };
+        }).sort((a, b) => b.score - a.score);
+        next[slot.id] = scored[0].candidate.id;
+      }
     });
+    setUndoSwaps({ key, swaps: { ...activeSwaps } });
     setSettings((previous) => ({
       ...previous,
       swapsByVariant: { ...previous.swapsByVariant, [key]: next },
@@ -740,6 +981,11 @@ export default function Home() {
     ...previous,
     swapsByVariant: { ...previous.swapsByVariant, [key]: {} },
   }));
+  const undoVersion = () => {
+    if (!undoSwaps || undoSwaps.key !== key) return;
+    setSettings((previous) => ({ ...previous, swapsByVariant: { ...previous.swapsByVariant, [key]: undoSwaps.swaps } }));
+    setUndoSwaps(null);
+  };
 
   const startWorkout = () => {
     setActivePlan(previewPlan);
@@ -748,6 +994,9 @@ export default function Home() {
     anchorRef.current = Date.now();
     lastIntervalRef.current = -1;
     completionRecordedRef.current = false;
+    setSessionFeedback({});
+    setSessionCleanTargets({});
+    setActiveSessionModified(previewModified || previewPlan.totalSeconds !== basePreviewPlan.totalSeconds);
     setComplete(false);
     setPlayerOpen(true);
     setRunning(true);
@@ -763,8 +1012,8 @@ export default function Home() {
       intervals.push({ id: `custom-${index}-work`, kind: "work", duration: item.work, block, slotId, exerciseId: item.exerciseId, label: exercises[item.exerciseId]?.name ?? item.exerciseId, round: 1, rounds: 1 });
       if (item.rest > 0) intervals.push({ id: `custom-${index}-rest`, kind: "rest", duration: item.rest, block, slotId, label: "Rest", round: 1, rounds: 1 });
     });
-    const plan: SessionPlan = { schemaVersion: 1, day: 0, level: customDifficulty === "easy" ? "L1" : customDifficulty === "hard" ? "L3" : "L2", includeLab: false, intervals, totalSeconds: intervals.reduce((sum, interval) => sum + interval.duration, 0) };
-    setActivePlan(plan); setTimerPosition(locateTimerPosition(plan, 0)); elapsedBaseRef.current = 0; anchorRef.current = Date.now(); lastIntervalRef.current = -1; completionRecordedRef.current = false; setComplete(false); setCustomOpen(false); setPlayerOpen(true); setRunning(true); beep(true);
+    const plan: SessionPlan = { schemaVersion: 1, day: 0, level: customDifficulty === "easy" ? "L1" : customDifficulty === "hard" ? "L3" : "L2", includeLab: customPlan.items.some((item) => item.block === "lab"), intervals, totalSeconds: intervals.reduce((sum, interval) => sum + interval.duration, 0) };
+    setActivePlan(plan); setTimerPosition(locateTimerPosition(plan, 0)); elapsedBaseRef.current = 0; anchorRef.current = Date.now(); lastIntervalRef.current = -1; completionRecordedRef.current = false; setSessionFeedback({}); setSessionCleanTargets({}); setActiveSessionModified(false); setComplete(false); setCustomOpen(false); setPlayerOpen(true); setRunning(true); beep(true);
   };
 
   const toggleTimer = () => {
@@ -804,9 +1053,30 @@ export default function Home() {
   const elapsedTotal = elapsedBefore + (timerPosition?.elapsedInInterval ?? 0);
   const progress = activePlan ? Math.min(100, (elapsedTotal / activePlan.totalSeconds) * 100) : 0;
 
-  const sectionBlocks: WorkoutBlock[] = includeLab
-    ? ["warmup", "pre", "core", "handstand", "lab", "cooldown"]
-    : ["warmup", "pre", "core", "handstand", "cooldown"];
+  const endWorkoutEarly = () => {
+    if (!activePlan || complete) {
+      setRunning(false);
+      setPlayerOpen(false);
+      return;
+    }
+    const performedSeconds = Math.max(0, Math.min(activePlan.totalSeconds, Math.floor(elapsedFromClock())));
+    if (performedSeconds >= 5 && saveMode !== "guest") {
+      const shouldSave = window.confirm("End this workout now and save the work completed so far as a partial session?\n\nPartial sessions never count as failure and do not advance the five-day program.");
+      if (!shouldSave) return;
+      let cursor = 0;
+      const performedExerciseIds: string[] = [];
+      for (const interval of activePlan.intervals) {
+        if (interval.kind === "work" && interval.exerciseId && performedSeconds > cursor) performedExerciseIds.push(interval.exerciseId);
+        cursor += interval.duration;
+        if (cursor >= performedSeconds) break;
+      }
+      recordSessionOutcome(activePlan, "partial", performedSeconds, performedExerciseIds);
+    }
+    setRunning(false);
+    setPlayerOpen(false);
+  };
+
+  const sectionBlocks = sessionBlockOrder(includeLab) as readonly WorkoutBlock[];
 
   const completedReadiness = Object.entries(settings.readiness).filter(([, value]) => value).length;
 
@@ -850,7 +1120,7 @@ export default function Home() {
           </div>
           <div className="hero-proof">
             <span><Check /> Exact {formatTime(previewPlan.totalSeconds)}</span>
-            <span><Check /> 163 movements</span>
+            <span><Check /> {Object.keys(exercises).length} movements</span>
             <span><Check /> Works on iPhone</span>
           </div>
         </div>
@@ -920,6 +1190,7 @@ export default function Home() {
             <div className="variant-panel">
               <button type="button" onClick={() => setCustomizeTodayOpen(true)}><Settings2 /> Customize today</button>
               <button type="button" onClick={buildAnotherVersion}><Shuffle /> Build another</button>
+              {undoSwaps?.key === key && <button type="button" onClick={undoVersion}><ArrowLeft /> Undo version</button>}
               <button type="button" onClick={resetRecommended}><RotateCcw /> Recommended</button>
             </div>
           </div>
@@ -934,21 +1205,40 @@ export default function Home() {
 
             {sectionBlocks.map((block, sectionIndex) => {
               const sectionSlots = slots.filter((slot) => slot.block === block);
+              const visibleSlots = sectionSlots.filter((slot) => !unavailableToday.has(slot.id));
               const labNote = block === "lab" ? day.labs[level]?.intensityNote : undefined;
+              const labSlot = block === "lab" ? sectionSlots[0] : undefined;
+              const labChoices = labSlot ? compatibleSwaps({ slot: labSlot, exercises, day: day.day, level, readiness: ready, difficulty: "same", includeLocked: true, equipment: todayEquipment }) : [];
+              const selectedLabId = labSlot ? (equipmentSwaps[labSlot.id] ?? labSlot.defaultExerciseId) : undefined;
               return (
                 <section className={`exercise-section ${block === "lab" ? "lab-section" : ""} ${block === "cooldown" ? "cooldown-section" : ""}`} key={block}>
                   <div className="exercise-section-title">
                     <div className={`section-icon ${block === "core" ? "icon-core" : block === "cooldown" ? "icon-reset" : block === "handstand" || block === "pre" || block === "lab" ? "icon-skill" : ""}`}><SectionIcon block={block} /></div>
                     <div><span>{String(sectionIndex + 1).padStart(2, "0")}</span><h2>{blockLabels[block]}</h2><p>{blockMeta[block]}</p></div>
                   </div>
-                  {block === "lab" && <p className="lab-callout">{day.labs[level]?.label}. {labNote ?? "Complete the clean target, then rest for the remainder of the 30-second practice window."}</p>}
+                  {block === "lab" && <>
+                    <p className="lab-callout">Choose one track and practise its selected skill for all five rounds. {labNote ?? "Complete the clean target, then rest for the remainder of the 30-second practice window."}</p>
+                    {labSlot && <div className="lab-track-picker" aria-label="Calisthenics Lab track">
+                      {(Object.keys(labTrackLabels) as LabTrack[]).map((track) => {
+                        const choice = labChoices.find((candidate) => labTrackFor(exercises[candidate.id]) === track);
+                        const selected = Boolean(choice && choice.id === selectedLabId);
+                        const locked = Boolean(choice?.gate && !ready[choice.gate]);
+                        return <button type="button" className={selected ? "active" : ""} disabled={!choice} key={track} onClick={() => {
+                          if (!choice) return;
+                          if (locked) { setReadinessOpen(true); return; }
+                          chooseSwap(labSlot, choice.id);
+                        }}><strong>{labTrackLabels[track]}</strong><span>{choice ? exercises[choice.id].name : "Not available for this day"}{locked ? " · readiness required" : ""}</span></button>;
+                      })}
+                    </div>}
+                  </>}
+                  {visibleSlots.length < sectionSlots.length && <p className="equipment-note">{sectionSlots.length - visibleSlots.length} movement{sectionSlots.length - visibleSlots.length === 1 ? " is" : "s are"} unavailable with today’s equipment and removed from the timer. Choose Reallocate in Customize Today to keep the original total.</p>}
                   <div className="exercise-grid">
-                    {sectionSlots.map((slot) => {
-                      const requestedId = activeSwaps[slot.id] ?? slot.defaultExerciseId;
+                    {visibleSlots.map((slot) => {
+                      const requestedId = equipmentSwaps[slot.id] ?? slot.defaultExerciseId;
                       const requested = exercises[requestedId];
                       const resolvedId = resolvedIdFor(slot.id) ?? requestedId;
                       const exercise = exercises[resolvedId];
-                      const rounds = block === "lab" ? (slot.id === "lab-a" ? 3 : 2) : sectionRounds[block];
+                      const rounds = block === "lab" ? 5 : sectionRounds[block];
                       return (
                         <ExerciseCard
                           key={slot.id}
@@ -961,6 +1251,7 @@ export default function Home() {
                           onSwap={() => { setSwapFilter("same"); setSwapSlotId(slot.id); }}
                           onEdit={() => setEditSlotId(slot.id)}
                           feedback={settings.feedbackByExercise[exercise.id]}
+                          equipmentAdjusted={equipmentSwaps[slot.id] !== activeSwaps[slot.id]}
                           onFeedback={(value) => setSettings((previous) => ({ ...previous, feedbackByExercise: { ...previous.feedbackByExercise, [exercise.id]: value } }))}
                         />
                       );
@@ -987,9 +1278,9 @@ export default function Home() {
       </section>
 
       <section className="history-strip">
-        <p className="eyebrow"><span /> SAVED ON THIS DEVICE</p><h2>Recent sessions</h2>
-        {history.length === 0 ? <div className="history-empty">Your completed workouts will appear here. Nothing is uploaded or shared.</div> : (
-          <div className="history-list">{history.slice(0, 6).map((item) => <div className="history-item" key={item.id}><strong>Day {item.day} • {item.level} • {item.title}</strong><span>{new Date(item.completedAt).toLocaleDateString()} • {formatTime(item.seconds)}{item.lab ? " • Lab" : ""}</span></div>)}</div>
+        <p className="eyebrow"><span /> {remoteSyncAvailable && profile ? "PROFILE PROGRESS" : "SAVED ON THIS DEVICE"}</p><h2>Recent sessions</h2>
+        {history.length === 0 ? <div className="history-empty">Your completed workouts will appear here.{remoteSyncAvailable && profile ? " Profile updates sync when online." : " Use Export Backup before changing devices."}</div> : (
+          <div className="history-list">{history.slice(0, 6).map((item) => <div className="history-item" key={item.id}><strong>{item.day === 0 ? "Custom" : `Day ${item.day}`} • {item.level} • {item.title}</strong><span>{new Date(item.completedAt).toLocaleDateString()} • {formatTime(item.seconds)}{item.lab ? " • Lab" : ""}{item.status === "modified" ? " • Modified" : item.status === "partial" ? " • Partial" : ""}{item.mode === "practice" ? " • Practice only" : ""}</span></div>)}</div>
         )}
       </section>
 
@@ -1002,7 +1293,7 @@ export default function Home() {
           const slot = slots.find((item) => item.id === swapSlotId);
           if (!slot) return null;
           const currentId = activeSwaps[slot.id] ?? slot.defaultExerciseId;
-          const options = compatibleSwaps({ slot, exercises, day: day.day, level, readiness: ready, difficulty: swapFilter, includeLocked: true });
+          const options = compatibleSwaps({ slot, exercises, day: day.day, level, readiness: ready, difficulty: swapFilter, includeLocked: true, equipment: todayEquipment });
           return (
             <Drawer title="Swap exercise" subtitle="Focus, day and equipment purpose stay matched. Choose the same level or inspect one adjacent level." onClose={() => setSwapSlotId(null)}>
               <div className="swap-filter">
@@ -1063,12 +1354,16 @@ export default function Home() {
             <div className="skill-paths">
               <h3>Progression paths</h3>
               {skillProgressionPaths.map((path) => {
-                const visible = path.filter((id) => Boolean(exercises[id]));
-                const masteredIndex = visible.reduce((last, id, index) => (profile?.progression[id]?.cleanSessions ?? 0) >= 2 ? index : last, -1);
+                const visible = path.steps.filter((id) => Boolean(exercises[id]));
+                let masteredIndex = -1;
+                visible.forEach((id, index) => {
+                  if (index === masteredIndex + 1 && (profile?.progression[id]?.cleanSessions ?? 0) >= 2) masteredIndex = index;
+                });
                 const currentIndex = Math.min(visible.length - 1, masteredIndex + 1);
-                return <article key={path[0]}><strong>{exercises[visible[0]]?.progressionFamily?.replaceAll("-", " ")}</strong>{visible.map((id, index) => <div className={index <= masteredIndex ? "done" : index === currentIndex ? "current" : ""} key={id}><i>{index <= masteredIndex ? <Check /> : index + 1}</i><span>{exercises[id].name}</span>{index === currentIndex && <small>{masteredIndex >= 0 ? "READY TO TRY" : "CURRENT"}</small>}</div>)}</article>;
+                return <article key={path.label}><strong>{path.label}</strong>{visible.map((id, index) => <div className={index <= masteredIndex ? "done" : index === currentIndex ? "current" : ""} key={id}><i>{index <= masteredIndex ? <Check /> : index + 1}</i><span>{exercises[id].name}</span>{index === currentIndex && <small>{masteredIndex >= 0 ? "READY TO TRY" : "CURRENT"}</small>}</div>)}<button type="button" className="path-challenge" onClick={() => openChallenge(path.customFocus as CustomFocus)}>Try the next appropriate step</button></article>;
               })}
             </div>
+            <div className="challenge-panel"><strong>Challenge me</strong><span>Choose a safe next challenge without skipping readiness gates.</span><div><button type="button" onClick={() => openChallenge()}>Whole workout</button>{(["handstand", "core", "lsit", "planche", "pushing"] as CustomFocus[]).map((focus) => <button type="button" key={focus} onClick={() => openChallenge(focus)}>{focus === "lsit" ? "L-Sit" : focus[0].toUpperCase() + focus.slice(1)}</button>)}</div></div>
             <p className="install-note"><ShieldCheck /> A locked drill is automatically replaced by its declared safe regression. Readiness never changes your whole-day level automatically.</p>
           </Drawer>
         )}
@@ -1077,16 +1372,18 @@ export default function Home() {
           <Drawer title="Customize today" subtitle="Temporary changes affect only this session and never lower your saved readiness." onClose={() => setCustomizeTodayOpen(false)}>
             <div className="custom-builder today-builder">
               <p className="control-kicker">Comfort level</p>
-              <div className="custom-chip-grid">{(["L1", "L2", "L3"] as DifficultyLevel[]).map((item) => <button type="button" className={level === item ? "active" : ""} key={item} onClick={() => setLevel(item)}>{levelLabels[item].name}</button>)}</div>
+              <div className="custom-chip-grid">{(["L1", "L2", "L3"] as DifficultyLevel[]).map((item) => <button type="button" className={level === item ? "active" : ""} key={item} onClick={() => setTodayLevel(item)}>{levelLabels[item].name}</button>)}<button type="button" className={level === "L1" ? "active" : ""} onClick={() => setTodayLevel("L1")}>Easy Day</button></div>
               <p className="control-kicker">Time after skipping</p>
               <div className="custom-chip-grid"><button type="button" className={todayTimingMode === "shorter" ? "active" : ""} onClick={() => setTodayTimingMode("shorter")}>Keep shorter</button><button type="button" className={todayTimingMode === "reallocate" ? "active" : ""} onClick={() => setTodayTimingMode("reallocate")}>Reallocate time</button></div>
               <div className="today-total"><Clock3 /><span>Today’s session</span><strong>{formatTime(previewPlan.totalSeconds)}</strong></div>
+              <p className="control-kicker">Equipment today</p>
+              <div className="custom-chip-grid equipment-chips">{(["parallettes", "floor", "wall", "rope"] as const).map((item) => <button type="button" className={todayEquipment.includes(item) ? "active" : ""} key={item} onClick={() => setTodayEquipment((current) => current.includes(item) ? (current.length > 1 ? current.filter((value) => value !== item) : current) : [...current, item])}>{item === "floor" ? "Mat / Floor" : item[0].toUpperCase() + item.slice(1)}</button>)}</div>
               <p className="control-kicker">Blocks and exercises</p>
               <div className="today-blocks">
                 {sectionBlocks.map((block) => {
                   const blockSlots = slots.filter((slot) => slot.block === block);
                   const fullySkipped = blockSlots.length > 0 && blockSlots.every((slot) => skippedToday.has(slot.id));
-                  return <section key={block}><button type="button" className={fullySkipped ? "off" : ""} onClick={() => toggleTodayBlock(block)}><strong>{blockLabels[block]}</strong><span>{fullySkipped ? "Skipped" : "Included"}</span></button>{blockSlots.map((slot) => { const id = resolvedIdFor(slot.id) ?? slot.defaultExerciseId; const skipped = skippedToday.has(slot.id); return <label key={slot.id}><input type="checkbox" checked={!skipped} onChange={() => toggleTodaySlot(slot.id)} /><span>{exercises[id].name}</span></label>; })}</section>;
+                  return <section key={block}><button type="button" className={fullySkipped ? "off" : ""} onClick={() => toggleTodayBlock(block)}><strong>{blockLabels[block]}</strong><span>{fullySkipped ? "Skipped" : "Included"}</span></button>{blockSlots.map((slot) => { const id = resolvedIdFor(slot.id) ?? slot.defaultExerciseId; const skipped = skippedToday.has(slot.id); const unavailable = unavailableToday.has(slot.id); return <label key={slot.id}><input type="checkbox" checked={!skipped && !unavailable} disabled={unavailable} onChange={() => toggleTodaySlot(slot.id)} /><span>{exercises[id].name}{unavailable ? " · equipment unavailable" : ""}</span></label>; })}</section>;
                 })}
               </div>
               <div className="drawer-actions"><button type="button" className="secondary-button" onClick={() => setTodaySkippedByVariant((previous) => ({ ...previous, [key]: [] }))}><RotateCcw /> Restore all</button><button type="button" className="primary-button" disabled={previewPlan.totalSeconds === 0} onClick={() => { setCustomizeTodayOpen(false); startWorkout(); }}><Play fill="currentColor" /> Start {formatTime(previewPlan.totalSeconds)}</button></div>
@@ -1096,13 +1393,21 @@ export default function Home() {
 
         {profileOpen && (
           <Drawer title="Who's training?" subtitle="Choose a permanent profile or start a disposable Guest session." onClose={() => setProfileOpen(false)}>
+            {profiles.length > 3 && <div className="profile-search"><label htmlFor="profile-search">Find username</label><input id="profile-search" value={profileSearch} placeholder="Search profiles" autoComplete="off" onChange={(event) => setProfileSearch(event.target.value)} /></div>}
             <div className="profile-list">
-              {profiles.map((item) => <button type="button" className={profile?.profileId === item.profileId ? "selected" : ""} key={item.profileId} onClick={() => void openProfile(item)}><span className="profile-dot">{item.username.slice(0, 1).toUpperCase()}</span><strong>{item.username}</strong>{profile?.profileId === item.profileId && <Check />}</button>)}
+              {profiles.filter((item) => item.username.toLocaleLowerCase().includes(profileSearch.trim().toLocaleLowerCase())).map((item) => <button type="button" className={profile?.profileId === item.profileId ? "selected" : ""} key={item.profileId} onClick={() => selectExistingProfile(item)}><span className="profile-dot">{item.username.slice(0, 1).toUpperCase()}</span><strong>{item.username}</strong>{profile?.profileId === item.profileId && <Check />}</button>)}
             </div>
-            <div className="drawer-actions"><button type="button" className="secondary-button" onClick={() => void createProfile()}><Plus /> New profile</button><button type="button" className="secondary-button" onClick={() => { setProfile(null); setProfileOpen(false); }}>Guest session</button></div>
+            <div className="new-profile-form">
+              <label htmlFor="new-profile-name">Create a username</label>
+              <div><input id="new-profile-name" value={newProfileName} maxLength={32} autoComplete="off" placeholder="e.g. Kyriakos" onChange={(event) => setNewProfileName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createProfile(); }} /><button type="button" disabled={!newProfileName.trim()} onClick={() => void createProfile()}><Plus /> Create</button></div>
+              <small>No email or password. Each username keeps separate progress.{remoteSyncAvailable ? " Changes sync when online." : " Export a backup before moving to another device."}</small>
+            </div>
+            <div className="drawer-actions"><button type="button" className="secondary-button" onClick={openGuest}>Guest session · don't save</button></div>
             {profile && <div className="profile-data-panel">
               <p className="control-kicker">Profile</p><strong>{profile.username}</strong><button type="button" onClick={() => void renameProfile()}>Rename profile</button>
-              <p className="control-kicker">Sync</p><div className="sync-line"><i className={`sync-${syncStatus}`} /><span>{syncStatus === "syncing" ? "Syncing…" : syncStatus === "error" ? "Sync error — retry" : remoteSyncAvailable ? "Saved" : "Offline — saved on this device"}</span></div><button type="button" onClick={() => void syncCurrentProfile()}>Sync now</button>
+              <p className="control-kicker">Default equipment</p><div className="custom-chip-grid equipment-chips">{(["parallettes", "floor", "wall", "rope"] as const).map((item) => <button type="button" className={profile.equipment.includes(item) ? "active" : ""} key={item} onClick={() => void toggleDefaultEquipment(item)}>{item === "floor" ? "Mat / Floor" : item[0].toUpperCase() + item.slice(1)}</button>)}</div>
+              <p className="control-kicker">Session saving</p><div className="custom-chip-grid"><button type="button" className={saveMode === "normal" ? "active" : ""} onClick={() => setSaveMode("normal")}>Normal</button><button type="button" className={saveMode === "practice" ? "active" : ""} onClick={() => setSaveMode("practice")}>Practice only</button><button type="button" className={saveMode === "guest" ? "active" : ""} onClick={() => setSaveMode("guest")}>Don't save</button></div>
+              <p className="control-kicker">Sync</p><div className="sync-line"><i className={`sync-${syncStatus}`} /><span>{syncStatus === "syncing" ? "Syncing…" : syncStatus === "error" ? "Sync error — retry" : profile.pendingSync ? "Sync needed" : remoteSyncAvailable ? "Saved" : "Offline — saved on this device"}</span></div>{profile.lastSyncedAt && <small>Last synced {new Date(profile.lastSyncedAt).toLocaleString()}</small>}<button type="button" onClick={() => void syncCurrentProfile()}>Sync now</button>
               <p className="control-kicker">Data</p><div className="profile-data-actions"><button type="button" onClick={() => downloadText(`parallette25-${profile.username}.json`, exportProfile(profile))}>Export backup</button><label>Import backup<input type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importProfileFile(file); event.currentTarget.value = ""; }} /></label><button type="button" className="danger" onClick={() => void resetCurrentProfile()}>Reset progress</button><button type="button" className="danger" onClick={() => void removeCurrentProfile()}>Delete profile</button></div>
             </div>}
           </Drawer>
@@ -1113,13 +1418,15 @@ export default function Home() {
             <div className="custom-builder">
               <p className="control-kicker">What do you want to train?</p>
               <div className="custom-chip-grid">{(["handstand", "core", "compression", "lsit", "planche", "pushing", "support", "mobility", "conditioning"] as CustomFocus[]).map((focus) => <button type="button" className={customFocuses.includes(focus) ? "active" : ""} key={focus} onClick={() => setCustomFocuses((current) => current.includes(focus) ? current.filter((item) => item !== focus) : [...current, focus])}>{focus === "lsit" ? "L-sit" : focus[0].toUpperCase() + focus.slice(1)}</button>)}</div>
-              <p className="control-kicker">Equipment today</p>
-              <div className="custom-chip-grid equipment-chips">{(["parallettes", "floor", "wall", "rope"] as const).map((item) => <button type="button" className={customEquipment.includes(item) ? "active" : ""} key={item} onClick={() => setCustomEquipment((current) => current.includes(item) ? current.filter((value) => value !== item) : [...current, item])}>{item === "floor" ? "Mat / Floor" : item[0].toUpperCase() + item.slice(1)}</button>)}</div>
               <p className="control-kicker">How much time?</p><div className="custom-chip-grid">{[300, 600, 900, 1200, 1500, 1800].map((seconds) => <button type="button" className={customSeconds === seconds ? "active" : ""} key={seconds} onClick={() => setCustomSeconds(seconds)}>{formatTime(seconds)}</button>)}</div>
+              <label className="custom-duration">Custom minutes<input type="number" min="5" max="90" step="1" value={Math.round(customSeconds / 60)} onChange={(event) => setCustomSeconds(Math.max(300, Math.min(5400, Number(event.target.value || 5) * 60)))} /></label>
               <p className="control-kicker">Difficulty</p><div className="custom-chip-grid"><button type="button" className={customDifficulty === "easy" ? "active" : ""} onClick={() => setCustomDifficulty("easy")}>Easy</button><button type="button" className={customDifficulty === "recommended" ? "active" : ""} onClick={() => setCustomDifficulty("recommended")}>Recommended</button><button type="button" className={customDifficulty === "hard" ? "active" : ""} onClick={() => setCustomDifficulty("hard")}>Hard</button></div>
+              <p className="equipment-summary">Using {customEquipment.map((item) => item === "floor" ? "Mat / Floor" : item[0].toUpperCase() + item.slice(1)).join(" · ") || "no equipment selected"}</p>
+              <button type="button" className="advanced-toggle" onClick={() => setCustomAdvanced((current) => !current)}>{customAdvanced ? "Hide advanced options" : "Advanced options"}</button>
+              {customAdvanced && <div className="advanced-options"><p className="control-kicker">Equipment</p><div className="custom-chip-grid equipment-chips">{(["parallettes", "floor", "wall", "rope"] as const).map((item) => <button type="button" className={customEquipment.includes(item) ? "active" : ""} key={item} onClick={() => setCustomEquipment((current) => current.includes(item) ? current.filter((value) => value !== item) : [...current, item])}>{item === "floor" ? "Mat / Floor" : item[0].toUpperCase() + item.slice(1)}</button>)}</div><p className="control-kicker">Blocks</p>{(Object.keys(customBlocks) as Array<keyof CustomBlocks>).map((block) => <label key={block}><input type="checkbox" checked={customBlocks[block]} onChange={() => setCustomBlocks((current) => ({ ...current, [block]: !current[block] }))} /><span>{block === "preparation" ? "Preparation" : block === "strength" ? "Strength / Core" : block === "lab" ? "Calisthenics Lab" : block[0].toUpperCase() + block.slice(1)}</span></label>)}<p className="control-kicker">Preferences</p><label><input type="checkbox" checked={customPreferProgression} onChange={() => setCustomPreferProgression((current) => !current)} /><span>Prioritize my next progression</span></label><label><input type="checkbox" checked={customPreferVariety} onChange={() => setCustomPreferVariety((current) => !current)} /><span>Avoid recently used exercises</span></label></div>}
               <p className="control-kicker">Save mode</p><div className="custom-chip-grid"><button type="button" className={saveMode === "normal" ? "active" : ""} onClick={() => setSaveMode("normal")}>Normal · progress</button><button type="button" className={saveMode === "practice" ? "active" : ""} onClick={() => setSaveMode("practice")}>Practice only</button><button type="button" className={saveMode === "guest" ? "active" : ""} onClick={() => setSaveMode("guest")}>Guest · don't save</button></div>
               <div className="drawer-actions"><button type="button" className="secondary-button" onClick={generateCustom}><RefreshCw /> Generate</button>{customPlan && <button type="button" className="primary-button" onClick={startCustomWorkout}><Play fill="currentColor" /> Start {formatTime(customPlan.seconds)}</button>}</div>
-              {customPlan && <div className="custom-preview"><strong>{customPlan.title} · {formatTime(customPlan.seconds)}</strong>{customPlan.warnings.map((warning) => <span key={warning}>{warning}</span>)}{customPlan.items.map((item, index) => <div key={`${item.exerciseId}-${item.block}-${index}`}><span>{blockLabels[item.block === "skill" ? "handstand" : item.block === "strength" ? "core" : item.block]}</span><strong>{exercises[item.exerciseId]?.name}</strong><small>{item.work}s work · {item.rest}s rest</small></div>)}</div>}
+              {customPlan && <div className="custom-preview"><strong>{customPlan.title} · {formatTime(customPlan.seconds)}</strong>{customPlan.warnings.map((warning) => <span key={warning}>{warning}</span>)}{customPlan.items.map((item, index) => <div key={`${item.exerciseId}-${item.block}-${index}`}><span>{item.block === "skill" ? "Skill practice" : blockLabels[item.block === "strength" ? "core" : item.block]}</span><strong>{exercises[item.exerciseId]?.name}</strong><small>{item.work}s work · {item.rest}s rest</small></div>)}</div>}
             </div>
           </Drawer>
         )}
@@ -1131,7 +1438,7 @@ export default function Home() {
               <li><strong>2</strong><div><b>Tap the Share button</b><span>It is the square with an upward arrow.</span></div></li>
               <li><strong>3</strong><div><b>Choose “Add to Home Screen”</b><span>Launch it later as a full-screen app.</span></div></li>
             </ol>
-            <p className="install-note"><CircleHelp /> Preferences and history stay on this iPhone. After a successful first load, the app shell also works through a temporary connection loss. Reconnect occasionally to receive updates.</p>
+            <p className="install-note"><CircleHelp /> The app works through a temporary connection loss after a successful first load. {remoteSyncAvailable ? "Permanent profiles reconcile when you reconnect." : "This deployment stores profiles on this iPhone, so export a backup before switching devices."}</p>
           </Drawer>
         )}
       </AnimatePresence>
@@ -1142,8 +1449,8 @@ export default function Home() {
             {!complete && current ? (
               <>
                 <div className="player-topbar">
-                  <button type="button" className="icon-button player-close" onClick={() => { setRunning(false); setPlayerOpen(false); }} aria-label="Close workout"><X /></button>
-                  <div><span>{activePlan.day === 0 ? "CUSTOM SESSION" : `DAY ${activePlan.day}`} • {activePlan.level} • {blockLabels[current.block]}</span><div className="player-progress"><i style={{ width: `${progress}%` }} /></div></div>
+                  <button type="button" className="icon-button player-close" onClick={endWorkoutEarly} aria-label="End workout"><X /></button>
+                  <div><span>{activePlan.day === 0 ? "CUSTOM SESSION" : `DAY ${activePlan.day}`} • {activePlan.level} • {displayBlockLabel(current.block, activePlan.day === 0)}</span><div className="player-progress"><i style={{ width: `${progress}%` }} /></div></div>
                   <button type="button" className="icon-button" onClick={() => setSettings((previous) => ({ ...previous, soundOn: !previous.soundOn }))} aria-label="Toggle timer sound">{settings.soundOn ? <Volume2 /> : <VolumeX />}</button>
                 </div>
                 <div className="player-layout">
@@ -1158,6 +1465,15 @@ export default function Home() {
                     <div className="countdown" aria-live="polite">{formatTime(timerPosition.remaining)}</div>
                     <div className="countdown-track"><i style={{ width: `${current.duration ? (timerPosition.remaining / current.duration) * 100 : 0}%` }} /></div>
                     {currentExercise && current.kind === "work" && <div className="cue-box"><strong>FOCUS</strong><span>{currentExercise.cues[0]}</span><span>{currentExercise.cues[1]}</span></div>}
+                    {currentExercise && current.kind === "work" && <div className="player-quality">
+                      <button type="button" className={sessionCleanTargets[currentExercise.id] ? "clean" : ""} onClick={() => setSessionCleanTargets((previous) => ({ ...previous, [currentExercise.id]: !previous[currentExercise.id] }))}><Check /> Upper target completed cleanly</button>
+                      <div aria-label={`Session feedback for ${currentExercise.name}`}>
+                        {(["easy", "right", "hard"] as const).map((value) => <button type="button" className={sessionFeedback[currentExercise.id] === value ? "active" : ""} key={value} onClick={() => {
+                          setSessionFeedback((previous) => ({ ...previous, [currentExercise.id]: value }));
+                          setSettings((previous) => ({ ...previous, feedbackByExercise: { ...previous.feedbackByExercise, [currentExercise.id]: value } }));
+                        }}>{value === "easy" ? "Too easy" : value === "right" ? "Just right" : "Too hard"}</button>)}
+                      </div>
+                    </div>}
                     {current.kind === "rest" && nextExercise && <p className="rest-copy">Relax the grip, shake out tension, and set both bars before the next interval.</p>}
                     <div className="player-controls">
                       <button type="button" onClick={() => jump(-1)} disabled={timerPosition.intervalIndex === 0} aria-label="Previous interval"><ArrowLeft /></button>
@@ -1172,7 +1488,7 @@ export default function Home() {
               <div className="complete-screen">
                 <div className="complete-check"><Check /></div><p>{activePlan.day === 0 ? "CUSTOM SESSION" : `DAY ${activePlan.day}`} • {activePlan.level} COMPLETE</p>
                 <h1>{formatTime(activePlan.totalSeconds)}.<br /><em>Quality earned.</em></h1>
-                <span>Your session is saved on this device. Progress an exercise only after its upper target is clean in two separate sessions.</span>
+                <span>{saveMode === "guest" ? "Guest mode: this session was not added to history or progression." : saveMode === "practice" ? "Practice only: the session is in history, but progression and the next program day were not changed." : remoteSyncAvailable && profile ? "Your profile was saved locally and will sync online." : "Your session is saved on this device."} Progress an exercise only after its upper target is clean in two separate sessions.</span>
                 <button type="button" className="primary-button" onClick={() => { setPlayerOpen(false); setComplete(false); }}><Check /> Finish session</button>
               </div>
             )}

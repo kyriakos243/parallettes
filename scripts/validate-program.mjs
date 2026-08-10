@@ -33,6 +33,7 @@ const {
   exercises,
   programmeSummary,
   readiness,
+  skillProgressionPaths,
   timing,
   workoutVariants,
   workouts,
@@ -40,6 +41,7 @@ const {
 const {
   APP_STORAGE_VERSION,
   STABLE_SLOT_IDS,
+  adaptSwapsForEquipment,
   buildSessionPlan,
   compatibleSwaps,
   createPlanSnapshot,
@@ -66,18 +68,48 @@ const supportsDay = (exercise, day) =>
   exercise.compatibleDays === "all" || exercise.compatibleDays.includes(day);
 
 // Library identity and the agreed expansion size.
-assert(exerciseList.length === 163, `Expected 163 exercises; found ${exerciseList.length}`);
-assert(Object.keys(exercises).length === 163, "Exercise IDs are not unique");
-assert(new Set(exerciseList.map((exercise) => exercise.id)).size === 163,
+assert(exerciseList.length === 170, `Expected 170 exercises; found ${exerciseList.length}`);
+assert(Object.keys(exercises).length === 170, "Exercise IDs are not unique");
+assert(new Set(exerciseList.map((exercise) => exercise.id)).size === 170,
   "exerciseList contains duplicate IDs");
 const newExercises = exerciseList.filter((exercise) => exercise.introduced === "v2");
 const originalExercises = exerciseList.filter((exercise) => exercise.introduced === "original");
-assert(newExercises.length === 123, `Expected exactly 123 v2 exercises; found ${newExercises.length}`);
+assert(newExercises.length === 130, `Expected exactly 130 v2 exercises; found ${newExercises.length}`);
 assert(originalExercises.length === 40,
   `Expected 40 retained unique exercises; found ${originalExercises.length}`);
-assert(programmeSummary?.newExercises === 123, "Programme summary does not report 123 additions");
-assert(programmeSummary?.totalUniqueExercises === 163,
-  "Programme summary does not report 163 unique exercises");
+assert(programmeSummary?.newExercises === 130, "Programme summary does not report 130 additions");
+assert(programmeSummary?.totalUniqueExercises === 170,
+  "Programme summary does not report 170 unique exercises");
+assert(skillProgressionPaths.length === 15, `Expected 15 visible skill progression paths; found ${skillProgressionPaths.length}`);
+for (const path of skillProgressionPaths) {
+  assert(path.label?.trim() && path.steps.length >= 3, `Invalid progression path ${path.label ?? "unnamed"}`);
+  path.steps.forEach((id) => assert(Boolean(exercises[id]), `${path.label}: missing progression exercise ${id}`));
+}
+
+// Exact audited V2.1 baseline table. This prevents a valid-looking 25-minute
+// plan from silently drifting to merely theme-adjacent exercise choices.
+const canonicalSignatures = {
+  "1-L1": "wrist-palms,shoulder-sweep,scap-pushup|pike-shift,support-hold|wall-l|hollow-tuck,deadbug-heel-tap,plank-tap,bent-compression|wrist-flexor-rock,child-reach|-",
+  "1-L2": "wrist-palms,shoulder-sweep,scap-pushup|pike-shift,pike-elevation|chest-wall-line|long-lever-hollow-hold,deadbug-double-leg-lower,plank-tap,alternating-pike-leg-lift|wrist-flexor-rock,child-reach|planche-lean-hold",
+  "1-L3": "fingertip-wrist-pulses,shoulder-sweep,scap-pushup|support-shrugs,pike-elevation|chest-wall-alternating-toe-peel|hollow-scissor-kicks,long-lever-parallette-plank,side-plank-reach-through,straddle-compression-lift|wrist-flexor-rock,lat-parallette|straddle-planche-lean",
+  "2-L1": "wrist-circles,wall-slides,plank-pike|support-shrugs,support-hold|box-toe-light|foot-assisted-lsit,single-leg-compression,one-foot-assisted-lsit,side-plank|wrist-extensor-rock,seated-pike-breathing-reset|-",
+  "2-L2": "wrist-circles,wall-slides,plank-pike|support-shrugs,support-hold|heel-pullaway|tuck-support,tuck-support-knee-extensions,alternating-lsit-extension,side-plank-hip-lift|wrist-extensor-rock,seated-pike-breathing-reset|tuck-to-one-leg-lsit-transition",
+  "2-L3": "fingertip-wrist-pulses,wall-slides,plank-pike|support-shrugs,support-hold|split-leg-wall-pullaway|full-lsit-attempt,straight-compression,long-lever-hollow-hold,side-plank-reach-through|wrist-extensor-rock,seated-pike-breathing-reset|tuck-to-lsit-transition",
+  "3-L1": "wrist-circles,kneeling-thoracic-rotation,down-dog-scapular-shrugs|grounded-side-exit-rehearsal,pike-shift|chest-wall-line|dead-bug,side-plank,hollow-one-leg,deadbug-heel-tap|thread-needle,supine-90-90-breathing-reset|-",
+  "3-L2": "wrist-circles,kneeling-thoracic-rotation,down-dog-scapular-shrugs|grounded-side-exit-rehearsal,pike-shift|wall-facing-handstand-weight-shift|dead-bug,bear-hover-knee-tap,side-plank-hip-lift,hollow-one-leg|thread-needle,supine-90-90-breathing-reset|frog-stand-hold",
+  "3-L3": "wrist-circles,kneeling-thoracic-rotation,down-dog-scapular-shrugs|grounded-side-exit-rehearsal,pike-shift|wall-facing-handstand-weight-shift|long-lever-hollow-hold,bear-hover-knee-tap,side-plank-reach-through,deadbug-double-leg-lower|thread-needle,supine-90-90-breathing-reset|floor-crane-one-knee-float",
+  "4-L1": "wrist-palms,wall-slides,scap-pushup|pike-elevation,bear-to-pike-shoulder-load|wall-elevation|shallow-range-pike-pushup,hollow-reach,supported-knee-raise,hollow-tuck|wrist-extensor-rock,lat-parallette|-",
+  "4-L2": "wrist-palms,wall-slides,scap-pushup|pike-elevation,full-wall-walk|wall-kickup|parallette-pike-pushup,hollow-flutter-kicks,supported-knee-raise,long-lever-parallette-plank|wrist-extensor-rock,lat-parallette|planche-lean-hold",
+  "4-L3": "fingertip-wrist-pulses,wall-slides,scap-pushup|pike-elevation,full-wall-walk|kickup-stop-short-drill|eccentric-pike-pushup,hollow-scissor-kicks,straight-compression,long-lever-parallette-plank|wrist-extensor-rock,lat-parallette|pseudo-planche-parallette-pushup",
+  "5-L1": "fingertip-wrist-pulses,shoulder-sweep,plank-pike|standing-kickup-line-rehearsal,grounded-side-exit-rehearsal|wall-kickup|tuck-support,hollow-one-leg,single-leg-compression,plank-tap|wrist-flexor-rock,chest-opener|-",
+  "5-L2": "fingertip-wrist-pulses,shoulder-sweep,plank-pike|standing-kickup-line-rehearsal,grounded-side-exit-rehearsal|heel-pullaway|alternating-lsit-extension,hollow-rocks,seated-pike-compression-pulses,plank-tap|wrist-flexor-rock,chest-opener|support-to-tuck-transition",
+  "5-L3": "fingertip-wrist-pulses,shoulder-sweep,plank-pike|standing-kickup-line-rehearsal,grounded-side-exit-rehearsal|freestanding-parallette-kickup|one-leg-lsit-hold,hollow-scissor-kicks,straddle-compression-lift,side-plank-reach-through|wrist-flexor-rock,chest-opener|tuck-to-lsit-transition",
+};
+for (const variant of workoutVariants) {
+  const key = `${variant.day}-${variant.level}`;
+  const actual = `${variant.warmup.join(",")}|${variant.pre.join(",")}|${variant.handstand}|${variant.core.join(",")}|${variant.cooldown.join(",")}|${variant.lab?.a ?? "-"}`;
+  assert(actual === canonicalSignatures[key], `${key}: canonical V2.1 exercise sequence drifted`);
+}
 
 const validLevels = new Set(["ALL", "L1", "L2", "L3"]);
 const validBlocks = new Set(["warmup", "pre", "core", "handstand", "lab", "cooldown"]);
@@ -109,6 +141,9 @@ for (const exercise of exerciseList) {
     `${exercise.id}: missing generator family metadata`);
   assert(exercise.how?.trim() && exercise.focus?.trim() && exercise.avoid?.trim(),
     `${exercise.id}: missing expanded technique guidance`);
+  assert(["reps", "hold", "attempts", "interval"].includes(exercise.targetType) &&
+    Number.isFinite(exercise.targetMin) && Number.isFinite(exercise.targetMax) && exercise.targetMin > 0 && exercise.targetMax >= exercise.targetMin,
+  `${exercise.id}: missing structured quality target`);
   assert(!/\bbox\b|\bbench\b|\bchair\b/iu.test(`${exercise.name} ${exercise.target} ${exercise.cues.join(" ")} ${exercise.regression}`),
     `${exercise.id}: user-facing copy requires disallowed equipment`);
   assert(exercise.blocks.join("|") === exercise.eligibleBlocks.join("|"),
@@ -165,6 +200,28 @@ for (const exercise of exerciseList) {
   }
 }
 
+for (const exercise of exerciseList.filter((item) => item.category === "Warm-up")) {
+  assert(exercise.media.kind !== "static", `${exercise.id}: warm-up must use active dynamic movement`);
+}
+for (const exercise of exerciseList.filter((item) => item.category === "Cooldown")) {
+  assert(exercise.media.kind === "static", `${exercise.id}: cooldown/stretching must be a static hold`);
+}
+const ropeExercises = exerciseList.filter((item) => item.requiredEquipment.includes("rope"));
+assert(ropeExercises.length === 10, `Expected 10 rope movements; found ${ropeExercises.length}`);
+assert(ropeExercises.filter((item) => item.category === "Warm-up").length === 3,
+  "Exactly three rope movements should be active warm-up/mobility options");
+assert(ropeExercises.filter((item) => item.category === "Conditioning").length === 7,
+  "Exactly seven rope movements should be optional conditioning work");
+assert(exerciseList.filter((item) => item.category === "Conditioning").every((item) => item.eligibleBlocks.includes("core")),
+  "Conditioning movements must occupy the post-skill strength/core block");
+assert(exerciseList.every((item) => item.media.status === "ready" && Boolean(item.media.motion) && !item.media.src),
+  "Production media must use only audited owned motion guides, with no legacy GIF reliance");
+const coreAbsCount = exerciseList.filter((item) => item.category === "Core" || item.category === "Abs").length;
+const otherCategoryCounts = [...new Set(exerciseList.map((item) => item.category))]
+  .filter((category) => category !== "Core" && category !== "Abs")
+  .map((category) => exerciseList.filter((item) => item.category === category).length);
+assert(coreAbsCount > Math.max(...otherCategoryCounts), "Core/Abs must remain the largest exercise family");
+
 // Fallback graphs must terminate. G0 is intentionally a hard-stop pain gate,
 // so it is considered satisfied while testing higher-readiness regressions.
 for (const exercise of exerciseList.filter((item) => item.gate && item.gate !== "G0_LOAD")) {
@@ -197,6 +254,7 @@ for (let day = 1; day <= 5; day += 1) {
 const allReady = Object.fromEntries(Object.keys(readiness).map((gate) => [gate, true]));
 const dayResults = [];
 let extendedPlans = 0;
+let matOnlyReplacements = 0;
 
 for (const variant of workoutVariants) {
   const prefix = `Day ${variant.day} ${variant.level}`;
@@ -219,6 +277,15 @@ for (const variant of workoutVariants) {
     assert(isExerciseCompatible(exercise, slot, variant.day, variant.level),
       `${prefix}/${slot.id}: ${exercise.id} violates block/focus/day/level compatibility`);
   }
+  const matOnly = adaptSwapsForEquipment({ slots, exercises, day: variant.day, level: variant.level, readiness: allReady, equipment: ["floor"] });
+  for (const slot of slots) {
+    if (matOnly.unavailable.includes(slot.id)) continue;
+    const selectedId = matOnly.swaps[slot.id] ?? slot.defaultExerciseId;
+    const selected = exercises[selectedId];
+    assert(selected.requiredEquipment.every((item) => item === "floor"),
+      `${prefix}/${slot.id}: mat-only adaptation selected ${selectedId}`);
+    if (selectedId !== slot.defaultExerciseId) matOnlyReplacements += 1;
+  }
 
   let plan25;
   try {
@@ -227,6 +294,9 @@ for (const variant of workoutVariants) {
       `${prefix}: default plan is ${plan25.totalSeconds}s, expected 1500s`);
     assert(plan25.intervals.length === 50,
       `${prefix}: default plan has ${plan25.intervals.length} intervals, expected 50`);
+    const blockOrder25 = [...new Set(plan25.intervals.map((interval) => interval.block))].join("/");
+    assert(blockOrder25 === "warmup/pre/handstand/core/cooldown",
+      `${prefix}: default block order is ${blockOrder25}`);
     const parsedSnapshot = parsePlanSnapshot(
       JSON.stringify(createPlanSnapshot(plan25, "2026-01-01T00:00:00.000Z")),
     );
@@ -247,7 +317,7 @@ for (const variant of workoutVariants) {
   if (variant.lab) {
     try {
       const slots30 = slotsForVariant(variant, exercises, true);
-      assert(slots30.length === 14, `${prefix}: extended plan must have 14 stable slots`);
+      assert(slots30.length === 13, `${prefix}: extended plan must have 13 stable slots`);
       const plan30 = buildSessionPlan({
         variant,
         exercises,
@@ -258,15 +328,21 @@ for (const variant of workoutVariants) {
         `${prefix}: extended plan is ${plan30.totalSeconds}s, expected 1800s`);
       assert(plan30.intervals.length === 60,
         `${prefix}: extended plan has ${plan30.intervals.length} intervals, expected 60`);
+      const blockOrder30 = [...new Set(plan30.intervals.map((interval) => interval.block))].join("/");
+      assert(blockOrder30 === "warmup/pre/handstand/lab/core/cooldown",
+        `${prefix}: extended block order is ${blockOrder30}`);
       const pattern = plan30.intervals
         .filter((interval) => interval.block === "lab" && interval.kind === "work")
         .map((interval) => interval.slotId)
         .join("/");
-      assert(pattern === "lab-a/lab-b/lab-a/lab-b/lab-a",
-        `${prefix}: Lab sequence is not A/B/A/B/A`);
-      const labPosition = locateTimerPosition(plan30, 1501);
+      assert(pattern === "lab-a/lab-a/lab-a/lab-a/lab-a",
+        `${prefix}: Lab must repeat one selected skill for five rounds`);
+      const labPosition = locateTimerPosition(plan30, 721);
       assert(labPosition.interval?.block === "lab",
-        `${prefix}: 25:01 should be inside the Calisthenics Lab`);
+        `${prefix}: 12:01 should be inside the Calisthenics Lab`);
+      const corePosition = locateTimerPosition(plan30, 1021);
+      assert(corePosition.interval?.block === "core",
+        `${prefix}: 17:01 should be inside the Abs/Core circuit`);
       extendedPlans += 1;
     } catch (error) {
       fail(`${prefix}: extended plan build failed: ${error.message}`);
@@ -314,6 +390,7 @@ for (const variant of workoutVariants) {
 }
 
 assert(extendedPlans === 10, `Expected 10 L2/L3 extended plans; found ${extendedPlans}`);
+assert(matOnlyReplacements > 0, "Recommended Program did not produce any mat-only role-preserving substitutions");
 assert(timing.defaultTotal === 1500 && timing.extendedTotal === 1800,
   "Programme timing constants are not exactly 25/30 minutes");
 
@@ -329,8 +406,8 @@ if (l2Variant) {
       readiness: allReady,
       timings: { "core-1": { work: 45 }, "lab-a": { work: 35 } },
     });
-    assert(custom.totalSeconds === 1830,
-      `Stable-slot custom timing expected 1830s; found ${custom.totalSeconds}s`);
+    assert(custom.totalSeconds === 1840,
+      `Stable-slot custom timing expected 1840s; found ${custom.totalSeconds}s`);
   } catch (error) {
     fail(`Stable-slot custom timing plan failed: ${error.message}`);
   }

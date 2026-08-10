@@ -17,6 +17,7 @@ export type Category =
   | "Core"
   | "Handstand"
   | "Calisthenics"
+  | "Conditioning"
   | "Cooldown";
 export type Focus =
   | "wrist"
@@ -39,7 +40,8 @@ export type Focus =
   | "lsit"
   | "transition"
   | "thoracic-reset"
-  | "breathing";
+  | "breathing"
+  | "conditioning";
 export type ReadinessGateId =
   | "G0_LOAD"
   | "G1_SUPPORT"
@@ -122,7 +124,7 @@ export type CalisthenicsLab = {
   label: string;
   a: Prescription;
   b: Prescription;
-  sequence: ["a", "b", "a", "b", "a"];
+  sequence: ["selected", "selected", "selected", "selected", "selected"];
   intensityNote?: string;
 };
 
@@ -203,9 +205,10 @@ export const readiness: Record<ReadinessGateId, ReadinessStandard> = {
 export const timing = {
   warmup: { start: 0, work: 45, transition: 15, exercises: 3, rounds: 1, total: 180 },
   pre: { start: 180, work: 40, transition: 20, exercises: 2, rounds: 2, total: 240 },
-  core: { start: 420, work: 40, transition: 20, exercises: 4, rounds: 3, total: 720 },
-  handstand: { start: 1140, work: 30, transition: 30, exercises: 1, rounds: 5, total: 300 },
-  lab: { start: 1440, work: 30, transition: 30, exercises: 2, rounds: 5, total: 300 },
+  handstand: { start: 420, work: 30, transition: 30, exercises: 1, rounds: 5, total: 300 },
+  core25: { start: 720, work: 40, transition: 20, exercises: 4, rounds: 3, total: 720 },
+  lab: { start: 720, work: 30, transition: 30, exercises: 1, rounds: 5, total: 300 },
+  core30: { start: 1020, work: 40, transition: 20, exercises: 4, rounds: 3, total: 720 },
   cooldown25: { start: 1440, work: 30, transition: 0, exercises: 2, rounds: 1, total: 60 },
   cooldown30: { start: 1740, work: 30, transition: 0, exercises: 2, rounds: 1, total: 60 },
   defaultTotal: 1500,
@@ -271,12 +274,12 @@ const existing: ExerciseSeed[] = [
   { id: "wall-elevation", name: "Handstand Shoulder Elevation", level: "L2", category: "Handstand", eligibleBlocks: ["handstand"], primaryFocus: "scapular", secondaryFocus: ["line"], compatibleDays: days(3, 4), target: "6–10 controlled reps", cues: ["Stay chest-to-wall", "Keep elbows locked; move only the shoulder blades"], regression: "Perform in a floor pike or Wall Inverted-L position.", gate: "G2_INVERSION", media: media("loop", "audit", "Athlete faces wall; toes stay in contact; no elbow bend or banana arch.", { src: gif("d4_wall_shoulder_elevation") }) },
   { id: "heel-pullaway", name: "Back-to-Wall Heel Pull-Away", level: "L2", category: "Handstand", eligibleBlocks: ["handstand"], primaryFocus: "balance", secondaryFocus: ["line"], compatibleDays: days(5), target: "3–6 controlled floats", cues: ["Face away from the wall and peel heels a few centimetres", "Return before the body line breaks"], regression: "Float one heel at a time.", gate: "G3_ENTRY", media: media("loop", "audit", "Athlete faces away; heels begin on wall; small pull-away and return are distinct.", { src: gif("d5_heel_pullaway_v2") }) },
 
-  { id: "wrist-flexor-rock", name: "Wrist Flexor Rock-Back", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "wrist", secondaryFocus: [], compatibleDays: "all", target: "4–6 slow rocks in 30 seconds", cues: ["Keep palms flat with fingers forward", "Use only a mild stretch"], regression: "Keep shoulders directly above the hands.", media: media("loop", "ready", "Slow pain-free rock with full hands visible.", { motion: "wrist-flexor-rock" }) },
-  { id: "wrist-extensor-rock", name: "Wrist Extensor Rock-Back", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "wrist", secondaryFocus: [], compatibleDays: "all", target: "4–6 slow rocks in 30 seconds", cues: ["Turn fingers gently toward the knees", "Keep pressure light and elbows soft"], regression: "Stretch one hand at a time.", media: media("loop", "ready", "Back-of-forearm stretch remains gentle; no forced wrist angle.", { motion: "wrist-extensor-rock" }) },
+  { id: "wrist-flexor-rock", name: "Wrist Flexor Stretch Hold", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "wrist", secondaryFocus: [], compatibleDays: "all", target: "30-second relaxed hold", cues: ["Keep palms flat with fingers forward", "Settle into only a mild stretch"], regression: "Keep shoulders directly above the hands.", media: media("static", "ready", "Pain-free static wrist-flexor hold with full hands visible.", { motion: "wrist-flexor-rock" }) },
+  { id: "wrist-extensor-rock", name: "Wrist Extensor Stretch Hold", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "wrist", secondaryFocus: [], compatibleDays: "all", target: "30-second relaxed hold", cues: ["Turn fingers gently toward the knees", "Hold light pressure with elbows soft"], regression: "Stretch one hand at a time.", media: media("static", "ready", "Static back-of-forearm stretch remains gentle; no forced wrist angle.", { motion: "wrist-extensor-rock" }) },
   { id: "child-reach", name: "Child’s-Pose Reach", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "shoulder-mobility", secondaryFocus: ["thoracic-reset"], compatibleDays: "all", target: "3–4 long breaths", cues: ["Send hips back as hands reach", "Let the upper back widen"], regression: "Place a cushion between hips and heels.", media: media("static", "ready", "Long relaxed reach with no forced shoulder depth.", { motion: "child-reach" }) },
-  { id: "thread-needle", name: "Thread-the-Needle Flow", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "thoracic-reset", secondaryFocus: ["shoulder-mobility"], compatibleDays: "all", target: "2–3 slow reps per side", cues: ["Slide one arm under without forcing", "Rotate through the upper back"], regression: "Use a shorter reach and keep the head lifted.", media: media("loop", "ready", "Upper-back rotation is clear and supporting wrist stays comfortable.", { motion: "thread-needle" }) },
+  { id: "thread-needle", name: "Thread-the-Needle Hold", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "thoracic-reset", secondaryFocus: ["shoulder-mobility"], compatibleDays: "all", target: "30-second relaxed hold per selected side", cues: ["Rest the reaching shoulder without forcing", "Breathe into the upper-back rotation"], regression: "Use a shorter reach and keep the head lifted.", media: media("static", "ready", "Static upper-back rotation is clear and supporting wrist stays comfortable.", { motion: "thread-needle" }) },
   { id: "lat-parallette", name: "Kneeling Parallette Lat Reach", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "shoulder-mobility", secondaryFocus: ["thoracic-reset"], compatibleDays: "all", target: "3–4 slow breaths", cues: ["Keep hips above or behind knees", "Sink chest gently between straight arms"], regression: "Use the floor instead of the bars.", media: media("static", "ready", "Both bars stable and equal height; shoulders remain pain-free.", { motion: "lat-reach" }) },
-  { id: "puppy-rock", name: "Puppy-Pose Rock", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "shoulder-mobility", secondaryFocus: ["thoracic-reset"], compatibleDays: "all", target: "3–5 slow rocks", cues: ["Keep hips roughly over knees", "Lower chest without pinching shoulders"], regression: "Rest the forearms on the mat.", media: media("loop", "ready", "Small controlled shoulder-opening rock, full body visible.", { motion: "puppy-rock" }) },
+  { id: "puppy-rock", name: "Puppy-Pose Hold", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "shoulder-mobility", secondaryFocus: ["thoracic-reset"], compatibleDays: "all", target: "30-second relaxed hold", cues: ["Keep hips roughly over knees", "Let the chest settle without pinching shoulders"], regression: "Rest the forearms on the mat.", media: media("static", "ready", "Static shoulder-opening position with full body visible.", { motion: "puppy-rock" }) },
   { id: "chest-opener", name: "Gentle Chest Opener", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "shoulder-mobility", secondaryFocus: [], compatibleDays: "all", target: "3–4 slow breaths", cues: ["Clasp hands loosely behind the back", "Lift only to a mild stretch"], regression: "Hold a towel between the hands.", media: media("static", "ready", "Shoulders remain down; no forced arm lift.", { motion: "chest-opener", orientation: "front-oblique" }) },
   { id: "upper-back-reach", name: "Upper-Back Hug & Reach", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "thoracic-reset", secondaryFocus: ["breathing"], compatibleDays: "all", target: "3–4 slow breaths", cues: ["Reach elbows forward", "Breathe between the shoulder blades"], regression: "Keep hands on opposite shoulders.", media: media("static", "ready", "Rounded upper back and relaxed neck remain visible.", { motion: "upper-back-reach", orientation: "front-oblique" }) },
 ];
@@ -329,7 +332,7 @@ const additions: ExerciseSeed[] = [
   { id: "freestanding-parallette-kickup", name: "Freestanding Parallette Kick-Up", level: "L3", category: "Handstand", eligibleBlocks: ["handstand"], primaryFocus: "entry", secondaryFocus: ["balance", "exit"], compatibleDays: days(5), target: "3–5 accurate attempts", cues: ["Use a low-force kick", "Exit sideways before overbalancing"], regression: "Use Parallette Kick-Up to Wall.", gate: "G4_FREE_BAR", fallbackId: "parallette-kickup-to-wall", media: media("transition", "required", "Side/front-oblique view; full calm kick-up, brief line and sideways exit; clear space and both bars visible.", { orientation: "front-oblique" }) },
 
   // Cooldown/reset: 6
-  { id: "forearms-parallette-prayer-rock", name: "Forearms-on-Parallettes Prayer Rock", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "shoulder-mobility", secondaryFocus: ["thoracic-reset"], compatibleDays: "all", target: "3–5 slow rocks", cues: ["Keep ribs gently tucked", "Use a mild shoulder stretch"], regression: "Reduce hip travel.", media: media("loop", "required", "Side view; forearms supported on equal bars, hips rock back without lumbar arch.") },
+  { id: "forearms-parallette-prayer-rock", name: "Forearms-on-Parallettes Prayer Hold", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "shoulder-mobility", secondaryFocus: ["thoracic-reset"], compatibleDays: "all", target: "30-second relaxed hold", cues: ["Keep ribs gently tucked", "Breathe into a mild shoulder stretch"], regression: "Keep the hips closer to the knees.", media: media("static", "required", "Side view; forearms supported on equal bars in a static hold without lumbar arch.") },
   { id: "seated-wrist-extension-stretch", name: "Seated Wrist Extension Stretch", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "wrist", secondaryFocus: [], compatibleDays: "all", target: "15 seconds per side", cues: ["Keep the elbow softly straight", "Use only a mild stretch"], regression: "Bend the elbow.", media: media("static", "required", "Front-oblique seated view; stretched hand, wrist angle and relaxed shoulder fully visible.", { orientation: "front-oblique" }) },
   { id: "forearm-pronator-stretch", name: "Forearm Pronator Stretch", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "wrist", secondaryFocus: [], compatibleDays: "all", target: "15 seconds per side", cues: ["Rotate gently from the forearm", "Keep the shoulder relaxed"], regression: "Use less rotation.", media: media("static", "required", "Close front-oblique view clearly shows hand placement without forcing fingers.", { orientation: "front-oblique" }) },
   { id: "crossbody-shoulder-stretch", name: "Cross-Body Shoulder Stretch", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "shoulder-mobility", secondaryFocus: [], compatibleDays: "all", target: "15 seconds per side", cues: ["Keep the stretched shoulder down", "Pull above the elbow"], regression: "Use lighter pressure.", media: media("static", "required", "Front view; arm crosses at shoulder height, neck and shoulder relaxed.", { orientation: "front-oblique" }) },
@@ -372,26 +375,107 @@ const v2ExpansionNames: Record<string, string> = {
   "supine-spinal-twist": "Supine Spinal Twist", "sphinx-breathing-hold": "Sphinx Breathing Hold", "kneeling-hip-flexor-stretch": "Kneeling Hip-Flexor Stretch", "seated-straddle-fold-gentle": "Seated Straddle Fold — Gentle", "shoulder-wall-lat-stretch": "Shoulder Wall Lat Stretch",
   "basic-two-foot-bounce": "Basic Two-Foot Bounce", "alternate-foot-step": "Alternate-Foot Step", "boxer-step": "Boxer Step", "side-to-side-ski-hop": "Side-to-Side Ski Hop", "forward-back-hop": "Forward-Back Hop", "high-knee-rope": "High-Knee Rope", "fast-single-under-cadence": "Fast Single-Under Cadence", "recovery-bounce": "Recovery Bounce", "rope-step-through-mobility": "Rope Step-Through Mobility",
 };
+const v2ExpansionHow: Record<string, string> = {
+  "cat-cow-flow": "From hands and knees, alternate a gentle spinal arch and round while the pelvis and head follow the movement smoothly.",
+  "bear-shoulder-circles": "Hover the knees just above the floor, keep the trunk quiet and draw small controlled circles through both shoulders.",
+  "prone-y-t-w-raises": "Lie face down and lift the arms through Y, T and W shapes using the shoulder blades, returning softly between shapes.",
+  "easy-rope-bounce": "Turn the rope from relaxed wrists and make low two-foot jumps, landing quietly under the hips on every pass.",
+  "wall-shoulder-flexion-line-drill": "Stand with ribs stacked and slide straight arms overhead toward the wall without leaning the torso back.",
+  "prone-handstand-line-hold": "Lie face down with arms overhead, squeeze the legs together and create a long ribs-down handstand line from hands to toes.",
+  "bear-shoulder-tap": "From a low bear hover, shift minimally and tap the opposite shoulder without rotating the pelvis.",
+  "down-dog-to-pike-weight-shift": "From down-dog, keep the hips high and elbows locked as the shoulders travel toward the hands, then press back.",
+  "floor-frog-stand-setup": "Place the knees high on the arms, lean forward gradually and test light foot pressure while keeping a safe landing area.",
+  "wall-split-kick-entry-rehearsal": "Face away from the wall, place the hands, split the legs and rehearse a controlled kick path with a soft wall touch.",
+  "forearm-plank": "Set elbows beneath shoulders and hold a straight shoulder-to-heel line while gently drawing the ribs toward the pelvis.",
+  "rkc-plank": "From forearm plank, squeeze glutes and quads and pull elbows toward toes without moving to create short, high-tension holds.",
+  "plank-reach": "From a rigid plank, reach one arm forward without shifting the hips, replace the hand and alternate sides.",
+  "plank-leg-lift": "Hold a firm plank and lift one straight leg only as high as the pelvis can remain level, then alternate.",
+  "forearm-plank-body-saw": "From forearm plank, glide the whole body a few centimetres backward and forward while maintaining the same trunk shape.",
+  "bird-dog": "From hands and knees, extend the opposite arm and leg until long, pause without arching, then return and alternate.",
+  "bird-dog-knee-to-elbow": "Extend opposite arm and leg from quadruped, then bring elbow and knee together under the trunk before re-extending.",
+  "bear-crawl-step": "Keep the knees hovering low as the opposite hand and foot take a small step, maintaining a quiet level torso.",
+  "reverse-crunch": "From supine bent knees, curl the pelvis toward the ribs until the tailbone lifts slightly, then lower without swinging.",
+  "bent-knee-leg-lower": "Brace the trunk with hips and knees bent, lower the feet toward the floor only while the low back stays controlled, then return.",
+  "straight-leg-raise": "Lie supine and raise both straight legs with the pelvis controlled, then lower only through a range that preserves the trunk position.",
+  "tuck-up": "From a long supine position, bring chest and bent knees toward one another under control, then lengthen back out.",
+  "controlled-v-up": "Lift straight legs and torso together toward a balanced V position, pause briefly and lower without dropping.",
+  "alternating-jackknife": "Raise one straight leg as the opposite hand reaches toward it, lower with control and alternate sides.",
+  "supine-toe-reach": "Keep the legs vertical and curl the shoulder blades up as the hands reach toward the toes, then lower slowly.",
+  "heel-touches": "With knees bent and shoulders lightly curled, alternate side reaches toward each heel without pulling the head.",
+  "bicycle-crunch-slow": "Extend one leg as the opposite shoulder rotates toward the bent knee, pause, and change sides slowly.",
+  "side-plank-star-hold": "Stack into a side plank and lift the top leg into a star while the supporting shoulder and pelvis remain stable.",
+  "side-plank-knee-drive": "From side plank, draw the top knee toward the torso and extend it again without allowing the hips to collapse.",
+  "forearm-side-plank": "Place the elbow beneath the shoulder and hold a straight side line with hips lifted and head aligned with the trunk.",
+  "glute-bridge-march": "Hold a level glute bridge and alternately lift one foot a few centimetres without letting the pelvis tip.",
+  "single-leg-glute-bridge": "Extend one leg, drive through the grounded foot to lift the hips and lower while keeping the pelvis square.",
+  "reverse-plank-hold": "Press through the hands and heels to lift the hips into a long reverse plank with the chest open and neck comfortable.",
+  "prone-swimmer": "Lie face down and alternate a small opposite arm-and-leg lift, keeping the motion long rather than arching high.",
+  "floor-seated-knee-lift": "Sit tall with knees bent and lift both feet using hip compression without rocking the torso backward.",
+  "floor-single-leg-pike-lift": "Sit in pike, press the hands into the floor and lift one locked leg from the hip before changing sides.",
+  "floor-double-leg-pike-lift": "Sit tall in pike and lift both straight legs together without throwing the shoulders behind the hips.",
+  "straddle-pike-pulses": "Sit in a wide straddle and make small straight-leg lifts from the hips while keeping the torso tall.",
+  "seated-pike-hold-lift-off": "Hold a tall pike position, press the hands down and make brief clean attempts to float both heels.",
+  "floor-tuck-v-sit-balance": "Balance behind the sitting bones with knees tucked and chest lifted, using only the clean range you can control.",
+  "floor-chest-wall-handstand-hold": "Walk the feet up the wall into a chest-to-wall floor handstand, push tall through locked elbows and exit sideways under control.",
+  "floor-back-wall-heel-pull": "Kick up softly with heels at the wall, then use finger and wrist pressure to separate the heels briefly without pushing off.",
+  "floor-chest-wall-toe-pull": "From chest-to-wall handstand, lighten or peel the toes using hand pressure and body line, then return them softly.",
+  "floor-wall-weight-shift": "In a stable wall handstand, shift a small amount of weight from hand to hand without moving or twisting the hands.",
+  "floor-controlled-kick-up-to-wall": "Use a calm split-leg kick-up and meet the wall softly, establishing active shoulders before the heels touch.",
+  "floor-freestanding-kick-up": "Place the hands, use a measured split-leg kick and stop the entry through the hands before taking a planned side exit.",
+  "floor-freestanding-balance-attempt": "Enter calmly, hold only while small hand corrections preserve the line, and exit before control deteriorates.",
+  "floor-side-exit-practice": "From a low-to-near-vertical setup, turn the hips and step one foot to the side into a controlled cartwheel-style landing.",
+  "knee-push-up": "Keep a straight shoulder-to-knee line as the chest lowers between the hands and presses back up.",
+  "floor-push-up": "Lower the rigid body as one unit with elbows tracking back, then press the floor away to full support.",
+  "tempo-floor-push-up": "Use about three seconds to lower in a rigid push-up, pause with control and press up without losing the trunk line.",
+  "floor-pike-push-up": "Set the hips high, bend the elbows back and lower the head toward the floor between the hands, then press away.",
+  "floor-planche-lean": "From a protracted straight-arm plank, move the shoulders gradually beyond the hands while the toes remain grounded.",
+  "floor-frog-stand": "Support the knees on the upper arms, lean forward until both feet float and return them before balance is lost.",
+  "floor-crane-one-knee-float": "Stabilize a frog/crane hold, lift one knee briefly from its supporting arm, replace it and change sides.",
+  "floor-tuck-planche-attempt": "With locked elbows and a protracted upper back, draw the knees toward the chest for a brief controlled float, then reset.",
+  "supine-spinal-twist": "Lie on the back, guide bent knees gently to one side while both shoulders relax, and breathe without forcing range.",
+  "sphinx-breathing-hold": "Rest on the forearms in a low sphinx, lengthen through the chest and take slow breaths without compressing the low back.",
+  "kneeling-hip-flexor-stretch": "From half kneeling, tuck the pelvis slightly and shift forward until a gentle front-of-hip stretch is felt.",
+  "seated-straddle-fold-gentle": "Sit tall in a comfortable straddle and hinge forward into a mild stretch while breathing slowly.",
+  "shoulder-wall-lat-stretch": "Place hands or forearms on the wall, send the hips back and lower the chest gently while keeping the ribs controlled.",
+  "basic-two-foot-bounce": "Turn the rope from the wrists and clear it with low symmetrical jumps, landing quietly under the hips.",
+  "alternate-foot-step": "Step over each rope pass on alternating feet in a relaxed jogging rhythm with low impact.",
+  "boxer-step": "Shift weight lightly from side to side on each rope pass while keeping the bounce low and rhythm even.",
+  "side-to-side-ski-hop": "Keep the feet together and make small lateral hops over each rope pass with a stable torso.",
+  "forward-back-hop": "Use small two-foot hops forward and backward while the wrists maintain an even rope cadence.",
+  "high-knee-rope": "Alternate higher knee drives over the rope while staying tall and landing softly; slow down before form changes.",
+  "fast-single-under-cadence": "Use quick low single-unders driven by the wrists, keeping the shoulders relaxed and jumps economical.",
+  "recovery-bounce": "Continue very relaxed low rope passes with easy breathing and reduce cadence whenever tension rises.",
+  "rope-step-through-mobility": "Hold the rope wide as a mobility guide and pass it overhead through a comfortable shoulder range without forcing behind the body.",
+};
 const v2ExpansionIds = Object.keys(v2ExpansionNames);
 const ropeExerciseIds = new Set([
   "easy-rope-bounce", "basic-two-foot-bounce", "alternate-foot-step", "boxer-step",
   "side-to-side-ski-hop", "forward-back-hop", "high-knee-rope",
   "fast-single-under-cadence", "recovery-bounce", "rope-step-through-mobility",
 ]);
+const ropeWarmupIds = new Set(["easy-rope-bounce", "recovery-bounce", "rope-step-through-mobility"]);
+const v2ExpansionStaticIds = new Set([
+  "prone-handstand-line-hold", "forearm-plank", "rkc-plank", "side-plank-star-hold",
+  "forearm-side-plank", "floor-tuck-v-sit-balance", "floor-chest-wall-handstand-hold",
+  "floor-planche-lean", "sphinx-breathing-hold", "supine-spinal-twist",
+  "kneeling-hip-flexor-stretch", "seated-straddle-fold-gentle", "shoulder-wall-lat-stretch",
+]);
 const isRopeExercise = (id: string) => ropeExerciseIds.has(id);
 const v2ExpansionFocus = (id: string): Focus => {
-  if (isRopeExercise(id)) return id === "rope-step-through-mobility" ? "shoulder-mobility" : "support";
+  if (isRopeExercise(id)) return id === "rope-step-through-mobility" ? "shoulder-mobility" : ropeWarmupIds.has(id) ? "scapular" : "conditioning";
   if (id.includes("handstand") || id.includes("wall-") || id.includes("kick-up") || id.includes("kickup")) return id.includes("exit") ? "exit" : id.includes("kick") ? "entry" : "line";
+  if (id.includes("planche") || id.includes("frog") || id.includes("crane")) return "planche";
+  if (id.includes("push-up")) return id.includes("pike") ? "vertical-push" : "horizontal-push";
   if (id.includes("compression") || id.includes("pike-lift") || id.includes("v-sit") || id.includes("leg-lift")) return "compression";
   if (id.includes("plank") || id.includes("bird") || id.includes("bear") || id.includes("bridge")) return id.includes("side") || id.includes("reach") ? "anti-rotation" : "anti-extension";
   if (id.includes("stretch") || id.includes("twist") || id.includes("sphinx") || id.includes("cat-cow")) return "thoracic-reset";
   return "hollow";
 };
 const v2ExpansionCategory = (id: string): Category => {
-  if (id.startsWith("wall-") || id.startsWith("prone-handstand") || id.includes("kick-up") || id.includes("freestanding") || id.includes("side-exit")) return "Handstand";
+  if (id.startsWith("wall-") || id.startsWith("prone-handstand") || id.startsWith("floor-chest-wall") || id.startsWith("floor-back-wall") || id.startsWith("floor-wall") || id.includes("kick-up") || id.includes("freestanding") || id.includes("side-exit")) return "Handstand";
   if (id.startsWith("floor-") && (id.includes("push") || id.includes("planche") || id.includes("frog") || id.includes("crane"))) return "Calisthenics";
-  if (id.includes("stretch") || id.includes("twist") || id.includes("sphinx")) return "Cooldown";
-  if (isRopeExercise(id)) return "Warm-up";
+  if (id.includes("stretch") || id.includes("twist") || id.includes("sphinx") || id === "seated-straddle-fold-gentle") return "Cooldown";
+  if (isRopeExercise(id)) return ropeWarmupIds.has(id) ? "Warm-up" : "Conditioning";
   if (id.includes("compression") || id.includes("pike-lift") || id.includes("v-sit") || id.includes("crunch") || id.includes("toe-reach") || id.includes("jackknife") || id.includes("leg-raise") || id.includes("tuck-up")) return "Abs";
   return "Core";
 };
@@ -420,12 +504,22 @@ const v2ExpansionSeeds: ExerciseSeed[] = v2ExpansionIds.map((id) => {
     target: level === "L3" ? "3–6 controlled attempts" : category === "Cooldown" ? "30-second gentle hold" : "6–12 controlled reps",
     cues: ["Move slowly and stop before alignment changes", "Use the easiest clean range first"],
     regression: "Reduce the range, lever or assistance.",
-    media: media(category === "Cooldown" ? "static" : "loop", "audit", `Unified V2 avatar demonstrates ${v2ExpansionNames[id]} with full body and equipment visible.`, { motion: id as MotionPreset }),
-    ...(equipment ? { family: category, subfamily: focus, progressionFamily: focus, progressionStage: level === "L1" ? 1 : level === "L2" ? 2 : 3, requiredEquipment: equipment, customFocusTags: [focus, category.toLowerCase()], loadTags: level === "L3" ? ["core_medium", "balance"] : ["low_fatigue"], fatigueCost: { wrist: equipment.includes("parallettes") ? 2 : 0, shoulder: equipment.includes("wall") ? 2 : 1, pushing: category === "Calisthenics" ? 2 : 0, core: 2, inversion: category === "Handstand" ? 3 : 0 }, targetType: level === "L3" ? "attempts" : category === "Cooldown" ? "hold" : "reps", targetMin: level === "L3" ? 3 : 6, targetMax: level === "L3" ? 6 : 12, how: `Start in the demonstrated ${v2ExpansionNames[id]} position, move with control, then return to a comfortable reset.`, focus: `Keep the ${focus} quality stable throughout.`, avoid: "Do not chase the timer with rushed or painful repetitions.", safety: "Stop for sharp or escalating pain." } : {}),
+    media: media(category === "Cooldown" || v2ExpansionStaticIds.has(id) ? "static" : "loop", "audit", `Unified V2 avatar demonstrates ${v2ExpansionNames[id]} with full body and equipment visible.`, { motion: id as MotionPreset }),
+    ...(equipment ? { family: category, subfamily: focus, progressionFamily: focus, progressionStage: level === "L1" ? 1 : level === "L2" ? 2 : 3, requiredEquipment: equipment, customFocusTags: [focus, category.toLowerCase()], loadTags: level === "L3" ? ["core_medium", "balance"] : ["low_fatigue"], fatigueCost: { wrist: equipment.includes("parallettes") ? 2 : 0, shoulder: equipment.includes("wall") ? 2 : 1, pushing: category === "Calisthenics" ? 2 : 0, core: 2, inversion: category === "Handstand" ? 3 : 0 }, targetType: level === "L3" ? "attempts" : category === "Cooldown" ? "hold" : "reps", targetMin: level === "L3" ? 3 : 6, targetMax: level === "L3" ? 6 : 12, how: v2ExpansionHow[id], focus: `Keep the ${focus} quality stable throughout.`, safety: "Stop for sharp or escalating pain." } : {}),
   };
 });
 
 const allDays: DayNumber[] = [1, 2, 3, 4, 5];
+const canonicalCompletionSeeds: ExerciseSeed[] = [
+  { id: "down-dog-scapular-shrugs", name: "Down-Dog Scapular Shrugs", level: "ALL", category: "Warm-up", eligibleBlocks: ["warmup"], primaryFocus: "scapular", secondaryFocus: ["overhead-load"], compatibleDays: days(2, 3, 4), target: "8–12 smooth reps", cues: ["Keep elbows locked", "Move only through the shoulder blades"], regression: "Bend the knees and shorten the down-dog stance.", media: media("loop", "audit", "Full-body down-dog with straight elbows and clearly different shoulder positions.", { motion: "down-dog-scapular-shrugs" }) },
+  { id: "full-wall-walk", name: "Full Wall Walk", level: "L2", category: "Pre-Handstand", eligibleBlocks: ["pre"], primaryFocus: "line", secondaryFocus: ["overhead-load"], compatibleDays: days(4, 5), target: "2–4 calm walks", cues: ["Take small hand and foot steps", "Stop before the line or exit becomes uncertain"], regression: "Use a Partial Wall Walk.", gate: "G2_INVERSION", fallbackId: "partial-wall-walk", media: media("transition", "audit", "Feet stay on the wall through a controlled walk toward vertical and a complete walk-down.", { motion: "full-wall-walk" }) },
+  { id: "one-foot-assisted-lsit", name: "One-Foot-Assisted L-Sit Support", level: "L1", category: "Abs", eligibleBlocks: ["core"], primaryFocus: "lsit", secondaryFocus: ["compression", "support"], compatibleDays: days(2, 5), target: "8–15 second hold per side", cues: ["Press tall before extending one leg", "Keep only the assisting foot lightly grounded"], regression: "Use Foot-Assisted L-Sit Support.", gate: "G1_SUPPORT", fallbackId: "foot-assisted-lsit", media: media("static", "audit", "One straight leg floats while the opposite foot provides light floor assistance; both bars visible.", { motion: "one-foot-assisted-lsit" }) },
+  { id: "tuck-support-knee-extensions", name: "Tuck Support Knee Extensions", level: "L2", category: "Abs", eligibleBlocks: ["core"], primaryFocus: "lsit", secondaryFocus: ["compression", "support"], compatibleDays: days(2), target: "4–8 alternating extensions", cues: ["Keep shoulders pressed tall", "Return each leg to tuck without swinging"], regression: "Use a Tuck Support Hold.", gate: "G1_SUPPORT", fallbackId: "tuck-support", media: media("loop", "audit", "Stable tuck alternates one controlled knee extension at a time with locked support arms.", { motion: "tuck-support-knee-extensions" }) },
+  { id: "shallow-range-pike-pushup", name: "Shallow-Range Pike Push-Up", level: "L1", category: "Core", eligibleBlocks: ["core"], primaryFocus: "vertical-push", secondaryFocus: ["overhead-load"], compatibleDays: days(4), target: "4–8 controlled reps", cues: ["Keep hips high and elbows tracking back", "Use a shallow range with no head contact"], regression: "Use a Pike Shoulder Elevation.", gate: "G0_LOAD", fallbackId: "pike-elevation", media: media("loop", "audit", "Side view shows a small controlled pike push-up range, grounded feet and a clear head path.", { motion: "shallow-range-pike-pushup" }) },
+  { id: "straddle-planche-lean", name: "Straddle Planche Lean", level: "L2", category: "Calisthenics", eligibleBlocks: ["lab"], primaryFocus: "planche", secondaryFocus: ["support"], compatibleDays: days(1, 4), target: "10–20 second quality hold", cues: ["Keep elbows locked and upper back protracted", "Use a wide grounded straddle to control the lean"], regression: "Use a standard Planche-Lean Hold.", gate: "G1_SUPPORT", fallbackId: "planche-lean-hold", media: media("static", "audit", "Straight-arm planche lean with clearly grounded wide straddle feet and both bars visible.", { motion: "straddle-planche-lean" }) },
+  { id: "support-to-tuck-transition", name: "Support-to-Tuck Transition", level: "L2", category: "Calisthenics", eligibleBlocks: ["lab"], primaryFocus: "transition", secondaryFocus: ["support", "compression"], compatibleDays: days(2, 5), target: "4–8 controlled transitions", cues: ["Press tall before the feet leave", "Draw both knees in without swinging"], regression: "Use a Foot-Assisted L-Sit Support.", gate: "G1_SUPPORT", fallbackId: "foot-assisted-lsit", media: media("transition", "audit", "Tall support moves into a compact unsupported tuck and returns with straight arms.", { motion: "support-to-tuck-transition" }) },
+  { id: "seated-pike-breathing-reset", name: "Seated Pike Breathing Reset", level: "ALL", category: "Cooldown", eligibleBlocks: ["cooldown"], primaryFocus: "breathing", secondaryFocus: ["compression"], compatibleDays: days(2, 5), target: "4–5 slow breaths", cues: ["Sit tall before a gentle hinge", "Use a long exhale without forcing range"], regression: "Bend the knees slightly.", media: media("static", "audit", "Relaxed seated pike with full body visible, knees softly unlocked if needed and a long neutral spine.", { motion: "seated-pike-breathing-reset" }) },
+];
 const correctedMotionIds = new Set([
   "pike-shift", "support-hold", "bent-compression", "hollow-tuck", "wall-l",
   "support-shrugs", "box-pike", "tuck-support", "straight-compression",
@@ -470,12 +564,14 @@ const normalizeExercise = (seed: ExerciseSeed, introduced: Exercise["introduced"
 
 const excludedV2Ids = new Set([
   "kneeling-lean", "cross-press", "boat-hold", "plank-tap-out", "mountain-climber", "plank-knee-elbow", "frog-prep",
+  "reverse-plank-hold",
   "prayer-wrist-waves", "inchworm-pike-walkout", "crossbody-mountain-climber", "frog-stand-weight-shift", "forearm-pronator-stretch", "crossbody-shoulder-stretch", "supine-thoracic-opener",
 ]);
 export const exercises: Record<string, Exercise> = Object.fromEntries([
   ...existing.filter((item) => !excludedV2Ids.has(item.id)).map((item) => [item.id, normalizeExercise(item, "original")] as const),
   ...additions.filter((item) => !excludedV2Ids.has(item.id)).map((item) => [item.id, normalizeExercise(item, "v2")] as const),
-  ...v2ExpansionSeeds.map((item) => [item.id, normalizeExercise(item, "v2")] as const),
+  ...v2ExpansionSeeds.filter((item) => !excludedV2Ids.has(item.id)).map((item) => [item.id, normalizeExercise(item, "v2")] as const),
+  ...canonicalCompletionSeeds.map((item) => [item.id, normalizeExercise(item, "v2")] as const),
 ]);
 
 // V2 equipment audit: retain stable IDs for saved plans, but remove the old
@@ -493,35 +589,93 @@ for (const exercise of Object.values(exercises)) {
   exercise.progressionStage ??= exercise.level === "L3" ? 3 : exercise.level === "L2" ? 2 : 1;
   exercise.customFocusTags ??= [exercise.primaryFocus, ...exercise.secondaryFocus];
   exercise.loadTags ??= exercise.level === "L3" ? ["wrist_medium", "core_medium"] : ["low_fatigue"];
-  exercise.how ??= `Start in the demonstrated ${exercise.name} position, move slowly through the clean range, then return under control.`;
+  exercise.how ??= exercise.media.specification;
   exercise.focus ??= exercise.cues[0];
-  exercise.avoid ??= exercise.cues[1];
+  exercise.avoid ??= exercise.category === "Warm-up"
+    ? "Avoid bouncing, forced end range or loading through numbness or sharp pain."
+    : exercise.category === "Cooldown"
+      ? "Avoid bouncing or forcing a deeper stretch; use an easy breathing range."
+      : exercise.category === "Handstand"
+        ? "Avoid rushed entries, passive shoulders or continuing after the exit path becomes uncertain."
+        : exercise.primaryFocus === "compression" || exercise.primaryFocus === "lsit"
+          ? "Avoid rocking the torso, swinging the legs or bending the knees beyond the prescribed variation."
+          : exercise.primaryFocus === "planche" || exercise.category === "Calisthenics"
+            ? "Avoid losing active shoulders or the prescribed elbow position; reset before leverage changes the shape."
+            : "Avoid using momentum or letting the ribs and pelvis leave the demonstrated trunk position.";
   exercise.safety ??= "Stop for sharp or escalating pain and reset before form breaks.";
-  exercise.targetType ??= exercise.target.toLowerCase().includes("hold") || exercise.target.toLowerCase().includes("second") ? "hold" : exercise.target.toLowerCase().includes("attempt") ? "attempts" : "reps";
+  exercise.targetType ??= exercise.category === "Cooldown" || exercise.media.kind === "static" || exercise.target.toLowerCase().includes("hold") || exercise.target.toLowerCase().includes("second") ? "hold" : exercise.target.toLowerCase().includes("attempt") ? "attempts" : "reps";
+  const targetNumbers = exercise.target.match(/\d+/gu)?.map(Number) ?? [];
+  exercise.targetMin ??= targetNumbers[0] ?? 1;
+  exercise.targetMax ??= targetNumbers[1] ?? targetNumbers[0] ?? 1;
   if (exercise.id === "box-pike") exercise.name = "Wall Inverted-L Alignment Hold";
   if (exercise.id === "box-toe-light") exercise.name = "Wall Inverted-L Foot Lightener";
   if (exercise.id === "box-pike-scapular-shrugs") exercise.name = "Wall Inverted-L Scapular Shrugs";
   if (exercise.id === "box-pike-shoulder-shift") exercise.name = "Wall Inverted-L Shoulder Shift";
   if (exercise.id === "box-pike-one-leg-line-lift") exercise.name = "Wall Inverted-L One-Leg Line Lift";
+  // The production UI uses the audited, owned vector rig for every movement.
+  // Legacy GIF paths remain in source history only and never ship as active media.
+  if (exercise.media.motion) {
+    exercise.media.status = "ready";
+    delete exercise.media.src;
+  }
 }
 
+// These canonical Foundation movements are intentionally available from L1;
+// readiness gates, not the whole-session level, protect their loaded variants.
+for (const id of ["box-toe-light", "wall-elevation", "wall-kickup", "plank-tap", "foot-assisted-lsit", "hollow-reach", "supported-knee-raise"]) {
+  const exercise = exercises[id];
+  if (!exercise) continue;
+  exercise.level = "L1";
+  exercise.availableLevels = ["L1", "L2", "L3"];
+}
+const addCanonicalBlock = (id: string, block: WorkoutBlock) => {
+  const exercise = exercises[id];
+  if (!exercise || exercise.eligibleBlocks.includes(block)) return;
+  exercise.eligibleBlocks = [...exercise.eligibleBlocks, block];
+  exercise.blocks = exercise.eligibleBlocks;
+};
+const addCanonicalDay = (id: string, day: DayNumber) => {
+  const exercise = exercises[id];
+  if (!exercise) return;
+  const current = exercise.compatibleDays === "all" ? allDays : exercise.compatibleDays;
+  const next = Array.from(new Set([...current, day])).sort() as DayNumber[];
+  exercise.compatibleDays = next;
+  exercise.days = next;
+};
+addCanonicalBlock("grounded-side-exit-rehearsal", "pre");
+for (const id of ["foot-assisted-lsit", "alternating-lsit-extension", "full-lsit-attempt", "one-leg-lsit-hold", "parallette-pike-pushup", "eccentric-pike-pushup"]) addCanonicalBlock(id, "core");
+for (const [id, day] of [
+  ["chest-wall-line", 1], ["chest-wall-alternating-toe-peel", 1], ["heel-pullaway", 2],
+  ["split-leg-wall-pullaway", 2], ["long-lever-hollow-hold", 2], ["kickup-stop-short-drill", 4],
+  ["hollow-flutter-kicks", 4], ["wall-kickup", 4],
+] as Array<[string, DayNumber]>) addCanonicalDay(id, day);
+
 export const skillProgressionPaths = [
-  ["dead-bug", "deadbug-heel-tap", "deadbug-double-leg-lower", "hollow-tuck", "hollow-one-leg", "long-lever-hollow-hold", "hollow-rocks", "hollow-scissor-kicks"],
-  ["support-hold", "support-shrugs", "tuck-support", "supported-knee-raise", "alternating-lsit-extension", "one-leg-lsit-hold", "full-lsit-attempt"],
-  ["bent-compression", "single-leg-compression", "alternating-pike-leg-lift", "straight-compression", "seated-pike-compression-pulses", "straddle-compression-lift"],
-  ["pike-shift", "wall-l", "partial-wall-walk", "chest-wall-line", "wall-kickup", "heel-pullaway", "split-leg-wall-pullaway", "freestanding-parallette-kickup"],
-  ["controlled-parallette-pushup", "parallette-pike-pushup", "eccentric-pike-pushup"],
-  ["parallette-forward-lean-hold", "planche-lean-hold", "frog-stand-hold", "foot-assisted-tuck-planche"],
+  { label: "Wrist & Loading", customFocus: "mobility", steps: ["wrist-circles", "wrist-palms", "fingertip-wrist-pulses"] },
+  { label: "Straight-Arm Support", customFocus: "support", steps: ["support-hold", "support-shrugs", "tuck-support", "supported-knee-raise"] },
+  { label: "Hollow / Anti-Extension", customFocus: "core", steps: ["dead-bug", "deadbug-heel-tap", "deadbug-double-leg-lower", "hollow-tuck", "hollow-one-leg", "long-lever-hollow-hold", "hollow-rocks", "hollow-scissor-kicks"] },
+  { label: "Pelvic Control", customFocus: "core", steps: ["reverse-crunch", "bent-knee-leg-lower", "straight-leg-raise", "controlled-v-up"] },
+  { label: "Anti-Rotation", customFocus: "core", steps: ["side-plank", "forearm-side-plank", "side-plank-hip-lift", "side-plank-reach-through", "side-plank-star-hold"] },
+  { label: "Compression", customFocus: "compression", steps: ["bent-compression", "single-leg-compression", "alternating-pike-leg-lift", "straight-compression", "seated-pike-compression-pulses", "straddle-compression-lift"] },
+  { label: "L-Sit", customFocus: "lsit", steps: ["foot-assisted-lsit", "one-foot-assisted-lsit", "tuck-support-knee-extensions", "alternating-lsit-extension", "one-leg-lsit-hold", "full-lsit-attempt"] },
+  { label: "Handstand Line", customFocus: "handstand", steps: ["pike-shift", "wall-l", "partial-wall-walk", "chest-wall-line", "chest-wall-alternating-toe-peel"] },
+  { label: "Handstand Entry", customFocus: "handstand", steps: ["standing-kickup-line-rehearsal", "wall-kickup", "kickup-stop-short-drill", "freestanding-parallette-kickup"] },
+  { label: "Handstand Balance", customFocus: "handstand", steps: ["wall-facing-handstand-weight-shift", "heel-pullaway", "split-leg-wall-pullaway", "freestanding-parallette-kickup"] },
+  { label: "Handstand Exit", customFocus: "handstand", steps: ["grounded-side-exit-rehearsal", "wall-handstand-side-exit", "floor-side-exit-practice"] },
+  { label: "Planche Foundation", customFocus: "planche", steps: ["parallette-forward-lean-hold", "planche-lean-hold", "planche-lean-toe-lightener", "foot-assisted-tuck-planche", "floor-tuck-planche-attempt"] },
+  { label: "Pushing Strength", customFocus: "pushing", steps: ["knee-push-up", "floor-push-up", "controlled-parallette-pushup", "tempo-floor-push-up", "pseudo-planche-parallette-pushup"] },
+  { label: "Overhead Strength", customFocus: "pushing", steps: ["pike-elevation", "shallow-range-pike-pushup", "floor-pike-push-up", "parallette-pike-pushup", "eccentric-pike-pushup"] },
+  { label: "Support Transitions", customFocus: "support", steps: ["support-to-tuck-transition", "tuck-to-one-leg-lsit-transition", "tuck-to-lsit-transition"] },
 ] as const;
 for (const path of skillProgressionPaths) {
-  path.forEach((id, index) => {
+  path.steps.forEach((id, index) => {
     const exercise = exercises[id];
     if (!exercise) return;
-    exercise.progressionFamily = path[0];
+    exercise.progressionFamily = path.label;
     exercise.progressionStage = index + 1;
-    exercise.easierId = index > 0 ? path[index - 1] : undefined;
-    exercise.harderId = index < path.length - 1 ? path[index + 1] : undefined;
-    exercise.prerequisites = index > 0 ? [path[index - 1]] : [];
+    exercise.easierId = index > 0 ? path.steps[index - 1] : undefined;
+    exercise.harderId = index < path.steps.length - 1 ? path.steps[index + 1] : undefined;
+    exercise.prerequisites = index > 0 ? [path.steps[index - 1]] : [];
   });
 }
 
@@ -539,7 +693,7 @@ const labTemplate = (
   a: Prescription,
   b: Prescription,
   intensityNote?: string,
-): CalisthenicsLab => ({ label, a, b, sequence: ["a", "b", "a", "b", "a"], ...(intensityNote ? { intensityNote } : {}) });
+): CalisthenicsLab => ({ label, a, b, sequence: ["selected", "selected", "selected", "selected", "selected"], ...(intensityNote ? { intensityNote } : {}) });
 
 export const universalWarmup: [Prescription, Prescription, Prescription] = [
   rx("wrist-palms"),
@@ -561,9 +715,9 @@ export const warmupsByVariant: Record<`${DayNumber}-${DifficultyLevel}`, [Prescr
   "2-L1": [rx("wrist-circles"), rx("wall-slides"), rx("plank-pike")],
   "2-L2": [rx("wrist-circles"), rx("wall-slides"), rx("plank-pike")],
   "2-L3": [rx("fingertip-wrist-pulses"), rx("wall-slides"), rx("plank-pike")],
-  "3-L1": [rx("wrist-circles"), rx("kneeling-thoracic-rotation"), rx("plank-pike")],
-  "3-L2": [rx("wrist-circles"), rx("kneeling-thoracic-rotation"), rx("plank-pike")],
-  "3-L3": [rx("wrist-circles"), rx("kneeling-thoracic-rotation"), rx("plank-pike")],
+  "3-L1": [rx("wrist-circles"), rx("kneeling-thoracic-rotation"), rx("down-dog-scapular-shrugs")],
+  "3-L2": [rx("wrist-circles"), rx("kneeling-thoracic-rotation"), rx("down-dog-scapular-shrugs")],
+  "3-L3": [rx("wrist-circles"), rx("kneeling-thoracic-rotation"), rx("down-dog-scapular-shrugs")],
   "4-L1": [rx("wrist-palms"), rx("wall-slides"), rx("scap-pushup")],
   "4-L2": [rx("wrist-palms"), rx("wall-slides"), rx("scap-pushup")],
   "4-L3": [rx("fingertip-wrist-pulses"), rx("wall-slides"), rx("scap-pushup")],
@@ -574,8 +728,8 @@ export const warmupsByVariant: Record<`${DayNumber}-${DifficultyLevel}`, [Prescr
 
 const cooldowns: Record<DayNumber, [Prescription, Prescription]> = {
   1: [rx("wrist-flexor-rock"), rx("child-reach")],
-  2: [rx("wrist-extensor-rock"), rx("upper-back-reach")],
-  3: [rx("wrist-flexor-rock"), rx("thread-needle")],
+  2: [rx("wrist-extensor-rock"), rx("seated-pike-breathing-reset")],
+  3: [rx("thread-needle"), rx("supine-90-90-breathing-reset")],
   4: [rx("wrist-extensor-rock"), rx("lat-parallette")],
   5: [rx("wrist-flexor-rock"), rx("chest-opener")],
 };
@@ -589,26 +743,26 @@ export const workouts: WorkoutDay[] = [
     levels: {
       L1: levelTemplate(
         [rx("pike-shift"), rx("support-hold")],
-        [rx("hollow-tuck"), rx("dead-bug"), rx("kneeling-plank-tap"), rx("bent-compression")],
+        [rx("hollow-tuck"), rx("deadbug-heel-tap"), rx("plank-tap"), rx("bent-compression")],
         rx("wall-l"),
         cooldowns[1],
       ),
       L2: levelTemplate(
-        [rx("parallette-forward-lean-hold"), rx("pike-scapular-shrugs")],
-        [rx("long-lever-hollow-hold"), rx("deadbug-double-leg-lower"), rx("plank-tap"), rx("seated-pike-compression-pulses")],
-        rx("box-toe-light"),
+        [rx("pike-shift"), rx("pike-elevation")],
+        [rx("long-lever-hollow-hold"), rx("deadbug-double-leg-lower"), rx("plank-tap"), rx("alternating-pike-leg-lift")],
+        rx("chest-wall-line"),
         cooldowns[1],
       ),
       L3: levelTemplate(
-        [rx("support-shrugs", "10–12 controlled reps"), rx("box-pike-shoulder-shift")],
-        [rx("hollow-scissor-kicks"), rx("plank-knee-drive-isometric"), rx("straddle-compression-lift"), rx("side-plank-reach-through")],
-        rx("parallette-kickup-to-wall"),
-        cooldowns[1],
+        [rx("support-shrugs"), rx("pike-elevation")],
+        [rx("hollow-scissor-kicks"), rx("long-lever-parallette-plank"), rx("side-plank-reach-through"), rx("straddle-compression-lift")],
+        rx("chest-wall-alternating-toe-peel"),
+        [rx("wrist-flexor-rock"), rx("lat-parallette")],
       ),
     },
     labs: {
-      L2: labTemplate("Support & L-Sit", rx("foot-assisted-lsit"), rx("controlled-parallette-pushup")),
-      L3: labTemplate("L-Sit & Planche Push", rx("full-lsit-attempt"), rx("pseudo-planche-parallette-pushup")),
+      L2: labTemplate("Planche Foundation", rx("planche-lean-hold"), rx("foot-assisted-lsit")),
+      L3: labTemplate("Straddle Planche", rx("straddle-planche-lean"), rx("pseudo-planche-parallette-pushup")),
     },
   },
   {
@@ -618,27 +772,27 @@ export const workouts: WorkoutDay[] = [
     intensity: "Strong",
     levels: {
       L1: levelTemplate(
-        [rx("support-shrugs"), rx("box-pike")],
-        [rx("tuck-support"), rx("bent-compression"), rx("deadbug-heel-tap"), rx("side-plank")],
-        rx("wall-l"),
+        [rx("support-shrugs"), rx("support-hold")],
+        [rx("foot-assisted-lsit"), rx("single-leg-compression"), rx("one-foot-assisted-lsit"), rx("side-plank")],
+        rx("box-toe-light"),
         cooldowns[2],
       ),
       L2: levelTemplate(
-        [rx("pike-alternating-toe-float"), rx("box-pike-scapular-shrugs")],
-        [rx("straight-compression"), rx("seated-pike-compression-pulses"), rx("alternating-pike-leg-lift"), rx("side-plank-hip-lift")],
-        rx("wall-facing-handstand-weight-shift"),
+        [rx("support-shrugs"), rx("support-hold")],
+        [rx("tuck-support"), rx("tuck-support-knee-extensions"), rx("alternating-lsit-extension"), rx("side-plank-hip-lift")],
+        rx("heel-pullaway"),
         cooldowns[2],
       ),
       L3: levelTemplate(
-        [rx("box-pike-shoulder-shift"), rx("pike-scapular-shrugs", "10–12 controlled reps")],
-        [rx("straddle-compression-lift"), rx("hollow-to-tuck-rock"), rx("bear-hover-knee-tap"), rx("side-plank-reach-through")],
-        rx("chest-wall-alternating-toe-peel"),
+        [rx("support-shrugs"), rx("support-hold")],
+        [rx("full-lsit-attempt"), rx("straight-compression"), rx("long-lever-hollow-hold"), rx("side-plank-reach-through")],
+        rx("split-leg-wall-pullaway"),
         cooldowns[2],
       ),
     },
     labs: {
-      L2: labTemplate("Compression Transitions", rx("alternating-lsit-extension"), rx("tuck-to-one-leg-lsit-transition")),
-      L3: labTemplate("L-Sit & Straddle", rx("full-lsit-attempt"), rx("straddle-lsit-compression-prep")),
+      L2: labTemplate("L-Sit Transition", rx("tuck-to-one-leg-lsit-transition"), rx("support-to-tuck-transition")),
+      L3: labTemplate("Full L-Sit Transition", rx("tuck-to-lsit-transition"), rx("full-lsit-attempt")),
     },
   },
   {
@@ -648,27 +802,27 @@ export const workouts: WorkoutDay[] = [
     intensity: "Light",
     levels: {
       L1: levelTemplate(
-        [rx("pike-shift"), rx("partial-wall-walk", "2–4 controlled climbs")],
-        [rx("hollow-one-leg"), rx("long-lever-parallette-plank", "20–25 second hold"), rx("dead-bug"), rx("kneeling-plank-tap")],
-        rx("chest-wall-line", "15–20 second hold"),
+        [rx("grounded-side-exit-rehearsal"), rx("pike-shift")],
+        [rx("dead-bug"), rx("side-plank"), rx("hollow-one-leg"), rx("deadbug-heel-tap")],
+        rx("chest-wall-line"),
         cooldowns[3],
       ),
       L2: levelTemplate(
-        [rx("bear-to-pike-shoulder-load"), rx("box-pike-scapular-shrugs", "6–8 reps")],
-        [rx("hollow-to-tuck-rock", "6–8 reps"), rx("plank-saw", "6–8 slow reps"), rx("deadbug-double-leg-lower", "5–6 reps"), rx("side-plank-hip-lift", "5–6 per side")],
-        rx("wall-facing-handstand-weight-shift", "6–8 small shifts"),
+        [rx("grounded-side-exit-rehearsal"), rx("pike-shift")],
+        [rx("dead-bug"), rx("bear-hover-knee-tap"), rx("side-plank-hip-lift"), rx("hollow-one-leg")],
+        rx("wall-facing-handstand-weight-shift"),
         cooldowns[3],
       ),
       L3: levelTemplate(
-        [rx("box-pike-shoulder-shift", "6–8 slow shifts"), rx("box-pike-one-leg-line-lift", "3–4 lifts per side")],
-        [rx("hollow-scissor-kicks", "10–12 total changes"), rx("deadbug-double-leg-lower", "5–6 reps"), rx("side-plank-reach-through", "4–5 per side"), rx("seated-pike-compression-pulses", "8–10 pulses")],
-        rx("chest-wall-alternating-toe-peel", "4–6 peels per side"),
+        [rx("grounded-side-exit-rehearsal"), rx("pike-shift")],
+        [rx("long-lever-hollow-hold"), rx("bear-hover-knee-tap"), rx("side-plank-reach-through"), rx("deadbug-double-leg-lower")],
+        rx("wall-facing-handstand-weight-shift"),
         cooldowns[3],
       ),
     },
     labs: {
-      L2: labTemplate("Technique Support", rx("frog-stand-hold", "8–12 second hold"), rx("foot-assisted-lsit", "15–20 second hold"), "Technique intensity: use the lower target and stop well before fatigue."),
-      L3: labTemplate("Light Skill Shapes", rx("one-leg-lsit-hold", "6–8 seconds per side"), rx("planche-lean-hold", "12–15 second hold"), "Technique intensity: use a shorter lean and leave at least two clean reps in reserve."),
+      L2: labTemplate("Parallette Crane", rx("frog-stand-hold"), rx("foot-assisted-lsit"), "Technique intensity: use the lower target and stop well before fatigue."),
+      L3: labTemplate("Crane One-Knee Float", rx("floor-crane-one-knee-float"), rx("planche-lean-hold"), "Technique intensity: keep a safe toe landing available and leave two clean attempts in reserve."),
     },
   },
   {
@@ -678,27 +832,27 @@ export const workouts: WorkoutDay[] = [
     intensity: "Strong",
     levels: {
       L1: levelTemplate(
-        [rx("bear-to-pike-shoulder-load"), rx("pike-elevation")],
-        [rx("bent-compression"), rx("deadbug-heel-tap"), rx("hollow-tuck"), rx("dead-bug")],
-        rx("wall-l"),
-        cooldowns[4],
-      ),
-      L2: levelTemplate(
-        [rx("pike-scapular-shrugs"), rx("box-pike-shoulder-shift")],
-        [rx("supported-knee-raise"), rx("plank-tap"), rx("long-lever-hollow-hold"), rx("alternating-pike-leg-lift")],
+        [rx("pike-elevation"), rx("bear-to-pike-shoulder-load")],
+        [rx("shallow-range-pike-pushup"), rx("hollow-reach"), rx("supported-knee-raise"), rx("hollow-tuck")],
         rx("wall-elevation"),
         cooldowns[4],
       ),
+      L2: levelTemplate(
+        [rx("pike-elevation"), rx("full-wall-walk")],
+        [rx("parallette-pike-pushup"), rx("hollow-flutter-kicks"), rx("supported-knee-raise"), rx("long-lever-parallette-plank")],
+        rx("wall-kickup"),
+        cooldowns[4],
+      ),
       L3: levelTemplate(
-        [rx("pike-alternating-toe-float"), rx("box-pike-one-leg-line-lift")],
-        [rx("straddle-compression-lift"), rx("plank-knee-drive-isometric"), rx("hollow-scissor-kicks"), rx("side-plank-reach-through")],
-        rx("parallette-kickup-to-wall"),
+        [rx("pike-elevation"), rx("full-wall-walk")],
+        [rx("eccentric-pike-pushup"), rx("hollow-scissor-kicks"), rx("straight-compression"), rx("long-lever-parallette-plank")],
+        rx("kickup-stop-short-drill"),
         cooldowns[4],
       ),
     },
     labs: {
-      L2: labTemplate("Pike Push & Planche Lean", rx("parallette-pike-pushup"), rx("planche-lean-hold")),
-      L3: labTemplate("Overhead & Tuck Planche", rx("eccentric-pike-pushup"), rx("foot-assisted-tuck-planche")),
+      L2: labTemplate("Planche Foundation", rx("planche-lean-hold"), rx("parallette-pike-pushup")),
+      L3: labTemplate("Planche Pushing", rx("pseudo-planche-parallette-pushup"), rx("eccentric-pike-pushup")),
     },
   },
   {
@@ -708,27 +862,27 @@ export const workouts: WorkoutDay[] = [
     intensity: "Focused",
     levels: {
       L1: levelTemplate(
-        [rx("standing-kickup-line-rehearsal"), rx("chest-wall-line")],
-        [rx("tuck-support", "10–20 second hold"), rx("hollow-one-leg"), rx("single-leg-compression"), rx("bear-hover-knee-tap")],
-        rx("grounded-side-exit-rehearsal"),
+        [rx("standing-kickup-line-rehearsal"), rx("grounded-side-exit-rehearsal")],
+        [rx("tuck-support"), rx("hollow-one-leg"), rx("single-leg-compression"), rx("plank-tap")],
+        rx("wall-kickup"),
         cooldowns[5],
       ),
       L2: levelTemplate(
-        [rx("parallette-kickup-to-wall"), rx("wall-facing-handstand-weight-shift")],
-        [rx("tuck-support", "12–20 second hold"), rx("hollow-to-tuck-rock"), rx("seated-pike-compression-pulses"), rx("plank-tap")],
-        rx("chest-wall-alternating-toe-peel"),
+        [rx("standing-kickup-line-rehearsal"), rx("grounded-side-exit-rehearsal")],
+        [rx("alternating-lsit-extension"), rx("hollow-rocks"), rx("seated-pike-compression-pulses"), rx("plank-tap")],
+        rx("heel-pullaway"),
         cooldowns[5],
       ),
       L3: levelTemplate(
-        [rx("kickup-stop-short-drill"), rx("split-leg-wall-pullaway")],
-        [rx("straddle-compression-lift"), rx("hollow-scissor-kicks"), rx("alternating-pike-leg-lift"), rx("side-plank-reach-through")],
+        [rx("standing-kickup-line-rehearsal"), rx("grounded-side-exit-rehearsal")],
+        [rx("one-leg-lsit-hold"), rx("hollow-scissor-kicks"), rx("straddle-compression-lift"), rx("side-plank-reach-through")],
         rx("freestanding-parallette-kickup"),
         cooldowns[5],
       ),
     },
     labs: {
-      L2: labTemplate("Balance & Transition", rx("frog-stand-hold"), rx("tuck-to-one-leg-lsit-transition")),
-      L3: labTemplate("Planche & L-Sit Transition", rx("planche-lean-toe-lightener"), rx("tuck-to-lsit-transition")),
+      L2: labTemplate("Support Transition", rx("support-to-tuck-transition"), rx("tuck-to-one-leg-lsit-transition")),
+      L3: labTemplate("L-Sit Transition", rx("tuck-to-lsit-transition"), rx("full-lsit-attempt")),
     },
   },
 ];
