@@ -373,8 +373,14 @@ const v2ExpansionNames: Record<string, string> = {
   "basic-two-foot-bounce": "Basic Two-Foot Bounce", "alternate-foot-step": "Alternate-Foot Step", "boxer-step": "Boxer Step", "side-to-side-ski-hop": "Side-to-Side Ski Hop", "forward-back-hop": "Forward-Back Hop", "high-knee-rope": "High-Knee Rope", "fast-single-under-cadence": "Fast Single-Under Cadence", "recovery-bounce": "Recovery Bounce", "rope-step-through-mobility": "Rope Step-Through Mobility",
 };
 const v2ExpansionIds = Object.keys(v2ExpansionNames);
+const ropeExerciseIds = new Set([
+  "easy-rope-bounce", "basic-two-foot-bounce", "alternate-foot-step", "boxer-step",
+  "side-to-side-ski-hop", "forward-back-hop", "high-knee-rope",
+  "fast-single-under-cadence", "recovery-bounce", "rope-step-through-mobility",
+]);
+const isRopeExercise = (id: string) => ropeExerciseIds.has(id);
 const v2ExpansionFocus = (id: string): Focus => {
-  if (id.includes("rope" ) || id.includes("bounce") || id.includes("hop") || id.includes("step")) return "support";
+  if (isRopeExercise(id)) return id === "rope-step-through-mobility" ? "shoulder-mobility" : "support";
   if (id.includes("handstand") || id.includes("wall-") || id.includes("kick-up") || id.includes("kickup")) return id.includes("exit") ? "exit" : id.includes("kick") ? "entry" : "line";
   if (id.includes("compression") || id.includes("pike-lift") || id.includes("v-sit") || id.includes("leg-lift")) return "compression";
   if (id.includes("plank") || id.includes("bird") || id.includes("bear") || id.includes("bridge")) return id.includes("side") || id.includes("reach") ? "anti-rotation" : "anti-extension";
@@ -385,20 +391,21 @@ const v2ExpansionCategory = (id: string): Category => {
   if (id.startsWith("wall-") || id.startsWith("prone-handstand") || id.includes("kick-up") || id.includes("freestanding") || id.includes("side-exit")) return "Handstand";
   if (id.startsWith("floor-") && (id.includes("push") || id.includes("planche") || id.includes("frog") || id.includes("crane"))) return "Calisthenics";
   if (id.includes("stretch") || id.includes("twist") || id.includes("sphinx")) return "Cooldown";
-  if (id.includes("rope") || id.includes("bounce") || id.includes("hop") || id.includes("step")) return "Warm-up";
+  if (isRopeExercise(id)) return "Warm-up";
   if (id.includes("compression") || id.includes("pike-lift") || id.includes("v-sit") || id.includes("crunch") || id.includes("toe-reach") || id.includes("jackknife") || id.includes("leg-raise") || id.includes("tuck-up")) return "Abs";
   return "Core";
 };
 const v2ExpansionLevel = (id: string): ExerciseLevel => {
+  if (["easy-rope-bounce", "recovery-bounce"].includes(id)) return "ALL";
   if (["controlled-v-up", "side-plank-star-hold", "floor-freestanding-kick-up", "floor-freestanding-balance-attempt", "floor-tuck-planche-attempt", "floor-crane-one-knee-float"].includes(id)) return "L3";
-  if (["rkc-plank", "plank-reach", "plank-leg-lift", "forearm-plank-body-saw", "bird-dog-knee-to-elbow", "bear-crawl-step", "straight-leg-raise", "alternating-jackknife", "bicycle-crunch-slow", "side-plank-knee-drive", "single-leg-glute-bridge", "floor-double-leg-pike-lift", "floor-pike-push-up", "floor-planche-lean", "tempo-floor-push-up"].includes(id)) return "L2";
+  if (["rkc-plank", "plank-reach", "plank-leg-lift", "forearm-plank-body-saw", "bird-dog-knee-to-elbow", "bear-crawl-step", "straight-leg-raise", "alternating-jackknife", "bicycle-crunch-slow", "side-plank-knee-drive", "single-leg-glute-bridge", "floor-double-leg-pike-lift", "floor-pike-push-up", "floor-planche-lean", "tempo-floor-push-up", "boxer-step", "side-to-side-ski-hop", "forward-back-hop", "high-knee-rope", "fast-single-under-cadence"].includes(id)) return "L2";
   return "L1";
 };
 const v2ExpansionSeeds: ExerciseSeed[] = v2ExpansionIds.map((id) => {
   const category = v2ExpansionCategory(id);
   const focus = v2ExpansionFocus(id);
   const level = v2ExpansionLevel(id);
-  const isRope = id.includes("rope") || id.includes("bounce") || id.includes("hop") || id.includes("step");
+  const isRope = isRopeExercise(id);
   const block: WorkoutBlock = category === "Warm-up" ? "warmup" : category === "Cooldown" ? "cooldown" : category === "Handstand" ? "handstand" : category === "Calisthenics" ? "lab" : "core";
   const equipment: Equipment[] = isRope ? ["rope", "floor"] : category === "Handstand" && id.includes("wall") ? ["wall", "floor"] : category === "Calisthenics" && !id.startsWith("floor-") ? ["parallettes", "floor"] : ["floor"];
   return {
