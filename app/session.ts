@@ -45,6 +45,7 @@ export type ExerciseCompatibility = {
   availableLevels?: readonly SessionLevel[];
   eligibleBlocks: readonly TrainingBlock[];
   primaryFocus: PrimaryFocus;
+  secondaryFocus?: readonly PrimaryFocus[];
   /** Omit or use an empty array when a drill is valid on every day. */
   compatibleDays?: readonly number[] | "all";
   gate?: GateId;
@@ -94,6 +95,7 @@ export type SessionSlot = Readonly<{
   position: number;
   defaultExerciseId: ExerciseId;
   primaryFocus: PrimaryFocus;
+  purposeFocuses?: readonly PrimaryFocus[];
 }>;
 
 export type IntervalTiming = Readonly<{ work: number; rest: number }>;
@@ -227,22 +229,45 @@ const focusGroups: readonly (readonly string[])[] = [
   ["balance", "grip"],
 ];
 
+/** Reset swaps stay within the same anatomical or movement purpose instead of
+ * treating every mobility drill as interchangeable. */
+const resetFocusGroups: readonly (readonly string[])[] = [
+  ["wrist", "grip"],
+  ["shoulder-mobility", "thoracic-reset"],
+  ["hamstring-mobility", "compression", "lsit"],
+  ["hip-mobility", "pelvic-control", "posterior-chain"],
+  ["adductor-mobility", "compression"],
+  ["breathing", "thoracic-reset"],
+  ["scapular", "support", "overhead-load", "line"],
+];
+
 /** Same-role families let the swap picker add useful variety without mixing
  * unrelated blocks or difficulty. Exact-focus matches still sort first. */
-const focusCompatible = (exerciseFocus: string, slotFocus: string): boolean =>
-  exerciseFocus === slotFocus || focusGroups.some((group) =>
+const focusCompatible = (exerciseFocus: string, slotFocus: string, reset: boolean): boolean =>
+  exerciseFocus === slotFocus || (reset ? resetFocusGroups : focusGroups).some((group) =>
     group.includes(exerciseFocus) && group.includes(slotFocus));
 
 export const isExerciseStructurallyCompatible = (
   exercise: ExerciseCompatibility,
-  slot: Pick<SessionSlot, "block" | "primaryFocus">,
+  slot: Pick<SessionSlot, "block" | "primaryFocus" | "purposeFocuses">,
   day: number,
-): boolean =>
-  exercise.eligibleBlocks.includes(slot.block) &&
-  // Lab is an explicitly selected extra skill track. Unlike a programmed
-  // core slot, its purpose may change from L-sit to planche or pushing.
-  (slot.block === "lab" || focusCompatible(exercise.primaryFocus, slot.primaryFocus)) &&
-  supportsDay(exercise, day);
+): boolean => {
+  const reset = slot.block === "warmup" || slot.block === "cooldown";
+  const exerciseFocuses = [exercise.primaryFocus, ...(exercise.secondaryFocus ?? [])];
+  const slotFocuses = [slot.primaryFocus, ...(slot.purposeFocuses ?? [])];
+  // Breathing accompanies many cooldowns but must not, by itself, make a hip
+  // stretch equivalent to a hamstring, wrist or shoulder reset.
+  const meaningfulExerciseFocuses = reset && exerciseFocuses.some((focus) => focus !== "breathing")
+    ? exerciseFocuses.filter((focus) => focus !== "breathing") : exerciseFocuses;
+  const meaningfulSlotFocuses = reset && slotFocuses.some((focus) => focus !== "breathing")
+    ? slotFocuses.filter((focus) => focus !== "breathing") : slotFocuses;
+  return exercise.eligibleBlocks.includes(slot.block) &&
+    // Lab is an explicitly selected extra skill track. Unlike a programmed
+    // core slot, its purpose may change from L-sit to planche or pushing.
+    (slot.block === "lab" || meaningfulExerciseFocuses.some((exerciseFocus) =>
+      meaningfulSlotFocuses.some((slotFocus) => focusCompatible(exerciseFocus, slotFocus, reset)))) &&
+    supportsDay(exercise, day);
+};
 
 export const isExerciseCompatible = (
   exercise: ExerciseCompatibility,
@@ -321,6 +346,7 @@ const makeSlots = (
       position,
       defaultExerciseId,
       primaryFocus: exercise.primaryFocus,
+      purposeFocuses: [exercise.primaryFocus, ...(exercise.secondaryFocus ?? [])],
     };
   });
 };

@@ -59,6 +59,54 @@ const focusMap: Record<CustomFocus, Focus[]> = {
   mobility: ["wrist", "grip", "shoulder-mobility", "hamstring-mobility", "hip-mobility", "adductor-mobility", "thoracic-reset", "breathing"],
   conditioning: ["conditioning", "anti-extension", "pelvic-control"],
 };
+
+export type TrainingDemand = "wrist" | "shoulder" | "compression" | "hips" | "trunk" | "conditioning";
+export type TrainingDemandProfile = Record<TrainingDemand, number>;
+
+const demandOrder: TrainingDemand[] = ["wrist", "shoulder", "compression", "hips", "trunk", "conditioning"];
+const emptyDemandProfile = (): TrainingDemandProfile => ({ wrist: 0, shoulder: 0, compression: 0, hips: 0, trunk: 0, conditioning: 0 });
+const demandGroupsForFocus = (focus: Focus): TrainingDemand[] => {
+  if (focus === "wrist" || focus === "grip") return ["wrist"];
+  if (["shoulder-mobility", "scapular", "overhead-load", "line", "entry", "exit", "balance", "horizontal-push", "vertical-push"].includes(focus)) return ["shoulder"];
+  if (focus === "support" || focus === "planche") return ["wrist", "shoulder"];
+  if (focus === "compression" || focus === "lsit" || focus === "hamstring-mobility") return ["compression"];
+  if (focus === "adductor-mobility") return ["compression", "hips"];
+  if (focus === "hip-mobility") return ["hips"];
+  if (focus === "pelvic-control" || focus === "posterior-chain") return ["hips", "trunk"];
+  if (focus === "thoracic-reset") return ["shoulder", "trunk"];
+  if (focus === "conditioning") return ["conditioning", "trunk"];
+  return ["trunk"];
+};
+
+export const demandGroupsForExercise = (exercise: Exercise): TrainingDemand[] =>
+  [...new Set([exercise.primaryFocus, ...exercise.secondaryFocus].flatMap(demandGroupsForFocus))];
+const primaryDemandGroupsForExercise = (exercise: Exercise): TrainingDemand[] =>
+  demandGroupsForFocus(exercise.primaryFocus);
+
+/** Aggregate the actual work selected for the middle of a Custom Session. */
+export const demandProfileForExercises = (selected: readonly Exercise[]): TrainingDemandProfile => {
+  const profile = emptyDemandProfile();
+  const add = (focus: Focus, weight: number) => demandGroupsForFocus(focus).forEach((group) => { profile[group] += weight; });
+  for (const exercise of selected) {
+    add(exercise.primaryFocus, 6);
+    exercise.secondaryFocus.forEach((focus) => add(focus, 3));
+    for (const tag of exercise.customFocusTags ?? []) {
+      if ((Object.values(focusMap).flat() as string[]).includes(tag)) add(tag as Focus, 1);
+    }
+    profile.wrist += (exercise.fatigueCost?.wrist ?? 0) * 2;
+    profile.shoulder += ((exercise.fatigueCost?.shoulder ?? 0) + (exercise.fatigueCost?.pushing ?? 0)) * 2;
+    profile.trunk += (exercise.fatigueCost?.core ?? 0) * 2;
+    if ((exercise.fatigueCost?.inversion ?? 0) > 0) {
+      profile.wrist += exercise.fatigueCost?.inversion ?? 0;
+      profile.shoulder += exercise.fatigueCost?.inversion ?? 0;
+    }
+  }
+  return profile;
+};
+
+/** Positive only when a dynamic warm-up or static reset addresses demands in the selected work. */
+export const resetRelevanceScore = (exercise: Exercise, profile: TrainingDemandProfile): number =>
+  demandGroupsForExercise(exercise).reduce((total, group) => total + profile[group], 0);
 const skillFocus = (focuses: CustomFocus[]) => focuses.some((focus) =>
   ["handstand", "lsit", "planche", "pushing", "support"].includes(focus));
 const blockMatches = (exercise: Exercise, block: CustomBlock, focuses: CustomFocus[]) => {
@@ -209,18 +257,71 @@ export function buildCustomSession(request: CustomRequest): CustomPlan {
     return selected;
   };
 
-  const rawItems: Array<Omit<CustomItem, "occurrence" | "occurrences" | "intentionalRepeat">> = [];
-  for (const block of safeOrder) {
-    const minuteSlots = allocations[block];
-    if (minuteSlots <= 0) continue;
-    const intervalCount = block === "cooldown" ? minuteSlots * 2 : minuteSlots;
-    const desiredStations = block === "warmup" ? Math.min(3, intervalCount)
+  const intervalCountFor = (block: CustomBlock) => block === "cooldown" ? allocations[block] * 2 : allocations[block];
+  const stationCountFor = (block: CustomBlock) => {
+    const intervalCount = intervalCountFor(block);
+    return block === "warmup" ? Math.min(3, intervalCount)
       : block === "pre" ? Math.min(2, intervalCount)
         : block === "skill" ? Math.min(Math.max(1, Math.min(2, request.focuses.length)), intervalCount)
           : block === "lab" ? 1
             : block === "strength" ? Math.min(request.focuses.includes("mobility") ? 5 : 4, intervalCount)
               : Math.min(4, intervalCount);
-    const stations = chooseStations(block, desiredStations);
+  };
+
+  // Select the actual training work first.  Warm-up and cooldown choices are
+  // then derived from these movements rather than from the session title alone.
+  const stationsByBlock = new Map<CustomBlock, Exercise[]>();
+  for (const block of ["pre", "skill", "lab", "strength"] as CustomBlock[]) {
+    if (allocations[block] <= 0) continue;
+    stationsByBlock.set(block, chooseStations(block, stationCountFor(block)));
+  }
+  const middleExercises = [...stationsByBlock.values()].flat();
+  const demandProfile = demandProfileForExercises(middleExercises);
+
+  const chooseRelatedResetStations = (block: "warmup" | "cooldown", count: number): Exercise[] => {
+    const selected: Exercise[] = [];
+    const covered = new Set<TrainingDemand>();
+    const rankedDemands = [...demandOrder].sort((a, b) => demandProfile[b] - demandProfile[a]);
+    for (let index = 0; index < count; index += 1) {
+      const candidates = eligible.filter((exercise) => blockMatches(exercise, block, request.focuses) &&
+        !globallyUsed.has(exercise.id) && !selected.some((item) => item.id === exercise.id));
+      if (!candidates.length) break;
+      const relatedCandidates = candidates.filter((exercise) => resetRelevanceScore(exercise, demandProfile) > 0);
+      const safeCandidates = relatedCandidates.length ? relatedCandidates : candidates;
+      const unusedPrimaryFocus = safeCandidates.filter((exercise) => !selected.some((item) => item.primaryFocus === exercise.primaryFocus));
+      const diverseCandidates = unusedPrimaryFocus.length ? unusedPrimaryFocus : safeCandidates;
+      const targetDemand = rankedDemands.find((group) => !covered.has(group) && demandProfile[group] > 0 &&
+        diverseCandidates.some((exercise) => primaryDemandGroupsForExercise(exercise).includes(group) || demandGroupsForExercise(exercise).includes(group)));
+      const purposePool = targetDemand
+        ? (() => {
+          const primaryMatches = diverseCandidates.filter((exercise) => primaryDemandGroupsForExercise(exercise).includes(targetDemand));
+          return primaryMatches.length ? primaryMatches : diverseCandidates.filter((exercise) => demandGroupsForExercise(exercise).includes(targetDemand));
+        })()
+        : diverseCandidates;
+      const ranked = purposePool.map((exercise, orderIndex) => ({
+        exercise,
+        orderIndex,
+        relevance: resetRelevanceScore(exercise, demandProfile),
+      })).sort((a, b) => b.relevance - a.relevance || a.orderIndex - b.orderIndex);
+      const best = ranked[0].relevance;
+      const shortlist = ranked.filter((item) => item.relevance >= best - 2).slice(0, 4);
+      const choice = shortlist[hash(`${seed}:matched-${block}:${index}`) % shortlist.length].exercise;
+      selected.push(choice);
+      globallyUsed.add(choice.id);
+      primaryDemandGroupsForExercise(choice).forEach((group) => covered.add(group));
+    }
+    return selected;
+  };
+
+  if (allocations.warmup > 0) stationsByBlock.set("warmup", chooseRelatedResetStations("warmup", stationCountFor("warmup")));
+  if (allocations.cooldown > 0) stationsByBlock.set("cooldown", chooseRelatedResetStations("cooldown", stationCountFor("cooldown")));
+
+  const rawItems: Array<Omit<CustomItem, "occurrence" | "occurrences" | "intentionalRepeat">> = [];
+  for (const block of safeOrder) {
+    const minuteSlots = allocations[block];
+    if (minuteSlots <= 0) continue;
+    const intervalCount = intervalCountFor(block);
+    const stations = stationsByBlock.get(block) ?? [];
     if (!stations.length) continue;
     const rounds = Math.ceil(intervalCount / stations.length);
     for (let index = 0; index < intervalCount; index += 1) {

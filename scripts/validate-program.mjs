@@ -101,29 +101,29 @@ for (const path of skillProgressionPaths) {
   path.steps.forEach((id) => assert(Boolean(exercises[id]), `${path.label}: missing progression exercise ${id}`));
 }
 
-// Exact audited V2.1 baseline table. This prevents a valid-looking 25-minute
-// plan from silently drifting to merely theme-adjacent exercise choices.
+// Exact audited programme baseline table. This prevents a valid-looking
+// 25-minute plan from silently drifting to unrelated exercise choices.
 const canonicalSignatures = {
   "1-L1": "wrist-palms,shoulder-sweep,scap-pushup|pike-shift,support-hold|wall-l|hollow-tuck,deadbug-heel-tap,plank-tap,bent-compression|wrist-flexor-rock,child-reach|-",
   "1-L2": "wrist-palms,shoulder-sweep,scap-pushup|pike-shift,pike-elevation|chest-wall-line|long-lever-hollow-hold,deadbug-double-leg-lower,plank-tap,alternating-pike-leg-lift|wrist-flexor-rock,child-reach|planche-lean-hold",
   "1-L3": "fingertip-wrist-pulses,shoulder-sweep,scap-pushup|support-shrugs,pike-elevation|chest-wall-alternating-toe-peel|hollow-scissor-kicks,long-lever-parallette-plank,side-plank-reach-through,straddle-compression-lift|wrist-flexor-rock,lat-parallette|straddle-planche-lean",
-  "2-L1": "wrist-circles,wall-slides,plank-pike|support-shrugs,support-hold|box-toe-light|foot-assisted-lsit,single-leg-compression,one-foot-assisted-lsit,side-plank|wrist-extensor-rock,seated-pike-breathing-reset|-",
-  "2-L2": "wrist-circles,wall-slides,plank-pike|support-shrugs,support-hold|heel-pullaway|tuck-support,tuck-support-knee-extensions,alternating-lsit-extension,side-plank-hip-lift|wrist-extensor-rock,seated-pike-breathing-reset|tuck-to-one-leg-lsit-transition",
-  "2-L3": "fingertip-wrist-pulses,wall-slides,plank-pike|support-shrugs,support-hold|split-leg-wall-pullaway|full-lsit-attempt,straight-compression,long-lever-hollow-hold,side-plank-reach-through|wrist-extensor-rock,seated-pike-breathing-reset|tuck-to-lsit-transition",
+  "2-L1": "wrist-circles,plank-pike,alternating-straight-leg-hamstring-sweep|support-shrugs,support-hold|box-toe-light|foot-assisted-lsit,single-leg-compression,one-foot-assisted-lsit,side-plank|wrist-extensor-rock,seated-pike-breathing-reset|-",
+  "2-L2": "wrist-circles,plank-pike,alternating-straight-leg-hamstring-sweep|support-shrugs,support-hold|heel-pullaway|tuck-support,tuck-support-knee-extensions,alternating-lsit-extension,side-plank-hip-lift|wrist-extensor-rock,seated-pike-breathing-reset|tuck-to-one-leg-lsit-transition",
+  "2-L3": "fingertip-wrist-pulses,plank-pike,cossack-weight-shift|support-shrugs,support-hold|split-leg-wall-pullaway|full-lsit-attempt,straight-compression,long-lever-hollow-hold,side-plank-reach-through|wrist-extensor-rock,seated-pike-breathing-reset|tuck-to-lsit-transition",
   "3-L1": "wrist-circles,kneeling-thoracic-rotation,down-dog-scapular-shrugs|grounded-side-exit-rehearsal,pike-shift|chest-wall-line|dead-bug,side-plank,hollow-one-leg,deadbug-heel-tap|thread-needle,supine-90-90-breathing-reset|-",
   "3-L2": "wrist-circles,kneeling-thoracic-rotation,down-dog-scapular-shrugs|grounded-side-exit-rehearsal,pike-shift|wall-facing-handstand-weight-shift|dead-bug,bear-hover-knee-tap,side-plank-hip-lift,hollow-one-leg|thread-needle,supine-90-90-breathing-reset|frog-stand-hold",
   "3-L3": "wrist-circles,kneeling-thoracic-rotation,down-dog-scapular-shrugs|grounded-side-exit-rehearsal,pike-shift|wall-facing-handstand-weight-shift|long-lever-hollow-hold,bear-hover-knee-tap,side-plank-reach-through,deadbug-double-leg-lower|thread-needle,supine-90-90-breathing-reset|floor-crane-one-knee-float",
   "4-L1": "wrist-palms,wall-slides,scap-pushup|pike-elevation,bear-to-pike-shoulder-load|wall-elevation|shallow-range-pike-pushup,hollow-reach,supported-knee-raise,hollow-tuck|wrist-extensor-rock,lat-parallette|-",
   "4-L2": "wrist-palms,wall-slides,scap-pushup|pike-elevation,full-wall-walk|wall-kickup|parallette-pike-pushup,hollow-flutter-kicks,supported-knee-raise,long-lever-parallette-plank|wrist-extensor-rock,lat-parallette|planche-lean-hold",
   "4-L3": "fingertip-wrist-pulses,wall-slides,scap-pushup|pike-elevation,full-wall-walk|kickup-stop-short-drill|eccentric-pike-pushup,hollow-scissor-kicks,straight-compression,long-lever-parallette-plank|wrist-extensor-rock,lat-parallette|pseudo-planche-parallette-pushup",
-  "5-L1": "fingertip-wrist-pulses,shoulder-sweep,plank-pike|standing-kickup-line-rehearsal,grounded-side-exit-rehearsal|wall-kickup|tuck-support,hollow-one-leg,single-leg-compression,plank-tap|wrist-flexor-rock,chest-opener|-",
-  "5-L2": "fingertip-wrist-pulses,shoulder-sweep,plank-pike|standing-kickup-line-rehearsal,grounded-side-exit-rehearsal|heel-pullaway|alternating-lsit-extension,hollow-rocks,seated-pike-compression-pulses,plank-tap|wrist-flexor-rock,chest-opener|support-to-tuck-transition",
-  "5-L3": "fingertip-wrist-pulses,shoulder-sweep,plank-pike|standing-kickup-line-rehearsal,grounded-side-exit-rehearsal|freestanding-parallette-kickup|one-leg-lsit-hold,hollow-scissor-kicks,straddle-compression-lift,side-plank-reach-through|wrist-flexor-rock,chest-opener|tuck-to-lsit-transition",
+  "5-L1": "fingertip-wrist-pulses,shoulder-sweep,alternating-straight-leg-hamstring-sweep|standing-kickup-line-rehearsal,grounded-side-exit-rehearsal|wall-kickup|tuck-support,hollow-one-leg,single-leg-compression,plank-tap|wrist-flexor-rock,chest-opener|-",
+  "5-L2": "fingertip-wrist-pulses,plank-pike,alternating-straight-leg-hamstring-sweep|standing-kickup-line-rehearsal,grounded-side-exit-rehearsal|heel-pullaway|alternating-lsit-extension,hollow-rocks,seated-pike-compression-pulses,plank-tap|wrist-flexor-rock,chest-opener|support-to-tuck-transition",
+  "5-L3": "fingertip-wrist-pulses,plank-pike,cossack-weight-shift|standing-kickup-line-rehearsal,grounded-side-exit-rehearsal|freestanding-parallette-kickup|one-leg-lsit-hold,hollow-scissor-kicks,straddle-compression-lift,side-plank-reach-through|wrist-flexor-rock,chest-opener|tuck-to-lsit-transition",
 };
 for (const variant of workoutVariants) {
   const key = `${variant.day}-${variant.level}`;
   const actual = `${variant.warmup.join(",")}|${variant.pre.join(",")}|${variant.handstand}|${variant.core.join(",")}|${variant.cooldown.join(",")}|${variant.lab?.a ?? "-"}`;
-  assert(actual === canonicalSignatures[key], `${key}: canonical V2.1 exercise sequence drifted`);
+  assert(actual === canonicalSignatures[key], `${key}: audited exercise sequence drifted`);
 }
 
 const validLevels = new Set(["ALL", "L1", "L2", "L3"]);
@@ -427,6 +427,19 @@ assert(extendedPlans === 10, `Expected 10 L2/L3 extended plans; found ${extended
 assert(matOnlyReplacements > 0, "Recommended Program did not produce any mat-only role-preserving substitutions");
 assert(timing.defaultTotal === 1500 && timing.extendedTotal === 1800,
   "Programme timing constants are not exactly 25/30 minutes");
+
+const compressionVariant = workoutVariants.find((variant) => variant.day === 2 && variant.level === "L2");
+if (compressionVariant) {
+  const compressionSlots = slotsForVariant(compressionVariant, exercises, false);
+  const wristWarmup = compressionSlots.find((slot) => slot.id === "warmup-1");
+  const pikeCooldown = compressionSlots.find((slot) => slot.id === "cooldown-2");
+  assert(wristWarmup && !compatibleSwaps({ slot: wristWarmup, exercises, day: 2, level: "L2", readiness: allReady, difficulty: "same" })
+    .some((exercise) => exercise.id === "alternating-straight-leg-hamstring-sweep"),
+  "Wrist warm-up swap offered an unrelated hamstring drill");
+  assert(pikeCooldown && !compatibleSwaps({ slot: pikeCooldown, exercises, day: 2, level: "L2", readiness: allReady, difficulty: "same" })
+    .some((exercise) => exercise.id === "figure-four-glute-stretch"),
+  "Compression cooldown swap offered an unrelated glute stretch through a generic breathing tag");
+}
 
 // Timing overrides are tied to stable slots and repeat only where that slot is
 // scheduled. This guards against the old exercise-ID/reset-index leakage.

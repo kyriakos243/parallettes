@@ -1781,7 +1781,7 @@ export default function Home() {
         )}
 
         {customOpen && (
-          <Drawer title="Build a custom session" subtitle="Focus, equipment, time and difficulty are independent. The generator keeps the order safe." onClose={() => setCustomOpen(false)}>
+          <Drawer title="Build a custom session" subtitle="The generator builds your main work first, then matches dynamic warm-up and static cooldown exercises to its actual demands." onClose={() => setCustomOpen(false)}>
             <div className="custom-builder">
               <p className="control-kicker">What do you want to train?</p>
               <div className="custom-chip-grid">{(["handstand", "core", "compression", "lsit", "planche", "pushing", "support", "mobility", "conditioning"] as CustomFocus[]).map((focus) => <button type="button" className={customFocuses.includes(focus) ? "active" : ""} key={focus} onClick={() => setCustomFocuses((current) => current.includes(focus) ? current.filter((item) => item !== focus) : [...current, focus])}>{focus === "lsit" ? "L-sit" : focus[0].toUpperCase() + focus.slice(1)}</button>)}</div>

@@ -55,6 +55,24 @@ for (const focus of focuses) {
             throw new Error(`Unsafe order in ${focus}/${difficulty}/${equipment.join("+")}/${seconds}: ${seen.join("/")}`);
           }
         }
+        const middleExercises = [...new Set(plan.items.filter((item) => item.block !== "warmup" && item.block !== "cooldown").map((item) => item.exerciseId))]
+          .map((id) => programModule.exports.exercises[id]);
+        if (middleExercises.length) {
+          const demandProfile = customModule.exports.demandProfileForExercises(middleExercises);
+          const dominantDemand = Object.entries(demandProfile).sort((a, b) => b[1] - a[1])[0]?.[0];
+          for (const resetBlock of ["warmup", "cooldown"]) {
+            const resetExercises = [...new Set(plan.items.filter((item) => item.block === resetBlock).map((item) => item.exerciseId))]
+              .map((id) => programModule.exports.exercises[id]);
+            for (const exercise of resetExercises) {
+              if (customModule.exports.resetRelevanceScore(exercise, demandProfile) <= 0) {
+                throw new Error(`${focus}/${difficulty}/${equipment.join("+")}/${seconds}: ${resetBlock} ${exercise.id} is unrelated to the selected work`);
+              }
+            }
+            if (resetExercises.length && dominantDemand && !resetExercises.some((exercise) => customModule.exports.demandGroupsForExercise(exercise).includes(dominantDemand))) {
+              throw new Error(`${focus}/${difficulty}/${equipment.join("+")}/${seconds}: ${resetBlock} misses dominant ${dominantDemand} demand`);
+            }
+          }
+        }
         generatedCombinations += 1;
       }
     }
