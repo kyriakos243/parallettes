@@ -54,6 +54,7 @@ const {
   parsePlanSnapshot,
   parseStoredAppState,
   performedExerciseIdsFor,
+  reviewableExerciseIdsFor,
   slotsForVariant,
   variantKey,
 } = session;
@@ -446,6 +447,10 @@ if (l2Variant) {
       "Partial-session review did not collapse repeated rounds into unique performed exercises");
     assert(performedExerciseIdsFor(custom, 0).length === 0,
       "A zero-second session incorrectly included unperformed exercises");
+    const reviewable = reviewableExerciseIdsFor(custom, custom.totalSeconds);
+    const resetOnly = new Set(custom.intervals.filter((interval) => interval.block === "warmup" || interval.block === "cooldown").map((interval) => interval.exerciseId).filter(Boolean));
+    assert(reviewable.length > 0 && reviewable.every((id) => !resetOnly.has(id)),
+      "Post-workout review included a warm-up or cooldown-only exercise");
   } catch (error) {
     fail(`Stable-slot custom timing plan failed: ${error.message}`);
   }

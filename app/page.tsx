@@ -79,6 +79,7 @@ import {
   locateTimerPosition,
   parseStoredAppState,
   performedExerciseIdsFor,
+  reviewableExerciseIdsFor,
   slotsForVariant,
   variantKey,
   type IntervalTiming,
@@ -1128,14 +1129,7 @@ export default function Home() {
     status: PendingReview["status"],
     performedSeconds: number,
   ) => {
-    const exerciseIds = performedExerciseIdsFor(plan, performedSeconds);
-    if (exerciseIds.length === 0) {
-      setRunning(false);
-      setPlayerOpen(false);
-      setComplete(false);
-      localStorage.removeItem(ACTIVE_SESSION_KEY);
-      return;
-    }
+    const exerciseIds = reviewableExerciseIdsFor(plan, performedSeconds);
     setSessionReviews(Object.fromEntries(exerciseIds.map((id) => [id, { feedback: "right", achieved: false }] as const)));
     setPendingReview({ status, performedSeconds: Math.floor(performedSeconds), exerciseIds });
     setRunning(false);
@@ -1862,7 +1856,7 @@ export default function Home() {
                 <div className="complete-check"><Check /></div><p>{activePlan.day === 0 ? "CUSTOM SESSION" : `DAY ${activePlan.day}`} • {activePlan.level} {pendingReview?.status === "partial" ? "ENDED EARLY" : "COMPLETE"}</p>
                 <h1>{formatTime(pendingReview?.performedSeconds ?? activePlan.totalSeconds)}.<br /><em>{pendingReview?.status === "partial" ? "Work completed." : "Quality earned."}</em></h1>
                 {pendingReview && <>
-                  <span className="review-intro">Quick review — each movement appears once, even when it had several rounds. “Too easy” automatically records the upper target as achieved.</span>
+                  <span className="review-intro">Quick review — only progression exercises appear, once each. Warm-up and cooldown never need a rating.</span>
                   <div className="post-workout-review">
                     {pendingReview.exerciseIds.map((exerciseId) => {
                       const exercise = exercises[exerciseId];
@@ -1872,12 +1866,12 @@ export default function Home() {
                       return <article key={exerciseId}>
                         <div><strong>{exercise?.name ?? exerciseId}</strong><small>{cleanCount}/2 clean sessions{nextExercise ? ` • Next: ${nextExercise.name}` : ""}</small></div>
                         <div className="review-rating" aria-label={`Difficulty for ${exercise?.name ?? exerciseId}`}>
-                          {(["easy", "right", "hard"] as const).map((value) => <button type="button" className={review.feedback === value ? "active" : ""} key={value} onClick={() => setSessionReviews((previous) => ({ ...previous, [exerciseId]: { feedback: value, achieved: value === "easy" ? true : value === "hard" ? false : previous[exerciseId]?.achieved === true } }))}>{value === "easy" ? "Too easy" : value === "right" ? "Just right" : "Too hard"}</button>)}
+                          {(["easy", "right", "hard"] as const).map((value) => <button type="button" className={review.feedback === value ? "active" : ""} key={value} onClick={() => setSessionReviews((previous) => ({ ...previous, [exerciseId]: { feedback: value, achieved: value === "easy" } }))}>{value === "easy" ? "Ready to progress" : value === "right" ? "Right level" : "Too hard"}</button>)}
                         </div>
-                        <button type="button" className={`review-achieved ${review.achieved ? "active" : ""}`} disabled={review.feedback !== "right"} onClick={() => setSessionReviews((previous) => ({ ...previous, [exerciseId]: { ...review, achieved: !review.achieved } }))}><Check /> Upper target achieved cleanly</button>
                       </article>;
                     })}
                   </div>
+                  {pendingReview.exerciseIds.length === 0 && <span>No progression exercise was reached yet, so there is nothing to rate.</span>}
                   <span>{saveMode === "guest" ? "Guest mode: this review will not be saved." : saveMode === "practice" ? "Practice mode saves history, but does not change progression or advance the programme." : pendingReview.status === "partial" ? "This partial session saves your work but does not advance the programme day." : "Two clean sessions unlock the recommendation for the next progression."}</span>
                   <button type="button" className="primary-button" onClick={() => {
                     recordSessionOutcome(activePlan, pendingReview.status, pendingReview.performedSeconds, pendingReview.exerciseIds, sessionReviews);

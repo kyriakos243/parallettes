@@ -158,6 +158,22 @@ export const performedExerciseIdsFor = (plan: SessionPlan, elapsedSeconds: numbe
   return ids;
 };
 
+const REVIEWABLE_BLOCKS = new Set<TrainingBlock>(["pre", "handstand", "lab", "core"]);
+
+/** Progression exercises reached before the timer stopped; warm-up and cooldown never require ratings. */
+export const reviewableExerciseIdsFor = (plan: SessionPlan, elapsedSeconds: number): string[] => {
+  const limit = Math.max(0, Math.min(plan.totalSeconds, elapsedSeconds));
+  const ids: string[] = [];
+  let cursor = 0;
+  for (const interval of plan.intervals) {
+    if (interval.kind === "work" && interval.exerciseId && REVIEWABLE_BLOCKS.has(interval.block) &&
+      limit > cursor && !ids.includes(interval.exerciseId)) ids.push(interval.exerciseId);
+    cursor += interval.duration;
+    if (cursor >= limit) break;
+  }
+  return ids;
+};
+
 /** Apply one post-session review; repeated rounds never create duplicate evidence. */
 export const applyExerciseReviews = (
   current: ProgressionEvidence,
