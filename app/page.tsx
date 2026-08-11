@@ -1864,7 +1864,8 @@ export default function Home() {
                       const cleanCount = profile?.progression[exerciseId]?.cleanSessions ?? 0;
                       const nextExercise = exercise?.harderId ? exercises[exercise.harderId] : undefined;
                       return <article key={exerciseId}>
-                        <div><strong>{exercise?.name ?? exerciseId}</strong><small>{cleanCount}/2 clean sessions{nextExercise ? ` • Next: ${nextExercise.name}` : ""}</small></div>
+                        {exercise && <div className="review-demo"><ExerciseDemo exercise={exercise} compact /></div>}
+                        <div className="review-exercise-info"><strong>{exercise?.name ?? exerciseId}</strong><small>{cleanCount}/2 clean sessions{nextExercise ? ` • Next: ${nextExercise.name}` : ""}</small></div>
                         <div className="review-rating" aria-label={`Difficulty for ${exercise?.name ?? exerciseId}`}>
                           {(["easy", "right", "hard"] as const).map((value) => <button type="button" className={review.feedback === value ? "active" : ""} key={value} onClick={() => setSessionReviews((previous) => ({ ...previous, [exerciseId]: { feedback: value, achieved: value === "easy" } }))}>{value === "easy" ? "Ready to progress" : value === "right" ? "Right level" : "Too hard"}</button>)}
                         </div>
