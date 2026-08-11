@@ -35,6 +35,19 @@ for (const focus of focuses) {
           if ((exercise.requiredEquipment ?? []).some((required) => !equipment.includes(required))) {
             throw new Error(`${focus}/${difficulty}/${equipment.join("+")} selected unavailable ${item.exerciseId}`);
           }
+          if (!Number.isInteger(item.round) || !Number.isInteger(item.rounds) || item.round < 1 || item.round > item.rounds) {
+            throw new Error(`${focus}/${difficulty}/${equipment.join("+")} has invalid round metadata for ${item.exerciseId}`);
+          }
+          if (!Number.isInteger(item.occurrence) || !Number.isInteger(item.occurrences) || item.occurrence < 1 || item.occurrence > item.occurrences) {
+            throw new Error(`${focus}/${difficulty}/${equipment.join("+")} has invalid repeat metadata for ${item.exerciseId}`);
+          }
+        }
+        const counts = plan.items.reduce((result, item) => result.set(item.exerciseId, (result.get(item.exerciseId) ?? 0) + 1), new Map());
+        for (const item of plan.items) {
+          const count = counts.get(item.exerciseId);
+          if (item.occurrences !== count || item.intentionalRepeat !== (count > 1)) {
+            throw new Error(`${focus}/${difficulty}/${equipment.join("+")} contains an unlabelled or mislabelled repeat for ${item.exerciseId}`);
+          }
         }
         const seen = [...new Set(plan.items.map((item) => item.block))];
         for (let index = 1; index < seen.length; index += 1) {
@@ -96,4 +109,15 @@ if (!noPreparation.warnings.some((warning) => warning.toLowerCase().includes("pr
   throw new Error("High-load skill without preparation did not produce a warning");
 }
 
-console.log(`Custom Session: ${generatedCombinations} focus/time/difficulty/equipment combinations, safe sequence, readiness gates, rope selection and mat-only filtering passed.`);
+const richCore = customModule.exports.buildCustomSession({ focuses: ["core", "compression"], equipment: ["parallettes", "floor", "wall"], seconds: 1500, difficulty: "recommended", readiness: allReady, variationSeed: 1 });
+const richStrength = richCore.items.filter((item) => item.block === "strength");
+if (new Set(richStrength.map((item) => item.exerciseId)).size < 4) {
+  throw new Error("A 25-minute Custom Session did not create a four-exercise strength/core circuit");
+}
+if (!richStrength.some((item) => item.round > 1) || !richStrength.every((item) => item.rounds > 1)) {
+  throw new Error("Repeated Custom Session circuit work is not explicitly labelled by round");
+}
+const variations = new Set(Array.from({ length: 6 }, (_, index) => customModule.exports.buildCustomSession({ focuses: ["core", "compression"], equipment: ["parallettes", "floor", "wall"], seconds: 1500, difficulty: "recommended", readiness: allReady, variationSeed: index + 10 }).items.map((item) => item.exerciseId).join(",")));
+if (variations.size < 3) throw new Error(`Generate produced only ${variations.size} distinct Custom Session sequences across six seeds`);
+
+console.log(`Custom Session: ${generatedCombinations} focus/time/difficulty/equipment combinations, exact timing, explicit rounds/repeats, varied circuits, safe sequence, readiness gates, rope selection and mat-only filtering passed.`);
