@@ -35,16 +35,22 @@ export type ProfileRecord = {
   syncError?: string;
 };
 
+export type AccountResult = {
+  profile: ProfileRecord;
+  recoveryCode?: string;
+};
+
 const DB_NAME = "parallette25-v2";
 const DB_VERSION = 2;
 const PROFILE_STORE = "profiles";
 const INDEX_KEY = "parallette25-profile-index-v1";
+const TOKEN_KEY = "parallette25-account-sessions-v1";
 const REMOTE_API = (import.meta.env.VITE_PROFILE_API_URL as string | undefined)?.replace(/\/$/u, "");
 export const remoteSyncAvailable = Boolean(REMOTE_API);
 
 const now = () => new Date().toISOString();
 const makeId = () => globalThis.crypto?.randomUUID?.() ?? `profile-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const sanitizeName = (name: string) => name.trim().replace(/\s+/g, " ").slice(0, 32);
+const sanitizeName = (name: string) => name.normalize("NFKC").trim().replace(/\s+/gu, " ").slice(0, 32);
 const timestamp = (value?: string) => value ? Date.parse(value) || 0 : 0;
 
 export const newProfile = (username: string): ProfileRecord => ({
@@ -73,6 +79,32 @@ const localProfiles = (): ProfileRecord[] => {
   } catch { return []; }
 };
 const saveLocalMirror = (profiles: ProfileRecord[]) => localStorage.setItem(INDEX_KEY, JSON.stringify(profiles));
+
+type StoredSession = { token: string; expiresAt?: string };
+const storedSessions = (): Record<string, StoredSession> => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TOKEN_KEY) ?? "{}");
+    return parsed && typeof parsed === "object" ? parsed as Record<string, StoredSession> : {};
+  } catch { return {}; }
+};
+const saveSessions = (sessions: Record<string, StoredSession>) => localStorage.setItem(TOKEN_KEY, JSON.stringify(sessions));
+const setSession = (profileId: string, token: string, expiresAt?: string) => saveSessions({ ...storedSessions(), [profileId]: { token, expiresAt } });
+const clearSession = (profileId: string) => {
+  const sessions = storedSessions();
+  delete sessions[profileId];
+  saveSessions(sessions);
+};
+const sessionFor = (profileId: string): StoredSession | null => {
+  const session = storedSessions()[profileId];
+  if (!session?.token) return null;
+  if (session.expiresAt && timestamp(session.expiresAt) <= Date.now()) {
+    clearSession(profileId);
+    return null;
+  }
+  return session;
+};
+
+export const hasProfileSession = (profileId: string) => Boolean(sessionFor(profileId));
 
 const openDb = (): Promise<IDBDatabase | null> => new Promise((resolve) => {
   if (typeof indexedDB === "undefined") return resolve(null);
@@ -107,6 +139,16 @@ const cacheProfile = async (profile: ProfileRecord) => {
   if (!db) return;
   await new Promise<void>((resolve) => {
     const request = db.transaction(PROFILE_STORE, "readwrite").objectStore(PROFILE_STORE).put(normalized);
+    request.onsuccess = () => resolve();
+    request.onerror = () => resolve();
+  });
+};
+
+const removeLocalProfile = async (profileId: string) => {
+  saveLocalMirror((await listLocalProfiles()).filter((profile) => profile.profileId !== profileId));
+  const db = await openDb();
+  if (db) await new Promise<void>((resolve) => {
+    const request = db.transaction(PROFILE_STORE, "readwrite").objectStore(PROFILE_STORE).delete(profileId);
     request.onsuccess = () => resolve();
     request.onerror = () => resolve();
   });
@@ -148,23 +190,106 @@ export function mergeProfiles(local: ProfileRecord, remote: ProfileRecord): Prof
   });
 }
 
+type ApiPayload = {
+  profile?: ProfileRecord;
+  token?: string;
+  expiresAt?: string;
+  recoveryCode?: string;
+  error?: string;
+};
+
+class ApiError extends Error {
+  status: number;
+  payload: ApiPayload;
+  constructor(status: number, payload: ApiPayload, fallback: string) {
+    super(payload.error ?? fallback);
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
+const api = async (path: string, init: RequestInit = {}, profileId?: string): Promise<ApiPayload | ProfileRecord> => {
+  if (!REMOTE_API) throw new Error("Cloud sync is not configured for this deployment.");
+  const headers = new Headers(init.headers);
+  if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
+  if (profileId) {
+    const session = sessionFor(profileId);
+    if (!session) throw new Error("Sign in to sync this profile.");
+    headers.set("authorization", `Bearer ${session.token}`);
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${REMOTE_API}${path}`, { ...init, headers });
+  } catch {
+    throw new Error("Network unavailable. Your changes remain saved on this device.");
+  }
+  const payload = await response.json().catch(() => ({})) as ApiPayload | ProfileRecord;
+  if (response.status === 401 && profileId) clearSession(profileId);
+  if (!response.ok) throw new ApiError(response.status, payload as ApiPayload, `Sync failed (${response.status}).`);
+  return payload;
+};
+
+const acceptAccount = async (payload: ApiPayload): Promise<AccountResult> => {
+  if (!payload.profile || !payload.token) throw new Error("The account service returned an incomplete response.");
+  const profile = normalizeProfile({ ...payload.profile, pendingSync: false, syncError: undefined, lastSyncedAt: now() });
+  setSession(profile.profileId, payload.token, payload.expiresAt);
+  await cacheProfile(profile);
+  return { profile, recoveryCode: payload.recoveryCode };
+};
+
+export async function registerProfile(username: string, password: string): Promise<AccountResult> {
+  const draft = newProfile(username);
+  const payload = await api("/auth/register", { method: "POST", body: JSON.stringify({ username, password, profile: draft }) }) as ApiPayload;
+  return acceptAccount(payload);
+}
+
+export async function signInProfile(username: string, password: string): Promise<ProfileRecord> {
+  const payload = await api("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }) as ApiPayload;
+  return (await acceptAccount(payload)).profile;
+}
+
+export async function claimLegacyProfile(profile: ProfileRecord, password: string): Promise<AccountResult> {
+  const payload = await api("/auth/claim", {
+    method: "POST",
+    body: JSON.stringify({ username: profile.username, profileId: profile.profileId, password, profile }),
+  }) as ApiPayload;
+  return acceptAccount(payload);
+}
+
+export async function recoverAccount(username: string, recoveryCode: string, newPassword: string): Promise<AccountResult> {
+  const payload = await api("/auth/recover", {
+    method: "POST",
+    body: JSON.stringify({ username, recoveryCode, newPassword }),
+  }) as ApiPayload;
+  return acceptAccount(payload);
+}
+
+export async function signOutProfile(profileId: string): Promise<void> {
+  if (REMOTE_API && sessionFor(profileId)) {
+    try { await api("/auth/logout", { method: "POST" }, profileId); }
+    catch { /* The local token must still be removed when offline. */ }
+  }
+  clearSession(profileId);
+}
+
 type RemoteResult = { profile?: ProfileRecord; conflict?: ProfileRecord; error?: string };
 
 async function putRemote(profile: ProfileRecord, revision: number): Promise<RemoteResult> {
   if (!REMOTE_API) return { profile: { ...profile, pendingSync: false } };
+  if (!sessionFor(profile.profileId)) return { error: "Sign in to sync this profile." };
   try {
-    const response = await fetch(`${REMOTE_API}/profiles/${encodeURIComponent(profile.profileId)}`, {
+    const response = await api("/profiles/me", {
       method: "PUT",
-      headers: { "content-type": "application/json", "if-match": String(revision) },
+      headers: { "if-match": String(revision) },
       body: JSON.stringify(profile),
-    });
-    const payload = await response.json().catch(() => ({})) as { profile?: ProfileRecord; error?: string } & Partial<ProfileRecord>;
-    if (response.status === 409 && payload.profile) return { conflict: normalizeProfile(payload.profile) };
-    if (!response.ok) return { error: payload.error ?? `Sync failed (${response.status})` };
-    const saved = (payload.profileId ? payload : payload.profile) as ProfileRecord | undefined;
-    return saved ? { profile: normalizeProfile(saved) } : { error: "Remote store returned no profile" };
+    }, profile.profileId) as ProfileRecord;
+    return { profile: normalizeProfile(response) };
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Network unavailable" };
+    if (error instanceof ApiError && error.status === 409 && error.payload.profile) {
+      return { conflict: normalizeProfile(error.payload.profile) };
+    }
+    const message = error instanceof Error ? error.message : "Network unavailable";
+    return { error: message };
   }
 }
 
@@ -193,43 +318,24 @@ async function pushWithConflictMerge(profile: ProfileRecord): Promise<ProfileRec
   return pending;
 }
 
+/** Only profiles already used on this device are listed. Remote accounts are never publicly enumerated. */
 export async function listProfiles(): Promise<ProfileRecord[]> {
-  const local = await listLocalProfiles();
-  if (!REMOTE_API) return local;
-  try {
-    const response = await fetch(`${REMOTE_API}/profiles`);
-    if (!response.ok) return local;
-    const payload = await response.json() as ProfileRecord[] | { profiles?: Array<ProfileRecord | Pick<ProfileRecord, "profileId" | "username">> };
-    const listed = Array.isArray(payload) ? payload : payload.profiles ?? [];
-    const remote = await Promise.all(listed.map(async (item) => {
-      if ("revision" in item && "history" in item) return normalizeProfile(item as ProfileRecord);
-      const detail = await fetch(`${REMOTE_API}/profiles/${encodeURIComponent(item.profileId)}`);
-      return detail.ok ? normalizeProfile(await detail.json() as ProfileRecord) : null;
-    }));
-    const merged = new Map(local.map((item) => [item.profileId, item]));
-    for (const item of remote) {
-      if (!item) continue;
-      const cached = merged.get(item.profileId);
-      const reconciled = cached ? mergeProfiles(cached, item) : item;
-      merged.set(item.profileId, reconciled);
-      await cacheProfile(reconciled);
-    }
-    return [...merged.values()].sort((a, b) => a.username.localeCompare(b.username));
-  } catch { return local; }
+  return listLocalProfiles();
 }
 
 export async function saveProfile(profile: ProfileRecord): Promise<ProfileRecord> {
   const current = await getProfile(profile.profileId);
+  const canSync = Boolean(REMOTE_API && sessionFor(profile.profileId));
   const localDraft = normalizeProfile({
     ...current,
     ...profile,
     revision: Math.max(profile.revision, current?.revision ?? 0),
     updatedAt: now(),
-    pendingSync: Boolean(REMOTE_API),
-    syncError: undefined,
+    pendingSync: canSync,
+    syncError: canSync ? undefined : REMOTE_API ? "Sign in to sync this profile." : undefined,
   });
   await cacheProfile(localDraft);
-  return REMOTE_API ? pushWithConflictMerge(localDraft) : { ...localDraft, pendingSync: false };
+  return canSync ? pushWithConflictMerge(localDraft) : { ...localDraft, pendingSync: false };
 }
 
 export async function getProfile(profileId: string): Promise<ProfileRecord | null> {
@@ -238,11 +344,13 @@ export async function getProfile(profileId: string): Promise<ProfileRecord | nul
 
 export async function syncProfile(profile: ProfileRecord): Promise<ProfileRecord> {
   if (!REMOTE_API) return { ...profile, pendingSync: false };
+  if (!sessionFor(profile.profileId)) {
+    const localOnly = { ...profile, pendingSync: false, syncError: "Sign in to sync this profile." };
+    await cacheProfile(localOnly);
+    return localOnly;
+  }
   try {
-    const response = await fetch(`${REMOTE_API}/profiles/${encodeURIComponent(profile.profileId)}`);
-    if (response.status === 404) return pushWithConflictMerge({ ...profile, revision: 0, pendingSync: true });
-    if (!response.ok) throw new Error(`Sync failed (${response.status})`);
-    const remote = normalizeProfile(await response.json() as ProfileRecord);
+    const remote = normalizeProfile(await api("/profiles/me", { method: "GET" }, profile.profileId) as ProfileRecord);
     const merged = mergeProfiles(profile, remote);
     if (profile.pendingSync || timestamp(profile.updatedAt) > timestamp(remote.updatedAt) || merged.history.length > remote.history.length) {
       return pushWithConflictMerge({ ...merged, revision: remote.revision, pendingSync: true, updatedAt: now() });
@@ -257,19 +365,16 @@ export async function syncProfile(profile: ProfileRecord): Promise<ProfileRecord
   }
 }
 
-export async function deleteProfile(profileId: string): Promise<void> {
-  if (REMOTE_API) {
-    const response = await fetch(`${REMOTE_API}/profiles/${encodeURIComponent(profileId)}`, { method: "DELETE", headers: { "x-delete-confirm": profileId } });
-    if (!response.ok && response.status !== 404) throw new Error(`Delete failed (${response.status}). Your profile is still available; reconnect and try again.`);
+export async function deleteProfile(profileId: string, password?: string): Promise<void> {
+  const local = await getProfile(profileId);
+  if (REMOTE_API && sessionFor(profileId) && local) {
+    await api("/profiles/me", {
+      method: "DELETE",
+      body: JSON.stringify({ confirmation: local.username, password }),
+    }, profileId);
   }
-  const all = (await listLocalProfiles()).filter((profile) => profile.profileId !== profileId);
-  saveLocalMirror(all);
-  const db = await openDb();
-  if (db) await new Promise<void>((resolve) => {
-    const request = db.transaction(PROFILE_STORE, "readwrite").objectStore(PROFILE_STORE).delete(profileId);
-    request.onsuccess = () => resolve();
-    request.onerror = () => resolve();
-  });
+  clearSession(profileId);
+  await removeLocalProfile(profileId);
 }
 
 export function exportProfile(profile: ProfileRecord): string {
@@ -281,6 +386,6 @@ export function importProfile(value: string): ProfileRecord | null {
     const parsed = JSON.parse(value);
     const profile = parsed.profile ?? parsed;
     if (!profile || typeof profile.username !== "string" || typeof profile.profileId !== "string") return null;
-    return normalizeProfile({ ...newProfile(profile.username), ...profile, pendingSync: Boolean(REMOTE_API) });
+    return normalizeProfile({ ...newProfile(profile.username), ...profile, pendingSync: false, syncError: "Secure or sign in to sync this backup." });
   } catch { return null; }
 }

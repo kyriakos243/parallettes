@@ -78,6 +78,11 @@ if (!rope.items.some((item) => programModule.exports.exercises[item.exerciseId].
   throw new Error("Conditioning Custom Session did not select skipping rope when available");
 }
 
+const noRope = customModule.exports.buildCustomSession({ focuses: ["conditioning"], equipment: ["floor"], seconds: 900, difficulty: "easy", readiness: allReady });
+if (!noRope.items.some((item) => item.exerciseId === "no-rope-penguin-taps")) {
+  throw new Error("Floor-only Conditioning session did not select No-Rope Penguin Taps");
+}
+
 const gated = customModule.exports.buildCustomSession({ focuses: ["planche"], equipment: ["parallettes", "floor"], seconds: 900, difficulty: "hard", readiness: {} });
 if (gated.items.some((item) => programModule.exports.exercises[item.exerciseId].gate)) {
   throw new Error("Custom Session bypassed an unmet readiness gate");

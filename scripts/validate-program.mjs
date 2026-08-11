@@ -68,19 +68,31 @@ const supportsDay = (exercise, day) =>
   exercise.compatibleDays === "all" || exercise.compatibleDays.includes(day);
 
 // Library identity and the agreed expansion size.
-assert(exerciseList.length === 170, `Expected 170 exercises; found ${exerciseList.length}`);
-assert(Object.keys(exercises).length === 170, "Exercise IDs are not unique");
-assert(new Set(exerciseList.map((exercise) => exercise.id)).size === 170,
+assert(exerciseList.length === 195, `Expected 195 exercises; found ${exerciseList.length}`);
+assert(Object.keys(exercises).length === 195, "Exercise IDs are not unique");
+assert(new Set(exerciseList.map((exercise) => exercise.id)).size === 195,
   "exerciseList contains duplicate IDs");
 const newExercises = exerciseList.filter((exercise) => exercise.introduced === "v2");
 const originalExercises = exerciseList.filter((exercise) => exercise.introduced === "original");
-assert(newExercises.length === 130, `Expected exactly 130 v2 exercises; found ${newExercises.length}`);
+assert(newExercises.length === 155, `Expected exactly 155 v2 exercises; found ${newExercises.length}`);
 assert(originalExercises.length === 40,
   `Expected 40 retained unique exercises; found ${originalExercises.length}`);
-assert(programmeSummary?.newExercises === 130, "Programme summary does not report 130 additions");
-assert(programmeSummary?.totalUniqueExercises === 170,
-  "Programme summary does not report 170 unique exercises");
-assert(skillProgressionPaths.length === 15, `Expected 15 visible skill progression paths; found ${skillProgressionPaths.length}`);
+const researchExpansionIds = [
+  "palm-lift-wrist-conditioning", "forearm-turn-finger-spread", "alternating-straight-leg-hamstring-sweep",
+  "dynamic-half-kneeling-hip-flexor-reach", "cossack-weight-shift", "parallette-wall-grip-pressure-shift",
+  "chest-wall-micro-shoulder-tap", "entry-balance-side-exit-chain", "prone-arch-body-hold",
+  "hollow-to-arch-log-roll", "reverse-plank-hold", "bridge-walkout", "high-plank-bird-dog",
+  "lateral-bear-crawl", "eccentric-lsit-to-tuck-lower", "assisted-straddle-lsit-hold",
+  "alternating-one-leg-lsit-switch", "parallette-push-up-plus", "planche-lean-scapular-pulse",
+  "staggered-parallette-push-up", "supine-hamstring-stretch", "figure-four-glute-stretch",
+  "crossbody-shoulder-stretch", "gentle-frog-adductor-hold", "no-rope-penguin-taps",
+];
+assert(researchExpansionIds.length === 25, "Research expansion must contain exactly 25 audited movements");
+for (const id of researchExpansionIds) assert(Boolean(exercises[id]), `Missing research expansion movement ${id}`);
+assert(programmeSummary?.newExercises === 155, "Programme summary does not report 155 additions");
+assert(programmeSummary?.totalUniqueExercises === 195,
+  "Programme summary does not report 195 unique exercises");
+assert(skillProgressionPaths.length === 16, `Expected 16 visible skill progression paths; found ${skillProgressionPaths.length}`);
 for (const path of skillProgressionPaths) {
   assert(path.label?.trim() && path.steps.length >= 3, `Invalid progression path ${path.label ?? "unnamed"}`);
   path.steps.forEach((id) => assert(Boolean(exercises[id]), `${path.label}: missing progression exercise ${id}`));
@@ -117,7 +129,7 @@ const validStatuses = new Set(["ready", "audit", "required"]);
 const validMediaKinds = new Set(["loop", "static", "transition"]);
 const validEquipment = new Set(["parallettes", "floor", "wall", "rope"]);
 const mediaCounts = { ready: 0, audit: 0, required: 0, files: 0, motion: 0 };
-const excludedIds = ["kneeling-lean", "cross-press", "boat-hold", "plank-tap-out", "mountain-climber", "plank-knee-elbow", "frog-prep", "prayer-wrist-waves", "inchworm-pike-walkout", "crossbody-mountain-climber", "frog-stand-weight-shift", "forearm-pronator-stretch", "crossbody-shoulder-stretch", "supine-thoracic-opener"];
+const excludedIds = ["kneeling-lean", "cross-press", "boat-hold", "plank-tap-out", "mountain-climber", "plank-knee-elbow", "frog-prep", "prayer-wrist-waves", "inchworm-pike-walkout", "crossbody-mountain-climber", "frog-stand-weight-shift", "forearm-pronator-stretch", "supine-thoracic-opener"];
 for (const id of excludedIds) assert(!exercises[id], `${id}: excluded audit movement returned to V2`);
 
 for (const exercise of exerciseList) {
@@ -252,6 +264,25 @@ for (let day = 1; day <= 5; day += 1) {
 }
 
 const allReady = Object.fromEntries(Object.keys(readiness).map((gate) => [gate, true]));
+for (const id of researchExpansionIds.filter((item) => item !== "no-rope-penguin-taps")) {
+  const appearsAsSwap = workoutVariants.some((variant) => {
+    const slots = slotsForVariant(variant, exercises, Boolean(variant.lab));
+    return slots.some((slot) => compatibleSwaps({
+      slot,
+      exercises,
+      day: variant.day,
+      level: variant.level,
+      readiness: allReady,
+      difficulty: "all",
+      includeLocked: true,
+      equipment: ["parallettes", "floor", "wall", "rope"],
+    }).some((candidate) => candidate.id === id));
+  });
+  assert(appearsAsSwap, `${id}: research expansion movement is unreachable from recommended swaps`);
+}
+assert(exercises["no-rope-penguin-taps"].category === "Conditioning" &&
+  exercises["no-rope-penguin-taps"].requiredEquipment.join("|") === "floor",
+"No-Rope Penguin Taps must remain a floor-only Custom Conditioning option");
 const dayResults = [];
 let extendedPlans = 0;
 let matOnlyReplacements = 0;

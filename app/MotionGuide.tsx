@@ -731,11 +731,146 @@ const v2ExpansionGuides = Object.fromEntries(
   v2ExpansionGuideIds.map((id) => [id, expansionGuide(id)]),
 ) as Record<(typeof v2ExpansionGuideIds)[number], Guide>;
 
+const researchExpansionGuides = {
+  "palm-lift-wrist-conditioning": dynamic("Finger pads stay grounded as the palms lift", [
+    quadruped,
+    change(quadruped, { lw: p(426, 390), rw: p(448, 390), head: p(500, 203), neck: p(460, 222) }),
+    quadruped,
+  ], 420, undefined, 4, p(10, 7)),
+  "forearm-turn-finger-spread": dynamic("Turn the forearms and open the fingers", [
+    change(standing, { le: p(282, 214), lw: p(340, 220), re: p(358, 214), rw: p(300, 220) }),
+    change(standing, { le: p(282, 214), lw: p(340, 198), re: p(358, 214), rw: p(300, 242) }),
+    change(standing, { le: p(282, 214), lw: p(340, 242), re: p(358, 214), rw: p(300, 198) }),
+  ], 486, undefined, 4.8, p(13, 0)),
+  "alternating-straight-leg-hamstring-sweep": dynamic("Heel forward; hinge from the hips", [
+    standing,
+    change(standing, {
+      head: p(402, 184), neck: p(372, 214), ls: p(344, 236), rs: p(368, 240),
+      le: p(402, 292), lw: p(438, 354), re: p(420, 300), rw: p(454, 364),
+      lh: p(310, 286), rh: p(332, 294), lk: p(262, 374), la: p(214, 470), rk: p(366, 386), ra: p(438, 470),
+    }),
+    standing,
+    change(standing, {
+      head: p(238, 184), neck: p(268, 214), ls: p(272, 240), rs: p(296, 236),
+      le: p(220, 300), lw: p(186, 364), re: p(238, 292), rw: p(202, 354),
+      lh: p(308, 294), rh: p(330, 286), lk: p(274, 386), la: p(202, 470), rk: p(378, 374), ra: p(426, 470),
+    }),
+  ], 486, undefined, 6, p(12, 2)),
+  "dynamic-half-kneeling-hip-flexor-reach": dynamic("Tuck the pelvis, shift gently, reach overhead", [
+    halfKneeling,
+    change(halfKneeling, {
+      head: p(340, 116), neck: p(334, 158), ls: p(308, 178), rs: p(360, 178),
+      le: p(306, 106), lw: p(318, 42), re: p(364, 106), rw: p(350, 42),
+      lh: p(318, 304), rh: p(350, 306), lk: p(404, 372), la: p(442, 470),
+    }),
+  ], 486, undefined, 4.8, p(13, 0)),
+  "cossack-weight-shift": dynamic("Shift side to side with both feet grounded", [
+    change(standing, { lh: p(302, 286), rh: p(338, 286), lk: p(224, 382), la: p(116, 470), rk: p(416, 382), ra: p(524, 470) }),
+    change(standing, { head: p(238, 156), neck: p(248, 198), ls: p(224, 216), rs: p(274, 220), lh: p(232, 314), rh: p(268, 318), lk: p(164, 364), la: p(116, 470), rk: p(390, 386), ra: p(524, 470), le: p(180, 272), lw: p(142, 322), re: p(300, 272), rw: p(342, 320) }),
+    change(standing, { lh: p(302, 286), rh: p(338, 286), lk: p(224, 382), la: p(116, 470), rk: p(416, 382), ra: p(524, 470) }),
+    change(standing, { head: p(402, 156), neck: p(392, 198), ls: p(366, 220), rs: p(416, 216), lh: p(372, 318), rh: p(408, 314), lk: p(250, 386), la: p(116, 470), rk: p(476, 364), ra: p(524, 470), le: p(340, 272), lw: p(298, 320), re: p(460, 272), rw: p(498, 322) }),
+  ], 486, undefined, 6, p(13, 0)),
+
+  "parallette-wall-grip-pressure-shift": dynamic("Keep the wall contact light; change pressure through the bars", [
+    wallHandstand,
+    change(wallHandstand, { head: p(462, 338), neck: p(462, 309), ls: p(443, 286), rs: p(466, 286), lh: p(476, 188), rh: p(492, 190), lk: p(512, 116), rk: p(524, 118) }),
+    change(wallHandstand, { head: p(474, 338), neck: p(474, 309), ls: p(455, 286), rs: p(478, 286), lh: p(488, 188), rh: p(504, 190), lk: p(524, 116), rk: p(536, 118) }),
+  ], 420, ["wall", "parallettes"], 5, p(0, 12)),
+  "chest-wall-micro-shoulder-tap": dynamic("Shift first; make only a tiny controlled tap", [
+    wallHandstand,
+    change(wallHandstand, { ls: p(456, 286), le: p(472, 326), lw: p(454, 286), rs: p(478, 286), re: p(470, 343), rw: p(456, 400), lh: p(486, 188), rh: p(502, 190) }),
+    wallHandstand,
+    change(wallHandstand, { rs: p(465, 286), re: p(448, 326), rw: p(466, 286), ls: p(447, 286), le: p(442, 342), lw: p(438, 400), lh: p(478, 188), rh: p(494, 190) }),
+  ], 420, ["wall", "parallettes"], 6, p(0, 12)),
+  "entry-balance-side-exit-chain": dynamic("Enter calmly, balance briefly, then take the trained side exit", [
+    kickupStart,
+    kickupSplit,
+    change(wallHandstand, { lh: p(468, 188), lk: p(464, 112), la: p(460, 38), rh: p(486, 190), rk: p(482, 114), ra: p(478, 40) }),
+    change(kickupSplit, { lh: p(480, 190), lk: p(540, 160), la: p(558, 132), rh: p(496, 198), rk: p(402, 242), ra: p(306, 294) }),
+    change(kickupStart, { rh: p(326, 264), rk: p(390, 330), ra: p(470, 400) }),
+  ], 420, "parallettes", 7, p(10, 6)),
+
+  "prone-arch-body-hold": hold("Reach long in a shallow arch; face stays toward the mat", change(prone, {
+    head: p(500, 366), neck: p(458, 362), ls: p(426, 354), rs: p(434, 368),
+    le: p(476, 338), lw: p(552, 320), re: p(484, 352), rw: p(558, 336),
+    lk: p(202, 370), la: p(82, 354), rk: p(216, 384), ra: p(94, 370),
+  }), 426, undefined, p(0, 11)),
+  "hollow-to-arch-log-roll": dynamic("Roll as one unit between hollow and shallow arch", [
+    longHollow,
+    change(longHollow, { head: p(500, 350), neck: p(462, 350), ls: p(426, 350), rs: p(432, 374), lh: p(300, 350), rh: p(308, 382), le: p(492, 324), lw: p(568, 304), re: p(496, 360), rw: p(572, 346), lk: p(204, 354), la: p(82, 344), rk: p(214, 390), ra: p(92, 386) }),
+    change(prone, { head: p(500, 366), neck: p(458, 362), ls: p(426, 354), rs: p(434, 368), le: p(476, 338), lw: p(552, 320), re: p(484, 352), rw: p(558, 336), lk: p(202, 370), la: p(82, 354), rk: p(216, 384), ra: p(94, 370) }),
+  ], 426, undefined, 6, p(0, 11)),
+  "bridge-walkout": dynamic("Take small heel steps while the pelvis stays level", [
+    bridge,
+    change(bridge, { lk: p(224, 342), la: p(146, 410), rk: p(242, 354), ra: p(164, 414) }),
+    change(bridge, { lk: p(206, 350), la: p(112, 410), rk: p(224, 362), ra: p(130, 414), lh: p(304, 318), rh: p(320, 330) }),
+  ], 426, undefined, 5.6, p(0, -12)),
+  "high-plank-bird-dog": dynamic("Reach opposite arm and leg; keep the pelvis square", [
+    plank,
+    change(plank, { le: p(500, 226), lw: p(574, 198), rk: p(168, 318), ra: p(54, 286) }),
+    plank,
+    change(plank, { re: p(512, 232), rw: p(582, 206), lk: p(154, 308), la: p(44, 274) }),
+  ], 420, undefined, 6, p(10, 7)),
+  "lateral-bear-crawl": dynamic("Knees hover low; step sideways without crossing", [
+    shifted(bearHover, -28, 0),
+    change(shifted(bearHover, -8, 0), { lw: p(454, 400), la: p(214, 394), rw: p(468, 400), ra: p(236, 396) }),
+    shifted(bearHover, 20, 0),
+  ], 420, undefined, 5, p(10, 6)),
+
+  "eccentric-lsit-to-tuck-lower": dynamic("Lower slowly from long legs to a compact tuck", [
+    lSit,
+    change(lSit, { lk: p(280, 312), la: p(172, 314), rk: p(294, 322), ra: p(184, 324) }),
+    tuckSupport,
+  ], 420, "parallettes", 6, p(13, 0)),
+  "assisted-straddle-lsit-hold": hold("Press tall; wide straight heels provide light floor assistance", change(support, {
+    lh: p(354, 304), rh: p(370, 312), lk: p(234, 330), la: p(86, 398), rk: p(286, 334), ra: p(218, 414),
+  }), 420, "parallettes", p(13, 0)),
+  "alternating-one-leg-lsit-switch": dynamic("Switch the long leg without dropping the support", [
+    change(lSit, { rk: p(380, 352), ra: p(340, 386) }),
+    tuckSupport,
+    change(lSit, { lk: p(382, 344), la: p(342, 380), rk: p(250, 310), ra: p(110, 308) }),
+  ], 420, "parallettes", 5.2, p(13, 0)),
+
+  "parallette-push-up-plus": dynamic("Finish with straight elbows and spread the shoulder blades", [
+    change(plank, { head: p(500, 282), neck: p(466, 296), ls: p(432, 308), le: p(470, 350), lw: p(434, 400), rs: p(448, 312), re: p(486, 354), rw: p(456, 400), lh: p(294, 330), rh: p(308, 338) }),
+    plank,
+    change(plank, { head: p(508, 220), neck: p(472, 242), ls: p(438, 262), rs: p(454, 266), lh: p(294, 296), rh: p(308, 304) }),
+  ], 420, "parallettes", 5.4, p(10, 7)),
+  "planche-lean-scapular-pulse": dynamic("Keep the lean and elbows locked as the shoulder blades pulse", [
+    plancheLean,
+    change(plancheLean, { head: p(538, 216), neck: p(502, 236), ls: p(474, 250), rs: p(492, 254), lh: p(320, 292), rh: p(334, 300) }),
+  ], 420, "parallettes", 4.2, p(10, 7)),
+  "staggered-parallette-push-up": dynamic("Keep hips square while pressing on the slightly staggered bars", [
+    change(plank, { lw: p(420, 400), rw: p(470, 372), le: p(420, 324), re: p(468, 310) }),
+    change(plank, { head: p(500, 282), neck: p(466, 296), ls: p(432, 308), rs: p(448, 312), le: p(458, 350), lw: p(420, 400), re: p(496, 338), rw: p(470, 372), lh: p(294, 330), rh: p(308, 338) }),
+  ], 420, "parallettes", 4.8, p(10, 7)),
+
+  "supine-hamstring-stretch": hold("Support behind the thigh; lengthen the knee gently", change(supine, {
+    le: p(350, 318), lw: p(310, 270), re: p(370, 330), rw: p(330, 282),
+    lh: p(310, 372), lk: p(322, 248), la: p(330, 104), rh: p(320, 386), rk: p(250, 354), ra: p(190, 414),
+  }), 426, undefined, p(0, -12)),
+  "figure-four-glute-stretch": hold("Ankle rests across the opposite thigh; shoulders stay relaxed", change(supine, {
+    le: p(366, 328), lw: p(304, 310), re: p(388, 344), rw: p(326, 326),
+    lh: p(314, 370), lk: p(350, 318), la: p(302, 278), rh: p(328, 384), rk: p(256, 344), ra: p(222, 414),
+  }), 426, undefined, p(0, -12)),
+  "gentle-frog-adductor-hold": hold("Wide padded knees; ease the hips back and breathe", change(quadruped, {
+    head: p(490, 286), neck: p(450, 278), ls: p(420, 284), rs: p(438, 292),
+    le: p(438, 338), lw: p(470, 400), re: p(454, 344), rw: p(486, 406),
+    lh: p(294, 274), rh: p(312, 284), lk: p(188, 340), la: p(120, 400), rk: p(396, 348), ra: p(474, 408),
+  }), 420, undefined, p(10, 6)),
+  "no-rope-penguin-taps": dynamic("Low jumps; tap the outer thighs once per turn", [
+    change(standing, { le: p(286, 232), lw: p(296, 300), re: p(354, 232), rw: p(344, 300) }),
+    change(standing, { head: p(320, 68), neck: p(320, 110), ls: p(284, 128), rs: p(356, 128), le: p(286, 230), lw: p(300, 286), re: p(354, 230), rw: p(340, 286), lh: p(302, 275), rh: p(338, 275), lk: p(292, 372), rk: p(348, 372), la: p(282, 452), ra: p(358, 452) }),
+    change(standing, { le: p(286, 232), lw: p(296, 300), re: p(354, 232), rw: p(344, 300) }),
+  ], 486, undefined, 3.6, p(13, 0)),
+} as const satisfies Record<string, Guide>;
+
 export const guides = {
   ...legacyGuides,
   ...newGuides,
   ...existingTechniqueGuides,
   ...v2ExpansionGuides,
+  ...researchExpansionGuides,
 } satisfies Record<string, Guide>;
 
 export type MotionPreset = keyof typeof guides;

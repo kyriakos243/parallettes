@@ -166,6 +166,19 @@ const supportsLevel = (
 ): boolean => exercise.level === "ALL" ||
   (exercise.availableLevels ?? [exercise.level]).includes(level);
 
+const focusGroups: readonly (readonly string[])[] = [
+  ["wrist", "grip"],
+  ["shoulder-mobility", "thoracic-reset", "hamstring-mobility", "hip-mobility", "adductor-mobility"],
+  ["hollow", "anti-extension", "anti-rotation", "pelvic-control", "posterior-chain"],
+  ["balance", "grip"],
+];
+
+/** Same-role families let the swap picker add useful variety without mixing
+ * unrelated blocks or difficulty. Exact-focus matches still sort first. */
+const focusCompatible = (exerciseFocus: string, slotFocus: string): boolean =>
+  exerciseFocus === slotFocus || focusGroups.some((group) =>
+    group.includes(exerciseFocus) && group.includes(slotFocus));
+
 export const isExerciseStructurallyCompatible = (
   exercise: ExerciseCompatibility,
   slot: Pick<SessionSlot, "block" | "primaryFocus">,
@@ -174,7 +187,7 @@ export const isExerciseStructurallyCompatible = (
   exercise.eligibleBlocks.includes(slot.block) &&
   // Lab is an explicitly selected extra skill track. Unlike a programmed
   // core slot, its purpose may change from L-sit to planche or pushing.
-  (slot.block === "lab" || exercise.primaryFocus === slot.primaryFocus) &&
+  (slot.block === "lab" || focusCompatible(exercise.primaryFocus, slot.primaryFocus)) &&
   supportsDay(exercise, day);
 
 export const isExerciseCompatible = (
