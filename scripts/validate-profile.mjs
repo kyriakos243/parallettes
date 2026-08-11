@@ -11,11 +11,21 @@ globalThis.localStorage = {
   getItem: (key) => memory.get(key) ?? null,
   setItem: (key, value) => memory.set(key, String(value)),
   removeItem: (key) => memory.delete(key),
+  key: (index) => [...memory.keys()][index] ?? null,
+  get length() { return memory.size; },
 };
 globalThis.indexedDB = undefined;
 const loaded = { exports: {} };
 new Function("exports", "module", "require", compiled)(loaded.exports, loaded, () => { throw new Error("Unexpected import"); });
-const { exportProfile, importProfile, mergeProfiles, newProfile } = loaded.exports;
+const { applyFactoryReset, exportProfile, importProfile, mergeProfiles, newProfile } = loaded.exports;
+
+memory.set("parallette25-profile-index-v1", JSON.stringify([{ profileId: "old", username: "Old" }]));
+memory.set("parallette25-account-sessions-v1", JSON.stringify({ old: { token: "secret" } }));
+memory.set("parallette25-history-v1:guest", JSON.stringify([{ id: "old-session" }]));
+if (!await applyFactoryReset() || [...memory.keys()].some((key) => key.startsWith("parallette25-") && key !== "parallette25-factory-reset")) {
+  throw new Error("Device factory reset did not remove all local account and workout data");
+}
+if (await applyFactoryReset()) throw new Error("Device factory reset was not idempotent");
 
 const base = newProfile("Kyriakos");
 const local = {
@@ -49,4 +59,4 @@ const restored = importProfile(exportProfile(merged));
 if (!restored || restored.profileId !== merged.profileId || restored.history.length !== 2) {
   throw new Error("Profile backup round-trip failed");
 }
-console.log("Profiles: stable ID, backup round-trip and conflict-safe append-only history passed.");
+console.log("Profiles: factory reset, stable ID, backup round-trip and conflict-safe append-only history passed.");
