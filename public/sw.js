@@ -1,4 +1,4 @@
-const CACHE = "parallette-25-v11";
+const CACHE = "parallette-25-v12";
 const base = new URL("./", self.registration.scope);
 const shell = [
   base.href,

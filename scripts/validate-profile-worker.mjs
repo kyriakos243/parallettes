@@ -2,6 +2,12 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import worker from "../profile-api/worker.js";
 
+const workerSource = readFileSync("profile-api/worker.js", "utf8");
+const passwordIterations = Number(workerSource.match(/const PASSWORD_ITERATIONS = ([\d_]+);/)?.[1].replaceAll("_", ""));
+if (!Number.isInteger(passwordIterations) || passwordIterations < 100_000 || passwordIterations > 100_000) {
+  throw new Error(`Cloudflare-compatible PBKDF2 iterations must be exactly 100000; found ${passwordIterations}`);
+}
+
 class TestStatement {
   constructor(database, sql, values = []) { this.database = database; this.sql = sql; this.values = values; }
   bind(...values) { return new TestStatement(this.database, this.sql, values); }

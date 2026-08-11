@@ -1,6 +1,9 @@
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const PASSWORD_ITERATIONS = 210_000;
+// Cloudflare Workers Web Crypto rejects PBKDF2 iteration counts above 100,000.
+// Keep this at the runtime ceiling so registration, login and recovery use the
+// strongest portable setting supported by the deployed Worker.
+const PASSWORD_ITERATIONS = 100_000;
 const SESSION_DAYS = 30;
 const MAX_PROFILE_BYTES = 750_000;
 const MAX_FAILED_ATTEMPTS = 8;
