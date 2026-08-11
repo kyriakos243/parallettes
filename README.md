@@ -1,14 +1,12 @@
 # Parallette 25+
 
-A mobile-first Parallette25 V2 engine containing five permanent themes, 170 tagged movements, three session levels, equipment-aware Custom Sessions, role-matched swaps and optional Calisthenics Lab work. Every recommended session is exactly 25 minutes; Progress and Challenge can add five minutes for an exact 30-minute session. Custom Sessions support exact 5/10/15/20/25/30-minute builds.
+A mobile-first Parallette25 V2 engine containing five permanent themes, 195 tagged movements, three session levels, equipment-aware Custom Sessions, role-matched swaps and optional Calisthenics Lab work. Every recommended session is exactly 25 minutes; Progress and Challenge can add five minutes for an exact 30-minute session. Custom Sessions support exact 5/10/15/20/25/30-minute builds.
 
-The documented exercise-count adjustment from the specification’s proposed 163 to the audited 170-movement production pool is recorded in [docs/V2_AUDIT_ADJUSTMENTS.md](docs/V2_AUDIT_ADJUSTMENTS.md).
+The documented exercise-count adjustment from the specification’s proposed 163 to the audited 195-movement production pool is recorded in [docs/V2_AUDIT_ADJUSTMENTS.md](docs/V2_AUDIT_ADJUSTMENTS.md).
 
 The authoritative session order is **Dynamic Warm-up → Prepare → Handstand → optional Calisthenics Lab → Abs/Core → static Cooldown & Stretching**.
 
 **Current live app:** https://kyriakos243.github.io/parallettes/
-
-The V2 work is intentionally developed on a separate branch/PR first. The current live URL remains on the previous stable release until the V2 checks and review are complete.
 
 ## Demonstration system and media policy
 
@@ -54,11 +52,13 @@ The included `.github/workflows/deploy-pages.yml` workflow builds and deploys th
 
 Open the live site in Safari, tap **Share**, then choose **Add to Home Screen**. Profiles, difficulty choices, swaps, Lab settings, readiness and history are cached on the device. The optional `VITE_PROFILE_API_URL` proxy enables cross-device profile sync without placing a GitHub token in the browser; when it is not configured, the app remains local-first and supports JSON backup/import.
 
-## Optional shared username profiles
+## Secure cross-device profiles
 
-The static Pages bundle never contains a write credential. A small Cloudflare Worker template is included in `profile-api/`; it stores username profiles in KV and enforces revision checks.
+The static Pages bundle never contains a write credential. The Cloudflare Worker in `profile-api/` provides private password-protected accounts in D1 while the app keeps an offline IndexedDB copy on each device.
 
-1. Create a Workers KV namespace and copy `profile-api/wrangler.toml.example` to `profile-api/wrangler.toml`.
-2. Insert the namespace ID, then deploy the Worker from that folder.
-3. In the GitHub repository, create the Actions variable `VITE_PROFILE_API_URL` containing the Worker URL (without a trailing slash).
-4. Run the Pages workflow. The same username can then be selected on another iPhone while IndexedDB remains the offline cache.
+1. Deploy `profile-api/worker.js` with the `DB` D1 binding and retain the existing `PROFILES` KV binding only while old passwordless profiles are being claimed.
+2. In the GitHub repository, set the Actions variable `VITE_PROFILE_API_URL` to the Worker URL without a trailing slash.
+3. Run the Pages workflow. A user can then sign in to the same account from another iPhone, iPad or Mac.
+4. On the first updated visit, an existing local profile is marked **On this device**. Choose **Secure this profile**, create a password, and save the one-time recovery code.
+
+Usernames are unique without regard to capitalisation. Profiles are never publicly listed, new visitors start as Guest, and a saved browser session cannot expose another account on a different device.
