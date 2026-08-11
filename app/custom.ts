@@ -15,9 +15,37 @@ export type CustomRequest = {
   preferVariety?: boolean;
   feedbackByExercise?: Record<string, "easy" | "right" | "hard">;
   progressionEvidence?: Record<string, { cleanSessions?: number }>;
+  /** Changes the top-ranked choices without weakening readiness or equipment filters. */
+  variationSeed?: number;
 };
-export type CustomItem = { exerciseId: string; block: "warmup" | "pre" | "skill" | "strength" | "lab" | "cooldown"; work: number; rest: number };
-export type CustomPlan = { mode: "custom"; seconds: number; items: CustomItem[]; warnings: string[]; title: string };
+export type CustomBlock = "warmup" | "pre" | "skill" | "strength" | "lab" | "cooldown";
+export type CustomItem = {
+  exerciseId: string;
+  block: CustomBlock;
+  work: number;
+  rest: number;
+  round: number;
+  rounds: number;
+  station: number;
+  stations: number;
+  occurrence: number;
+  occurrences: number;
+  intentionalRepeat: boolean;
+};
+export type CustomPlanSummary = {
+  block: CustomBlock;
+  intervals: number;
+  uniqueExercises: number;
+  rounds: number;
+};
+export type CustomPlan = {
+  mode: "custom";
+  seconds: number;
+  items: CustomItem[];
+  warnings: string[];
+  title: string;
+  summary: CustomPlanSummary[];
+};
 
 const defaultBlocks: CustomBlocks = { warmup: true, preparation: true, skill: true, strength: true, cooldown: true, lab: false };
 const focusMap: Record<CustomFocus, Focus[]> = {
@@ -33,7 +61,7 @@ const focusMap: Record<CustomFocus, Focus[]> = {
 };
 const skillFocus = (focuses: CustomFocus[]) => focuses.some((focus) =>
   ["handstand", "lsit", "planche", "pushing", "support"].includes(focus));
-const blockMatches = (exercise: Exercise, block: CustomItem["block"], focuses: CustomFocus[]) => {
+const blockMatches = (exercise: Exercise, block: CustomBlock, focuses: CustomFocus[]) => {
   if (block === "warmup") return exercise.category === "Warm-up";
   if (block === "pre") return exercise.category === "Pre-Handstand";
   if (block === "cooldown") return exercise.category === "Cooldown";
@@ -42,8 +70,16 @@ const blockMatches = (exercise: Exercise, block: CustomItem["block"], focuses: C
     if (focuses.includes("handstand") && exercise.category === "Handstand") return true;
     return exercise.category === "Calisthenics" && skillFocus(focuses);
   }
+  if (focuses.length === 1 && focuses[0] === "mobility") return exercise.category === "Warm-up";
   return exercise.category === "Abs" || exercise.category === "Core" || exercise.category === "Conditioning" ||
     (exercise.category === "Calisthenics" && skillFocus(focuses));
+};
+const exerciseMatchesFocus = (exercise: Exercise, focus: CustomFocus) => {
+  if (focus === "conditioning") {
+    return exercise.primaryFocus === "conditioning" || exercise.primaryFocus === "anti-extension" ||
+      exercise.primaryFocus === "pelvic-control" || exercise.requiredEquipment?.includes("rope") === true;
+  }
+  return [exercise.primaryFocus, ...exercise.secondaryFocus].some((tag) => focusMap[focus].includes(tag));
 };
 const levelFor = (difficulty: CustomDifficulty): DifficultyLevel => difficulty === "easy" ? "L1" : difficulty === "hard" ? "L3" : "L2";
 const score = (
@@ -100,75 +136,143 @@ export function buildCustomSession(request: CustomRequest): CustomPlan {
     .sort((a, b) => score(b, request.focuses, level, recent, request.preferNextProgression !== false, request.preferVariety !== false, request.feedbackByExercise ?? {}, request.progressionEvidence ?? {}) -
       score(a, request.focuses, level, recent, request.preferNextProgression !== false, request.preferVariety !== false, request.feedbackByExercise ?? {}, request.progressionEvidence ?? {}));
 
-  const pick = (block: CustomItem["block"]): Exercise | undefined => {
-    const pool = eligible.filter((exercise) => blockMatches(exercise, block, request.focuses));
-    return pool[0];
-  };
-  const items: CustomItem[] = [];
-  const add = (block: CustomItem["block"], count: number, work: number, rest: number) => {
-    const used = new Set(items.map((item) => item.exerciseId));
-    for (let index = 0; index < count; index += 1) {
-      const candidate = eligible.find((exercise) => blockMatches(exercise, block, request.focuses) && !used.has(exercise.id)) ?? pick(block);
-      if (!candidate) continue;
-      used.add(candidate.id);
-      items.push({ exerciseId: candidate.id, block, work, rest });
+  const seed = Math.abs(Math.round(request.variationSeed ?? 0));
+  const hash = (value: string) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
     }
+    return result >>> 0;
   };
+  const safeOrder: CustomBlock[] = ["warmup", "pre", "skill", "lab", "strength", "cooldown"];
+  const activeBlocks = safeOrder.filter((block) => {
+    if (block === "warmup") return blocks.warmup;
+    if (block === "pre") return blocks.preparation;
+    if (block === "skill") return blocks.skill && skillFocus(request.focuses);
+    if (block === "lab") return blocks.lab;
+    if (block === "strength") return blocks.strength;
+    return blocks.cooldown;
+  }).filter((block) => eligible.some((exercise) => blockMatches(exercise, block, request.focuses)));
 
-  // Small sessions remain coherent: warm-up → prep → skill → optional Lab → strength → reset.
   const seconds = Math.max(60, Math.round(request.seconds));
-  if (blocks.warmup && seconds >= 180) add("warmup", 3, 30, 15);
-  if (blocks.preparation && seconds >= 300) add("pre", 2, 30, 15);
-  if (blocks.skill && skillFocus(request.focuses)) add("skill", 1, 30, 30);
-  if (blocks.lab && seconds >= 300) add("lab", 1, 30, 30);
-  if (blocks.strength) add("strength", seconds >= 900 ? 4 : seconds >= 600 ? 3 : 2, 40, 20);
-  if (blocks.cooldown) add("cooldown", 1, 30, 0);
+  const fullMinutes = Math.floor(seconds / 60);
+  const remainder = seconds - fullMinutes * 60;
+  const allocations = Object.fromEntries(safeOrder.map((block) => [block, 0])) as Record<CustomBlock, number>;
 
-  // Exact-duration allocation: preserve the selected sequence and distribute
-  // the available seconds without inventing unrelated movements.
-  let desired = items.reduce((sum, item) => sum + item.work + item.rest, 0);
-  if (desired > seconds && items.length) {
-    const scale = seconds / desired;
-    for (const item of items) { item.work = Math.max(10, Math.round(item.work * scale)); item.rest = Math.max(0, Math.round(item.rest * scale)); }
-  }
-  let total = items.reduce((sum, item) => sum + item.work + item.rest, 0);
-  const cooldown = items.filter((item) => item.block === "cooldown");
-  const priorityBlocks: CustomItem["block"][] = ["strength", "skill", "lab", "pre", "warmup"];
-  const priority = priorityBlocks.find((block) => items.some((item) => item.block === block));
-  const repeatPool = priority
-    ? items.filter((item) => item.block === priority)
-    : items.filter((item) => item.block !== "cooldown");
-  if (total < seconds && repeatPool.length) {
-    let cursor = 0;
-    while (true) {
-      const candidate = repeatPool[cursor % repeatPool.length];
-      const duration = candidate.work + candidate.rest;
-      if (total + duration > seconds) break;
-      const insertAt = Math.max(0, items.length - cooldown.length);
-      items.splice(insertAt, 0, { ...candidate });
-      total += duration;
-      cursor += 1;
+  // Every included block first receives one honest 60-second unit. When a very
+  // short request cannot contain every selected block, preserve the reset,
+  // warm-up and the user's primary skill/strength purpose before extras.
+  const basePriority: CustomBlock[] = ["cooldown", "warmup", "skill", "strength", "pre", "lab"];
+  let unallocated = fullMinutes;
+  for (const block of basePriority) {
+    if (unallocated > 0 && activeBlocks.includes(block)) {
+      allocations[block] += 1;
+      unallocated -= 1;
     }
   }
-  // Any remainder is smaller than one normal interval. Spread it across the
-  // active work periods so the reset never becomes an implausibly long hold.
-  const workItems = items.filter((item) => item.block !== "cooldown");
-  for (let cursor = 0; total < seconds && workItems.length; cursor = (cursor + 1) % workItems.length) {
-    workItems[cursor].work += 1;
-    total += 1;
-  }
-  if (items.length && total > seconds) {
-    let excess = total - seconds;
-    for (let index = items.length - 1; index >= 0 && excess > 0; index -= 1) {
-      const reducibleRest = Math.min(excess, items[index].rest);
-      items[index].rest -= reducibleRest; excess -= reducibleRest;
-      const reducibleWork = Math.min(excess, Math.max(0, items[index].work - 10));
-      items[index].work -= reducibleWork; excess -= reducibleWork;
+  const targets: Partial<Record<CustomBlock, number>> = { warmup: 3, pre: 2, skill: 5, lab: 5 };
+  for (const block of ["warmup", "pre", "skill", "lab"] as CustomBlock[]) {
+    while (unallocated > 0 && activeBlocks.includes(block) && allocations[block] < (targets[block] ?? 1)) {
+      allocations[block] += 1;
+      unallocated -= 1;
     }
-    total = items.reduce((sum, item) => sum + item.work + item.rest, 0);
   }
-  const safeOrder: CustomItem["block"][] = ["warmup", "pre", "skill", "lab", "strength", "cooldown"];
-  items.sort((a, b) => safeOrder.indexOf(a.block) - safeOrder.indexOf(b.block));
-  if (total !== seconds) warnings.push(`This short session is ${Math.abs(seconds - total)} seconds from the requested duration; adjust intervals before starting.`);
-  return { mode: "custom", seconds: total, items, warnings, title: request.focuses.length ? request.focuses.map((focus) => focus[0].toUpperCase() + focus.slice(1)).join(" + ") : "Custom Session" };
+  const mainBlock = activeBlocks.includes("strength") ? "strength"
+    : activeBlocks.includes("skill") ? "skill"
+      : activeBlocks.includes("lab") ? "lab"
+        : activeBlocks.find((block) => block !== "cooldown") ?? "cooldown";
+  allocations[mainBlock] += unallocated;
+
+  for (const block of activeBlocks) {
+    if (allocations[block] === 0) warnings.push(`${block === "lab" ? "Calisthenics Lab" : block} was omitted because this session is too short to include every selected block safely.`);
+  }
+  if (allocations.lab > 0 && allocations.lab < 5) {
+    warnings.push(`Calisthenics Lab is shortened to ${allocations.lab} clearly labelled practice round${allocations.lab === 1 ? "" : "s"}.`);
+  }
+
+  const globallyUsed = new Set<string>();
+  const chooseStations = (block: CustomBlock, count: number): Exercise[] => {
+    const selected: Exercise[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const intendedFocus = request.focuses.length ? request.focuses[index % request.focuses.length] : undefined;
+      const candidates = eligible.filter((exercise) => blockMatches(exercise, block, request.focuses) && !globallyUsed.has(exercise.id));
+      const focused = intendedFocus ? candidates.filter((exercise) => exerciseMatchesFocus(exercise, intendedFocus)) : candidates;
+      const pool = focused.length ? focused : candidates.length ? candidates
+        : eligible.filter((exercise) => blockMatches(exercise, block, request.focuses) && !selected.some((item) => item.id === exercise.id));
+      if (!pool.length) break;
+      const shortlist = pool.slice(0, Math.min(6, pool.length));
+      const choice = shortlist[hash(`${seed}:${block}:${index}`) % Math.min(4, shortlist.length)];
+      selected.push(choice);
+      globallyUsed.add(choice.id);
+    }
+    return selected;
+  };
+
+  const rawItems: Array<Omit<CustomItem, "occurrence" | "occurrences" | "intentionalRepeat">> = [];
+  for (const block of safeOrder) {
+    const minuteSlots = allocations[block];
+    if (minuteSlots <= 0) continue;
+    const intervalCount = block === "cooldown" ? minuteSlots * 2 : minuteSlots;
+    const desiredStations = block === "warmup" ? Math.min(3, intervalCount)
+      : block === "pre" ? Math.min(2, intervalCount)
+        : block === "skill" ? Math.min(Math.max(1, Math.min(2, request.focuses.length)), intervalCount)
+          : block === "lab" ? 1
+            : block === "strength" ? Math.min(request.focuses.includes("mobility") ? 5 : 4, intervalCount)
+              : Math.min(4, intervalCount);
+    const stations = chooseStations(block, desiredStations);
+    if (!stations.length) continue;
+    const rounds = Math.ceil(intervalCount / stations.length);
+    for (let index = 0; index < intervalCount; index += 1) {
+      const round = Math.floor(index / stations.length) + 1;
+      const roundStart = (round - 1) * stations.length;
+      const stationsThisRound = Math.min(stations.length, intervalCount - roundStart);
+      const exercise = stations[index % stations.length];
+      rawItems.push({
+        exerciseId: exercise.id,
+        block,
+        work: block === "cooldown" ? 30 : block === "warmup" ? 45 : block === "skill" || block === "lab" ? 30 : 40,
+        rest: block === "cooldown" ? 0 : block === "warmup" ? 15 : block === "skill" || block === "lab" ? 30 : 20,
+        round,
+        rounds,
+        station: (index % stations.length) + 1,
+        stations: stationsThisRound,
+      });
+    }
+  }
+
+  if (remainder > 0 && rawItems.length) {
+    const adjustable = [...rawItems].reverse().find((item) => item.block !== "cooldown") ?? rawItems[rawItems.length - 1];
+    adjustable.work += remainder;
+  }
+  const occurrenceTotals = rawItems.reduce<Record<string, number>>((totals, item) => {
+    totals[item.exerciseId] = (totals[item.exerciseId] ?? 0) + 1;
+    return totals;
+  }, {});
+  const occurrenceCursor: Record<string, number> = {};
+  const items: CustomItem[] = rawItems.map((item) => {
+    const occurrence = (occurrenceCursor[item.exerciseId] ?? 0) + 1;
+    occurrenceCursor[item.exerciseId] = occurrence;
+    const occurrences = occurrenceTotals[item.exerciseId];
+    return { ...item, occurrence, occurrences, intentionalRepeat: occurrences > 1 };
+  });
+  const total = items.reduce((sum, item) => sum + item.work + item.rest, 0);
+  if (total !== seconds) warnings.push(`The available exercise pool produced ${total} seconds instead of ${seconds}; review the selected equipment or blocks.`);
+  const summary = safeOrder.flatMap((block): CustomPlanSummary[] => {
+    const blockItems = items.filter((item) => item.block === block);
+    return blockItems.length ? [{
+      block,
+      intervals: blockItems.length,
+      uniqueExercises: new Set(blockItems.map((item) => item.exerciseId)).size,
+      rounds: Math.max(...blockItems.map((item) => item.rounds)),
+    }] : [];
+  });
+  return {
+    mode: "custom",
+    seconds: total,
+    items,
+    warnings,
+    summary,
+    title: request.focuses.length ? request.focuses.map((focus) => focus === "lsit" ? "L-Sit" : focus[0].toUpperCase() + focus.slice(1)).join(" + ") : "Custom Session",
+  };
 }

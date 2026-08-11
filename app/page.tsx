@@ -479,6 +479,7 @@ export default function Home() {
   const elapsedBaseRef = useRef(0);
   const lastIntervalRef = useRef(-1);
   const completionRecordedRef = useRef(false);
+  const customGenerationRef = useRef(0);
   const audioRef = useRef<AudioContext | null>(null);
 
   const day = workouts.find((item) => item.day === settings.selectedDay) ?? workouts[0];
@@ -783,19 +784,23 @@ export default function Home() {
     setTodayEquipment(equipment);
     await refreshProfiles(updated.profileId);
   };
-  const generateCustom = () => setCustomPlan(buildCustomSession({
-    focuses: customFocuses,
-    equipment: customEquipment as never,
-    seconds: customSeconds,
-    difficulty: customDifficulty,
-    blocks: customAdvanced ? customBlocks : undefined,
-    recentIds: settings.recentExerciseIds,
-    readiness: ready,
-    preferNextProgression: customPreferProgression,
-    preferVariety: customPreferVariety,
-    feedbackByExercise: settings.feedbackByExercise,
-    progressionEvidence: profile?.progression,
-  }));
+  const generateCustom = () => {
+    customGenerationRef.current += 1;
+    setCustomPlan(buildCustomSession({
+      focuses: customFocuses,
+      equipment: customEquipment as never,
+      seconds: customSeconds,
+      difficulty: customDifficulty,
+      blocks: customAdvanced ? customBlocks : undefined,
+      recentIds: settings.recentExerciseIds,
+      readiness: ready,
+      preferNextProgression: customPreferProgression,
+      preferVariety: customPreferVariety,
+      feedbackByExercise: settings.feedbackByExercise,
+      progressionEvidence: profile?.progression,
+      variationSeed: Date.now() + customGenerationRef.current,
+    }));
+  };
 
   const openChallenge = (focus?: CustomFocus) => {
     if (!focus) {
@@ -1138,8 +1143,8 @@ export default function Home() {
     customPlan.items.forEach((item, index) => {
       const block = item.block === "skill" ? "handstand" : item.block === "strength" ? "core" : item.block;
       const slotId = (index === 0 ? "warmup-1" : index === 1 ? "pre-1" : index === 2 ? "handstand-1" : index === customPlan.items.length - 1 ? "cooldown-1" : `core-${Math.min(4, index)}`) as StableSlotId;
-      intervals.push({ id: `custom-${index}-work`, kind: "work", duration: item.work, block, slotId, exerciseId: item.exerciseId, label: exercises[item.exerciseId]?.name ?? item.exerciseId, round: 1, rounds: 1 });
-      if (item.rest > 0) intervals.push({ id: `custom-${index}-rest`, kind: "rest", duration: item.rest, block, slotId, label: "Rest", round: 1, rounds: 1 });
+      intervals.push({ id: `custom-${index}-work`, kind: "work", duration: item.work, block, slotId, exerciseId: item.exerciseId, label: exercises[item.exerciseId]?.name ?? item.exerciseId, round: item.round, rounds: item.rounds });
+      if (item.rest > 0) intervals.push({ id: `custom-${index}-rest`, kind: "rest", duration: item.rest, block, slotId, label: "Rest", round: item.round, rounds: item.rounds });
     });
     const plan: SessionPlan = { schemaVersion: 1, day: 0, level: customDifficulty === "easy" ? "L1" : customDifficulty === "hard" ? "L3" : "L2", includeLab: customPlan.items.some((item) => item.block === "lab"), intervals, totalSeconds: intervals.reduce((sum, interval) => sum + interval.duration, 0) };
     setActivePlan(plan); setTimerPosition(locateTimerPosition(plan, 0)); elapsedBaseRef.current = 0; anchorRef.current = Date.now(); lastIntervalRef.current = -1; completionRecordedRef.current = false; setSessionFeedback({}); setSessionCleanTargets({}); setActiveSessionModified(false); setComplete(false); setCustomOpen(false); setPlayerOpen(true); setRunning(true); beep(true);
@@ -1566,7 +1571,16 @@ export default function Home() {
               {customAdvanced && <div className="advanced-options"><p className="control-kicker">Equipment</p><div className="custom-chip-grid equipment-chips">{(["parallettes", "floor", "wall", "rope"] as const).map((item) => <button type="button" className={customEquipment.includes(item) ? "active" : ""} key={item} onClick={() => setCustomEquipment((current) => current.includes(item) ? current.filter((value) => value !== item) : [...current, item])}>{item === "floor" ? "Mat / Floor" : item[0].toUpperCase() + item.slice(1)}</button>)}</div><p className="control-kicker">Blocks</p>{(Object.keys(customBlocks) as Array<keyof CustomBlocks>).map((block) => <label key={block}><input type="checkbox" checked={customBlocks[block]} onChange={() => setCustomBlocks((current) => ({ ...current, [block]: !current[block] }))} /><span>{block === "preparation" ? "Preparation" : block === "strength" ? "Strength / Core" : block === "lab" ? "Calisthenics Lab" : block[0].toUpperCase() + block.slice(1)}</span></label>)}<p className="control-kicker">Preferences</p><label><input type="checkbox" checked={customPreferProgression} onChange={() => setCustomPreferProgression((current) => !current)} /><span>Prioritize my next progression</span></label><label><input type="checkbox" checked={customPreferVariety} onChange={() => setCustomPreferVariety((current) => !current)} /><span>Avoid recently used exercises</span></label></div>}
               <p className="control-kicker">Save mode</p><div className="custom-chip-grid"><button type="button" className={saveMode === "normal" ? "active" : ""} onClick={() => setSaveMode("normal")}>Normal · progress</button><button type="button" className={saveMode === "practice" ? "active" : ""} onClick={() => setSaveMode("practice")}>Practice only</button><button type="button" className={saveMode === "guest" ? "active" : ""} onClick={() => setSaveMode("guest")}>Guest · don't save</button></div>
               <div className="drawer-actions"><button type="button" className="secondary-button" onClick={generateCustom}><RefreshCw /> Generate</button>{customPlan && <button type="button" className="primary-button" onClick={startCustomWorkout}><Play fill="currentColor" /> Start {formatTime(customPlan.seconds)}</button>}</div>
-              {customPlan && <div className="custom-preview"><strong>{customPlan.title} · {formatTime(customPlan.seconds)}</strong>{customPlan.warnings.map((warning) => <span key={warning}>{warning}</span>)}{customPlan.items.map((item, index) => <div key={`${item.exerciseId}-${item.block}-${index}`}><span>{item.block === "skill" ? "Skill practice" : blockLabels[item.block === "strength" ? "core" : item.block]}</span><strong>{exercises[item.exerciseId]?.name}</strong><small>{item.work}s work · {item.rest}s rest</small></div>)}</div>}
+              {customPlan && <div className="custom-preview">
+                <strong>{customPlan.title} · {formatTime(customPlan.seconds)}</strong>
+                <div className="custom-plan-summary">{customPlan.summary.map((item) => <span key={item.block}><b>{item.block === "skill" ? "Skill" : item.block === "strength" ? "Strength / Core" : item.block === "pre" ? "Prepare" : item.block === "lab" ? "Lab" : item.block[0].toUpperCase() + item.block.slice(1)}</b>{item.uniqueExercises} exercise{item.uniqueExercises === 1 ? "" : "s"} · {item.rounds} round{item.rounds === 1 ? "" : "s"}</span>)}</div>
+                {customPlan.warnings.map((warning) => <span className="custom-warning" key={warning}>{warning}</span>)}
+                {customPlan.items.map((item, index) => <div key={`${item.exerciseId}-${item.block}-${index}`}>
+                  <span>{item.block === "skill" ? "Skill practice" : item.block === "strength" ? "Strength / Core" : blockLabels[item.block]} · Round {item.round}/{item.rounds}{item.stations > 1 ? ` · Station ${item.station}/${item.stations}` : ""}</span>
+                  <strong>{exercises[item.exerciseId]?.name}</strong>
+                  <small>{item.work}s work · {item.rest}s rest{item.intentionalRepeat ? ` · repeat ${item.occurrence}/${item.occurrences}` : " · one appearance"}</small>
+                </div>)}
+              </div>}
             </div>
           </Drawer>
         )}
