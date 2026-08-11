@@ -649,7 +649,11 @@ const expansionGuide = (id: (typeof v2ExpansionGuideIds)[number]): Guide => {
     if (id.includes("shift")) return dynamic("Shift a few centimetres with both hands planted", [wallHandstand, shifted(wallHandstand, -8, 0), shifted(wallHandstand, 8, 0)], 420, "wall", 4.6, p(0, 12));
     return hold("Active shoulders; chest faces wall; toes touch lightly", wallHandstand, 420, "wall", p(8, 12));
   }
-  if (id === "floor-freestanding-kick-up" || id === "floor-freestanding-balance-attempt") return dynamic("Calm freestanding entry with a planned exit", [kickupStart, kickupSplit, change(wallHandstand, { la: p(460, 38), ra: p(478, 40), lk: p(464, 112), rk: p(482, 114) })], 420, undefined, 5.4, p(9, 8));
+  if (id === "floor-freestanding-kick-up") return dynamic("Kick to a stacked line, then return one foot at a time", [kickupStart, kickupSplit, change(wallHandstand, { la: p(460, 38), ra: p(478, 40), lk: p(464, 112), rk: p(482, 114) }), kickupSplit, kickupStart], 420, undefined, 6.2, p(9, 8));
+  if (id === "floor-freestanding-balance-attempt") {
+    const balance = change(wallHandstand, { la: p(460, 38), ra: p(478, 40), lk: p(464, 112), rk: p(482, 114) });
+    return dynamic("Enter calmly; balance with tiny shoulder and finger-pressure changes", [kickupStart, kickupSplit, balance, shifted(balance, -7, 0), shifted(balance, 5, 0), balance], 420, undefined, 7, p(9, 8));
+  }
   if (id === "floor-side-exit-practice") return dynamic("Turn hips and land one foot at a time", [kickupSplit, change(kickupSplit, { lk: p(540, 160), la: p(558, 132), rk: p(402, 242), ra: p(306, 294) }), kickupStart], 420, undefined, 5.4, p(10, 6));
   if (id.includes("side-plank")) {
     if (id.includes("knee-drive")) return dynamic("Keep hips lifted as the top knee drives", [sidePlank, change(sidePlank, { rk: p(326, 286), ra: p(390, 310) })], 420, undefined, 4.5, p(11, 2));
@@ -667,7 +671,17 @@ const expansionGuide = (id: (typeof v2ExpansionGuideIds)[number]): Guide => {
   if (id.includes("glute-bridge")) return dynamic("Lift through the hips without arching the back", [supine, bridge, ...(id.includes("single") ? [change(bridge, { rk: p(286, 260), ra: p(300, 190) })] : id.includes("march") ? [change(bridge, { rk: p(300, 292), ra: p(314, 236) })] : [])], 426, undefined, 4.8, p(0, -12));
   if (id === "reverse-plank-hold") return hold("Hips lifted; shoulders controlled; body long", reversePlank, 420, undefined, p(5, -11));
   if (id === "prone-swimmer") return dynamic("Alternate a small arm and leg lift", [prone, change(prone, { le: p(420, 330), lw: p(500, 290), rk: p(210, 370), ra: p(90, 350) }), change(prone, { re: p(432, 344), rw: p(512, 304), lk: p(196, 356), la: p(76, 336) })], 426, undefined, 5, p(0, 10));
-  if (id.startsWith("floor-") && (id.includes("pike-lift") || id.includes("seated-knee-lift")) || id.includes("straddle-pike") || id.includes("pike-hold-lift")) return dynamic("Stay tall and lift from the hips", [seatedPike, change(seatedPike, { lk: p(224, 316), la: p(92, 300), rk: p(240, 326), ra: p(108, 310) })], 420, undefined, 4.4, p(13, 0));
+  if (id === "floor-seated-knee-lift") {
+    const bent = change(seatedPike, { lk: p(250, 314), la: p(284, 368), rk: p(270, 324), ra: p(304, 378) });
+    return dynamic("Keep the chest tall; draw both bent knees upward", [bent, change(bent, { lk: p(270, 270), la: p(306, 326), rk: p(290, 280), ra: p(326, 336) }), bent], 420, undefined, 4.8, p(13, 0));
+  }
+  if (id === "floor-single-leg-pike-lift") return dynamic("One locked knee lifts while the other heel stays grounded", [seatedPike, change(seatedPike, { lk: p(220, 296), la: p(88, 270) }), seatedPike], 420, undefined, 4.6, p(13, 0));
+  if (id === "floor-double-leg-pike-lift") return dynamic("Lift both straight heels together without leaning back", [seatedPike, change(seatedPike, { lk: p(220, 286), la: p(88, 258), rk: p(238, 296), ra: p(106, 268) }), seatedPike], 420, undefined, 4.8, p(13, 0));
+  if (id === "straddle-pike-pulses") {
+    const straddle = change(seatedPike, { lk: p(214, 330), la: p(82, 380), rk: p(250, 338), ra: p(142, 416) });
+    return dynamic("Keep both knees locked; pulse the wide heels clear of the floor", [straddle, change(straddle, { la: p(78, 354), ra: p(136, 390) }), straddle], 420, undefined, 4.6, p(13, 0));
+  }
+  if (id === "seated-pike-hold-lift-off") return hold("Press down, stay tall and hold both straight heels clear", change(seatedPike, { lk: p(220, 286), la: p(88, 258), rk: p(238, 296), ra: p(106, 268) }), 420, undefined, p(13, 0));
   if (id === "floor-tuck-v-sit-balance") return hold("Balance tall in a compact tuck", tuckSupport, 420, undefined, p(13, 0));
   if (id.includes("push-up")) {
     const base = id.includes("pike") ? pike : id.includes("knee") ? change(plank, { lk: p(210, 400), la: p(150, 412), rk: p(228, 404), ra: p(168, 416) }) : plank;

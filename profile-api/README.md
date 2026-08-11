@@ -6,8 +6,8 @@ This Cloudflare Worker provides private, password-protected accounts so the same
 
 1. Confirm `wrangler.toml` contains a `DB` D1 binding and the allowed GitHub Pages origin. Workers Builds can automatically provision the named D1 database when `database_id` is omitted.
 2. Keep the existing `PROFILES` KV binding during migration so an old passwordless profile can be claimed once. New accounts and sessions are stored only in D1.
-3. From this folder, run `npx wrangler deploy`, or connect this repository in Cloudflare Workers Builds with `profile-api` as the root directory and `npx wrangler deploy` as the deploy command.
-4. The Worker creates its tables on the first account request. The SQL in `migrations/0001_password_accounts.sql` is also provided for explicit migration workflows.
+3. Apply the checked-in D1 migration before deploying: `npx wrangler d1 migrations apply parallette25-profiles --remote`.
+4. Run `npx wrangler deploy`. For Cloudflare Workers Builds, use `profile-api` as the root directory and `npx wrangler d1 migrations apply parallette25-profiles --remote && npx wrangler deploy` as the deploy command. Schema changes never run inside a user request.
 5. Copy the resulting `https://...workers.dev` URL.
 6. In GitHub, open **parallettes → Settings → Secrets and variables → Actions → Variables** and add:
    - Name: `VITE_PROFILE_API_URL`

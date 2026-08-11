@@ -1,6 +1,6 @@
 import { RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
-import { MotionGuide } from "./MotionGuide";
+import { lazy, Suspense, useEffect, useState } from "react";
+import type { MotionPreset } from "./MotionGuide";
 import type { Exercise } from "./program";
 
 type Props = {
@@ -8,6 +8,8 @@ type Props = {
   compact?: boolean;
   dimmed?: boolean;
 };
+
+const MotionGuide = lazy(async () => ({ default: (await import("./MotionGuide")).MotionGuide }));
 
 const extension = (source: string) => source.split("?")[0].split(".").pop()?.toLowerCase();
 
@@ -23,7 +25,9 @@ export function ExerciseDemo({ exercise, compact = false, dimmed = false }: Prop
   if (media.motion) {
     return (
       <div className={`${visualClass} exercise-demo-motion`}>
-        <MotionGuide preset={media.motion} compact={compact} />
+        <Suspense fallback={<div className="motion-loading" aria-label="Loading exercise guide" />}>
+          <MotionGuide preset={media.motion as MotionPreset} compact={compact} />
+        </Suspense>
       </div>
     );
   }

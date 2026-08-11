@@ -14,6 +14,7 @@ export type ProfileSessionRecord = {
   level?: string;
   title?: string;
   lab?: boolean;
+  exerciseReviews?: Record<string, { feedback: "easy" | "right" | "hard"; achieved: boolean }>;
 };
 
 export type ProfileRecord = {
@@ -27,6 +28,7 @@ export type ProfileRecord = {
   nextProgramDay: number;
   history: ProfileSessionRecord[];
   readiness: Record<string, boolean>;
+  readinessUpdatedAt: Record<string, string>;
   progression: Record<string, { cleanSessions: number; lastFeedback?: "easy" | "right" | "hard" }>;
   equipment: string[];
   preferences: Record<string, unknown>;
@@ -57,7 +59,7 @@ const timestamp = (value?: string) => value ? Date.parse(value) || 0 : 0;
 
 export const newProfile = (username: string): ProfileRecord => ({
   profileId: makeId(), username: sanitizeName(username) || "Athlete", schemaVersion: 1, revision: 0,
-  createdAt: now(), updatedAt: now(), nextProgramDay: 1, history: [], readiness: {}, progression: {},
+  createdAt: now(), updatedAt: now(), nextProgramDay: 1, history: [], readiness: {}, readinessUpdatedAt: {}, progression: {},
   equipment: ["parallettes", "floor", "wall"], preferences: { soundOn: true }, pendingSync: Boolean(REMOTE_API),
 });
 
@@ -67,8 +69,9 @@ const normalizeProfile = (profile: ProfileRecord): ProfileRecord => ({
   username: sanitizeName(profile.username) || "Athlete",
   schemaVersion: 1,
   revision: Math.max(0, Number(profile.revision) || 0),
-  history: Array.isArray(profile.history) ? profile.history : [],
+  history: Array.isArray(profile.history) ? profile.history.slice(-500) : [],
   readiness: profile.readiness && typeof profile.readiness === "object" ? profile.readiness : {},
+  readinessUpdatedAt: profile.readinessUpdatedAt && typeof profile.readinessUpdatedAt === "object" ? profile.readinessUpdatedAt : {},
   progression: profile.progression && typeof profile.progression === "object" ? profile.progression : {},
   equipment: Array.isArray(profile.equipment) && profile.equipment.length ? profile.equipment : ["parallettes", "floor", "wall"],
   preferences: profile.preferences && typeof profile.preferences === "object" ? profile.preferences : {},
@@ -145,13 +148,6 @@ export async function applyFactoryReset(): Promise<boolean> {
     localStorage.setItem(FACTORY_RESET_KEY, FACTORY_RESET_EPOCH);
   }
 
-  // The Worker uses the same epoch to purge its private D1 and legacy KV data.
-  // This harmless health request ensures the cloud reset runs even before a
-  // user creates the first fresh account.
-  if (REMOTE_API) {
-    try { await fetch(`${REMOTE_API}/health`, { cache: "no-store" }); }
-    catch { /* A later online launch retries the health request. */ }
-  }
   return resetRequired;
 }
 
@@ -210,16 +206,29 @@ export function mergeProfiles(local: ProfileRecord, remote: ProfileRecord): Prof
     };
   }
   const readinessKeys = new Set([...Object.keys(localProfile.readiness), ...Object.keys(remoteProfile.readiness)]);
-  const mergedReadiness = Object.fromEntries([...readinessKeys].map((id) => [id, localProfile.readiness[id] === true || remoteProfile.readiness[id] === true]));
+  const mergedReadiness: Record<string, boolean> = {};
+  const readinessUpdatedAt: Record<string, string> = {};
+  for (const id of readinessKeys) {
+    const localChanged = timestamp(localProfile.readinessUpdatedAt[id]);
+    const remoteChanged = timestamp(remoteProfile.readinessUpdatedAt[id]);
+    const useLocal = localChanged === remoteChanged
+      ? preferred === localProfile
+      : localChanged > remoteChanged;
+    mergedReadiness[id] = useLocal ? localProfile.readiness[id] === true : remoteProfile.readiness[id] === true;
+    const changedAt = useLocal ? localProfile.readinessUpdatedAt[id] : remoteProfile.readinessUpdatedAt[id];
+    if (changedAt) readinessUpdatedAt[id] = changedAt;
+  }
   const remoteSessions = new Set(remoteProfile.history.map((item) => item.id));
   const remoteMissingEvidence = localProfile.history.some((item) => !remoteSessions.has(item.id)) ||
-    Object.entries(progression).some(([id, value]) => value.cleanSessions > (remoteProfile.progression[id]?.cleanSessions ?? 0));
+    Object.entries(progression).some(([id, value]) => value.cleanSessions > (remoteProfile.progression[id]?.cleanSessions ?? 0)) ||
+    Object.keys(readinessUpdatedAt).some((id) => timestamp(readinessUpdatedAt[id]) > timestamp(remoteProfile.readinessUpdatedAt[id]));
   return normalizeProfile({
     ...older,
     ...preferred,
     profileId: localProfile.profileId,
     history: [...sessions.values()].sort((a, b) => timestamp(a.completedAt) - timestamp(b.completedAt)),
     readiness: mergedReadiness,
+    readinessUpdatedAt,
     progression,
     revision: Math.max(localProfile.revision, remoteProfile.revision),
     pendingSync: localProfile.pendingSync === true || remoteMissingEvidence,
@@ -268,11 +277,29 @@ const api = async (path: string, init: RequestInit = {}, profileId?: string): Pr
 
 const acceptAccount = async (payload: ApiPayload): Promise<AccountResult> => {
   if (!payload.profile || !payload.token) throw new Error("The account service returned an incomplete response.");
-  const profile = normalizeProfile({ ...payload.profile, pendingSync: false, syncError: undefined, lastSyncedAt: now() });
-  setSession(profile.profileId, payload.token, payload.expiresAt);
+  const remote = normalizeProfile({ ...payload.profile, pendingSync: false, syncError: undefined, lastSyncedAt: now() });
+  setSession(remote.profileId, payload.token, payload.expiresAt);
+  const local = await getProfile(remote.profileId);
+  const merged = local ? mergeProfiles(local, remote) : remote;
+  const profile = merged.pendingSync ? await pushWithConflictMerge({ ...merged, revision: remote.revision }) : merged;
   await cacheProfile(profile);
   return { profile, recoveryCode: payload.recoveryCode };
 };
+
+export async function validateProfileSession(profileId: string): Promise<ProfileRecord | null> {
+  if (!REMOTE_API || !sessionFor(profileId)) return null;
+  try {
+    const remote = normalizeProfile(await api("/auth/session", { method: "GET" }, profileId) as ProfileRecord);
+    const local = await getProfile(profileId);
+    const merged = local ? mergeProfiles(local, remote) : remote;
+    const saved = merged.pendingSync ? await pushWithConflictMerge({ ...merged, revision: remote.revision }) : { ...merged, pendingSync: false, syncError: undefined, lastSyncedAt: now() };
+    await cacheProfile(saved);
+    return saved;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return null;
+    throw error;
+  }
+}
 
 export async function registerProfile(username: string, password: string): Promise<AccountResult> {
   const draft = newProfile(username);
@@ -368,11 +395,11 @@ export async function saveProfile(profile: ProfileRecord): Promise<ProfileRecord
     ...profile,
     revision: Math.max(profile.revision, current?.revision ?? 0),
     updatedAt: now(),
-    pendingSync: canSync,
+    pendingSync: Boolean(REMOTE_API),
     syncError: canSync ? undefined : REMOTE_API ? "Sign in to sync this profile." : undefined,
   });
   await cacheProfile(localDraft);
-  return canSync ? pushWithConflictMerge(localDraft) : { ...localDraft, pendingSync: false };
+  return canSync ? pushWithConflictMerge(localDraft) : localDraft;
 }
 
 export async function getProfile(profileId: string): Promise<ProfileRecord | null> {
@@ -382,7 +409,7 @@ export async function getProfile(profileId: string): Promise<ProfileRecord | nul
 export async function syncProfile(profile: ProfileRecord): Promise<ProfileRecord> {
   if (!REMOTE_API) return { ...profile, pendingSync: false };
   if (!sessionFor(profile.profileId)) {
-    const localOnly = { ...profile, pendingSync: false, syncError: "Sign in to sync this profile." };
+    const localOnly = { ...profile, pendingSync: true, syncError: "Sign in to sync this profile." };
     await cacheProfile(localOnly);
     return localOnly;
   }

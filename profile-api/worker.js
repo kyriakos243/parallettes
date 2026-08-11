@@ -8,47 +8,11 @@ const SESSION_DAYS = 30;
 const MAX_PROFILE_BYTES = 750_000;
 const MAX_FAILED_ATTEMPTS = 8;
 const RATE_WINDOW_MS = 15 * 60 * 1000;
-const FACTORY_RESET_EPOCH = "2026-08-11-1";
-const FACTORY_RESET_MARKER = `system:factory-reset:${FACTORY_RESET_EPOCH}`;
-
-const ensureSchema = async (env) => env.DB.batch([
-  env.DB.prepare(`CREATE TABLE IF NOT EXISTS accounts (
-    profile_id TEXT PRIMARY KEY NOT NULL, username TEXT NOT NULL, username_key TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL, password_salt TEXT NOT NULL, password_iterations INTEGER NOT NULL,
-    recovery_hash TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, profile_json TEXT NOT NULL,
-    created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
-  env.DB.prepare(`CREATE TABLE IF NOT EXISTS sessions (
-    token_hash TEXT PRIMARY KEY NOT NULL, profile_id TEXT NOT NULL, created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL, FOREIGN KEY (profile_id) REFERENCES accounts(profile_id) ON DELETE CASCADE)`),
-  env.DB.prepare(`CREATE TABLE IF NOT EXISTS auth_limits (
-    id TEXT PRIMARY KEY NOT NULL, attempts INTEGER NOT NULL, window_started TEXT NOT NULL)`),
-  env.DB.prepare("CREATE INDEX IF NOT EXISTS sessions_profile_id_idx ON sessions(profile_id)"),
-  env.DB.prepare("CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at)"),
-]);
-
-const ensureFactoryReset = async (env) => {
-  if (await env.PROFILES.get(FACTORY_RESET_MARKER)) return false;
-  let cursor;
-  do {
-    const page = await env.PROFILES.list({ prefix: "profile:", ...(cursor ? { cursor } : {}) });
-    await Promise.all(page.keys.map(({ name }) => env.PROFILES.delete(name)));
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-  await env.DB.batch([
-    env.DB.prepare("DELETE FROM sessions"),
-    env.DB.prepare("DELETE FROM accounts"),
-    env.DB.prepare("DELETE FROM auth_limits"),
-  ]);
-  await env.PROFILES.put(FACTORY_RESET_MARKER, now());
-  return true;
-};
-
 const base64Url = (bytes) => {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
 };
-
 const randomToken = (bytes = 32) => {
   const value = new Uint8Array(bytes);
   crypto.getRandomValues(value);
@@ -98,6 +62,7 @@ const responseHeaders = (origin) => {
     "cache-control": "no-store",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
+    "permissions-policy": "camera=(), microphone=(), geolocation=()",
     vary: "Origin",
   };
   if (origin) {
@@ -117,8 +82,23 @@ const json = (value, status = 200, origin = null) => new Response(JSON.stringify
 const readJson = async (request) => {
   const declared = Number(request.headers.get("content-length") ?? 0);
   if (declared > MAX_PROFILE_BYTES) throw new Error("REQUEST_TOO_LARGE");
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (bytes.byteLength > MAX_PROFILE_BYTES) throw new Error("REQUEST_TOO_LARGE");
+  if (!request.body) return {};
+  const reader = request.body.getReader();
+  const chunks = [];
+  let length = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    length += value.byteLength;
+    if (length > MAX_PROFILE_BYTES) {
+      await reader.cancel("REQUEST_TOO_LARGE");
+      throw new Error("REQUEST_TOO_LARGE");
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   return bytes.byteLength ? JSON.parse(decoder.decode(bytes)) : {};
 };
 
@@ -134,6 +114,7 @@ const defaultProfile = (profileId, username) => {
     nextProgramDay: 1,
     history: [],
     readiness: {},
+    readinessUpdatedAt: {},
     progression: {},
     equipment: ["parallettes", "floor", "wall"],
     preferences: { soundOn: true },
@@ -155,6 +136,7 @@ const normalizeIncomingProfile = (incoming, profileId, username, revision, creat
     updatedAt: touch ? timestamp : typeof profile.updatedAt === "string" ? profile.updatedAt : timestamp,
     history: Array.isArray(profile.history) ? profile.history.slice(-500) : [],
     readiness: profile.readiness && typeof profile.readiness === "object" ? profile.readiness : {},
+    readinessUpdatedAt: profile.readinessUpdatedAt && typeof profile.readinessUpdatedAt === "object" ? profile.readinessUpdatedAt : {},
     progression: profile.progression && typeof profile.progression === "object" ? profile.progression : {},
     equipment: Array.isArray(profile.equipment) && profile.equipment.length ? profile.equipment : base.equipment,
     preferences: profile.preferences && typeof profile.preferences === "object" ? profile.preferences : {},
@@ -245,6 +227,9 @@ const newCredentials = async (password) => {
 
 const register = async (request, env, origin) => {
   const body = await readJson(request);
+  const limiter = await rateKey(request, "register");
+  if (await rateLimited(env, limiter)) return json({ error: "Too many account-creation attempts. Wait 15 minutes, then try again." }, 429, origin);
+  await recordFailure(env, limiter);
   const username = sanitizeUsername(body.username);
   if (!validUsername(username)) return json({ error: "Use 2–32 letters or numbers; spaces, dots, apostrophes, underscores and hyphens are allowed." }, 400, origin);
   if (!validPassword(body.password)) return json({ error: "Password must contain 10–128 characters." }, 400, origin);
@@ -397,13 +382,11 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: responseHeaders(origin) });
     try {
       const url = new URL(request.url);
-      await ensureSchema(env);
-      await ensureFactoryReset(env);
       if (url.pathname === "/health" && request.method === "GET") return json({ ok: true, auth: "password", storage: "d1" }, 200, origin);
-      if (url.pathname === "/auth/register" && request.method === "POST") return register(request, env, origin);
-      if (url.pathname === "/auth/login" && request.method === "POST") return login(request, env, origin);
-      if (url.pathname === "/auth/claim" && request.method === "POST") return claimLegacy(request, env, origin);
-      if (url.pathname === "/auth/recover" && request.method === "POST") return recover(request, env, origin);
+      if (url.pathname === "/auth/register" && request.method === "POST") return await register(request, env, origin);
+      if (url.pathname === "/auth/login" && request.method === "POST") return await login(request, env, origin);
+      if (url.pathname === "/auth/claim" && request.method === "POST") return await claimLegacy(request, env, origin);
+      if (url.pathname === "/auth/recover" && request.method === "POST") return await recover(request, env, origin);
 
       const account = await authorize(request, env);
       if (!account) return json({ error: "Sign in required." }, 401, origin);
@@ -413,7 +396,7 @@ export default {
         await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await digest(token)).run();
         return json({ signedOut: true }, 200, origin);
       }
-      if (url.pathname === "/profiles/me") return profileMe(request, env, origin, account);
+      if (url.pathname === "/profiles/me") return await profileMe(request, env, origin, account);
       return json({ error: "Not found." }, 404, origin);
     } catch (error) {
       if (error instanceof SyntaxError) return json({ error: "Invalid JSON." }, 400, origin);

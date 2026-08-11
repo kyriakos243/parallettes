@@ -1,4 +1,4 @@
-const CACHE = "parallette-25-v12";
+const CACHE = "parallette-25-v13";
 const base = new URL("./", self.registration.scope);
 const shell = [
   base.href,
@@ -35,10 +35,11 @@ self.addEventListener("fetch", (event) => {
 
   if (event.request.mode === "navigate") {
     event.respondWith(
-      fetch(event.request).then((response) => {
+      fetch(event.request).then(async (response) => {
         if (response.ok) {
           const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(base.href, copy));
+          const cache = await caches.open(CACHE);
+          await cache.put(base.href, copy);
         }
         return response;
       }).catch(() => caches.match(base.href)),

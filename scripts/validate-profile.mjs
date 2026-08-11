@@ -35,6 +35,8 @@ const local = {
   pendingSync: true,
   history: [{ id: "local-session", completedAt: "2026-08-10T10:00:00.000Z", mode: "normal" }],
   progression: { hollow: { cleanSessions: 2, lastFeedback: "right" } },
+  readiness: { support: true },
+  readinessUpdatedAt: { support: "2026-08-10T09:00:00.000Z" },
 };
 const remote = {
   ...base,
@@ -42,6 +44,8 @@ const remote = {
   updatedAt: "2026-08-10T10:04:00.000Z",
   history: [{ id: "remote-session", completedAt: "2026-08-09T10:00:00.000Z", mode: "practice" }],
   progression: { hollow: { cleanSessions: 1 }, support: { cleanSessions: 1, lastFeedback: "easy" } },
+  readiness: { support: false },
+  readinessUpdatedAt: { support: "2026-08-10T09:30:00.000Z" },
 };
 const merged = mergeProfiles(local, remote);
 if (merged.history.length !== 2 || !merged.history.some((item) => item.id === "local-session")) {
@@ -50,6 +54,7 @@ if (merged.history.length !== 2 || !merged.history.some((item) => item.id === "l
 if (merged.progression.hollow.cleanSessions !== 2 || merged.progression.support.cleanSessions !== 1) {
   throw new Error("Conflict merge regressed skill evidence");
 }
+if (merged.readiness.support !== false) throw new Error("A newer readiness revocation was overwritten by an older true value");
 if (!merged.pendingSync || merged.revision !== 4) throw new Error("Conflict merge lost pending revision state");
 const remoteNewer = mergeProfiles({ ...local, updatedAt: "2026-08-10T10:03:00.000Z" }, { ...remote, updatedAt: "2026-08-10T10:06:00.000Z" });
 if (!remoteNewer.pendingSync || !remoteNewer.history.some((item) => item.id === "local-session")) {
@@ -59,4 +64,4 @@ const restored = importProfile(exportProfile(merged));
 if (!restored || restored.profileId !== merged.profileId || restored.history.length !== 2) {
   throw new Error("Profile backup round-trip failed");
 }
-console.log("Profiles: factory reset, stable ID, backup round-trip and conflict-safe append-only history passed.");
+console.log("Profiles: factory reset, stable ID, revocable readiness, backup round-trip and conflict-safe append-only history passed.");
