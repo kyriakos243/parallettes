@@ -82,10 +82,13 @@ env.DB.database.prepare(`INSERT INTO accounts (
   "2026-08-01T00:00:00.000Z", "2026-08-01T00:00:00.000Z",
 );
 const resetHealth = await worker.fetch(request("/health"), env);
-if (resetHealth.status !== 200 || env.DB.database.prepare("SELECT COUNT(*) AS count FROM accounts").get().count !== 0 ||
-  [...env.PROFILES.data.keys()].some((key) => key.startsWith("profile:"))) {
-  throw new Error("Profile Worker factory reset did not purge D1 and legacy KV records");
+if (resetHealth.status !== 200 || env.DB.database.prepare("SELECT COUNT(*) AS count FROM accounts").get().count !== 1 ||
+  !env.PROFILES.data.has("profile:stale-device")) {
+  throw new Error("Profile Worker health check unexpectedly mutated account data");
 }
+
+const oversized = await worker.fetch(post("/auth/register", { username: "Oversized", password: "correct horse battery staple", padding: "x".repeat(750_001) }), env);
+if (oversized.status !== 413) throw new Error("Profile Worker did not reject an oversized streaming request body");
 
 const registered = await worker.fetch(post("/auth/register", { username: "QA Athlete", password: "correct horse battery staple" }), env);
 const registration = await registered.json();
@@ -162,4 +165,4 @@ const deleted = await worker.fetch(request("/profiles/me", {
 }), env);
 if (deleted.status !== 200) throw new Error("Profile Worker failed password-confirmed account deletion");
 
-console.log("Profile Worker: factory reset, private registration/login, unique usernames, recovery, legacy claim, revision safety and protected deletion passed.");
+console.log("Profile Worker: non-mutating health, bounded bodies, private registration/login, unique usernames, recovery, legacy claim, revision safety and protected deletion passed.");

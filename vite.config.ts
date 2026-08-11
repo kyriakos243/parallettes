@@ -7,6 +7,13 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: false,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [{ name: "vendor", test: /node_modules/u }],
+        },
+      },
+    },
   },
   server: {
     host: "0.0.0.0",

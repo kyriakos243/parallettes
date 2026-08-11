@@ -141,6 +141,44 @@ export type SessionPlan = Readonly<{
   totalSeconds: number;
 }>;
 
+export type ExerciseFeedback = "easy" | "right" | "hard";
+export type ExerciseReview = Readonly<{ feedback: ExerciseFeedback; achieved: boolean }>;
+export type ProgressionEvidence = Record<string, { cleanSessions: number; lastFeedback?: ExerciseFeedback }>;
+
+/** Unique work exercises whose interval actually started before the timer stopped. */
+export const performedExerciseIdsFor = (plan: SessionPlan, elapsedSeconds: number): string[] => {
+  const limit = Math.max(0, Math.min(plan.totalSeconds, elapsedSeconds));
+  const ids: string[] = [];
+  let cursor = 0;
+  for (const interval of plan.intervals) {
+    if (interval.kind === "work" && interval.exerciseId && limit > cursor && !ids.includes(interval.exerciseId)) ids.push(interval.exerciseId);
+    cursor += interval.duration;
+    if (cursor >= limit) break;
+  }
+  return ids;
+};
+
+/** Apply one post-session review; repeated rounds never create duplicate evidence. */
+export const applyExerciseReviews = (
+  current: ProgressionEvidence,
+  exerciseIds: readonly string[],
+  reviews: Readonly<Record<string, ExerciseReview>>,
+): ProgressionEvidence => {
+  const next = { ...current };
+  for (const exerciseId of new Set(exerciseIds)) {
+    const review = reviews[exerciseId];
+    if (!review) continue;
+    const previous = next[exerciseId] ?? { cleanSessions: 0 };
+    next[exerciseId] = {
+      cleanSessions: review.achieved && review.feedback !== "hard"
+        ? Math.min(2, previous.cleanSessions + 1)
+        : previous.cleanSessions,
+      lastFeedback: review.feedback,
+    };
+  }
+  return next;
+};
+
 export type BuildSessionOptions = Readonly<{
   variant: WorkoutVariant;
   exercises: ExerciseLibrary;
@@ -718,7 +756,7 @@ export function parseStoredAppState(
   }
   if (isRecord(parsed.readiness)) {
     next.readiness = Object.fromEntries(
-      Object.entries(parsed.readiness).filter(([, ready]) => ready === true),
+      Object.entries(parsed.readiness).filter(([, ready]) => typeof ready === "boolean"),
     ) as Record<GateId, boolean>;
   }
   if (Array.isArray(parsed.recentExerciseIds)) {

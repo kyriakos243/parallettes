@@ -56,7 +56,7 @@ Open the live site in Safari, tap **Share**, then choose **Add to Home Screen**.
 
 The static Pages bundle never contains a write credential. The Cloudflare Worker in `profile-api/` provides private password-protected accounts in D1 while the app keeps an offline IndexedDB copy on each device.
 
-1. Deploy `profile-api/worker.js` with the `DB` D1 binding and retain the existing `PROFILES` KV binding only while old passwordless profiles are being claimed.
+1. Apply `profile-api/migrations/0001_password_accounts.sql`, then deploy `profile-api/worker.js` with the `DB` D1 binding. Retain the existing `PROFILES` KV binding only while old passwordless profiles are being claimed.
 2. In the GitHub repository, set the Actions variable `VITE_PROFILE_API_URL` to the Worker URL without a trailing slash.
 3. Run the Pages workflow. A user can then sign in to the same account from another iPhone, iPad or Mac.
 4. Following the August 2026 owner-requested factory reset, every device starts as Guest. Create a fresh account, choose a password, and save the one-time recovery code.

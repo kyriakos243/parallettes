@@ -42,6 +42,7 @@ const {
   APP_STORAGE_VERSION,
   STABLE_SLOT_IDS,
   adaptSwapsForEquipment,
+  applyExerciseReviews,
   buildSessionPlan,
   compatibleSwaps,
   createPlanSnapshot,
@@ -52,6 +53,7 @@ const {
   locateTimerPosition,
   parsePlanSnapshot,
   parseStoredAppState,
+  performedExerciseIdsFor,
   slotsForVariant,
   variantKey,
 } = session;
@@ -439,10 +441,29 @@ if (l2Variant) {
     });
     assert(custom.totalSeconds === 1840,
       `Stable-slot custom timing expected 1840s; found ${custom.totalSeconds}s`);
+    const performed = performedExerciseIdsFor(custom, 245);
+    assert(performed.length === new Set(performed).size && performed.length > 0,
+      "Partial-session review did not collapse repeated rounds into unique performed exercises");
+    assert(performedExerciseIdsFor(custom, 0).length === 0,
+      "A zero-second session incorrectly included unperformed exercises");
   } catch (error) {
     fail(`Stable-slot custom timing plan failed: ${error.message}`);
   }
 }
+
+const firstReview = applyExerciseReviews({}, ["review-drill", "review-drill"], {
+  "review-drill": { feedback: "easy", achieved: true },
+});
+const secondReview = applyExerciseReviews(firstReview, ["review-drill"], {
+  "review-drill": { feedback: "right", achieved: true },
+});
+const hardReview = applyExerciseReviews(secondReview, ["review-drill"], {
+  "review-drill": { feedback: "hard", achieved: false },
+});
+assert(firstReview["review-drill"].cleanSessions === 1 && secondReview["review-drill"].cleanSessions === 2,
+  "Two separate clean post-workout reviews did not reach the progression threshold");
+assert(hardReview["review-drill"].cleanSessions === 2 && hardReview["review-drill"].lastFeedback === "hard",
+  "A hard review incorrectly added clean evidence or failed to preserve regression guidance");
 
 // Versioned local-state parsing must preserve safe preferences and reject
 // malformed/out-of-range values without crashing the app.
