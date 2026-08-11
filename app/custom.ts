@@ -22,13 +22,13 @@ export type CustomPlan = { mode: "custom"; seconds: number; items: CustomItem[];
 const defaultBlocks: CustomBlocks = { warmup: true, preparation: true, skill: true, strength: true, cooldown: true, lab: false };
 const focusMap: Record<CustomFocus, Focus[]> = {
   handstand: ["line", "entry", "balance", "exit", "overhead-load"],
-  core: ["hollow", "anti-extension", "anti-rotation", "pelvic-control"],
+  core: ["hollow", "anti-extension", "anti-rotation", "pelvic-control", "posterior-chain"],
   compression: ["compression"],
   lsit: ["lsit", "compression", "support"],
   planche: ["planche", "support", "horizontal-push"],
   pushing: ["horizontal-push", "vertical-push"],
   support: ["support", "transition", "scapular", "anti-extension"],
-  mobility: ["wrist", "shoulder-mobility", "thoracic-reset", "breathing"],
+  mobility: ["wrist", "grip", "shoulder-mobility", "hamstring-mobility", "hip-mobility", "adductor-mobility", "thoracic-reset", "breathing"],
   conditioning: ["conditioning", "anti-extension", "pelvic-control"],
 };
 const skillFocus = (focuses: CustomFocus[]) => focuses.some((focus) =>
@@ -58,7 +58,10 @@ const score = (
 ) => {
   const focusSet = new Set(focuses.flatMap((focus) => focusMap[focus]));
   let value = focusSet.has(exercise.primaryFocus) ? 8 : exercise.secondaryFocus.some((focus) => focusSet.has(focus)) ? 4 : 0;
-  if (focuses.includes("conditioning")) value += exercise.requiredEquipment?.includes("rope") ? 12 : -8;
+  if (focuses.includes("conditioning")) {
+    value += exercise.requiredEquipment?.includes("rope") ? 12 : -8;
+    if (exercise.category === "Conditioning") value += 6;
+  }
   if (exercise.availableLevels.includes(level)) value += 3;
   if (recent.has(exercise.id)) value -= preferVariety ? 9 : 2;
   if (preferNextProgression && exercise.progressionStage === (level === "L1" ? 1 : level === "L2" ? 2 : 3)) value += 4;

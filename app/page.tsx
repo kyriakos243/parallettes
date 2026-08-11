@@ -33,7 +33,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExerciseDemo } from "./ExerciseDemo";
 import { MotionGuide, type MotionPreset } from "./MotionGuide";
 import { buildCustomSession, type CustomBlocks, type CustomDifficulty, type CustomFocus } from "./custom";
-import { deleteProfile, exportProfile, importProfile, listProfiles, newProfile, remoteSyncAvailable, saveProfile, syncProfile, type ProfileRecord, type SaveMode } from "./profileStore";
+import {
+  claimLegacyProfile,
+  deleteProfile,
+  exportProfile,
+  hasProfileSession,
+  importProfile,
+  listProfiles,
+  recoverAccount,
+  registerProfile,
+  remoteSyncAvailable,
+  saveProfile,
+  signInProfile,
+  signOutProfile,
+  syncProfile,
+  type ProfileRecord,
+  type SaveMode,
+} from "./profileStore";
 import {
   exercises,
   levelLabels,
@@ -430,7 +446,13 @@ export default function Home() {
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
   const [profile, setProfile] = useState<ProfileRecord | null>(null);
   const [newProfileName, setNewProfileName] = useState("");
-  const [profileSearch, setProfileSearch] = useState("");
+  const [accountMode, setAccountMode] = useState<"signin" | "create" | "recover">("signin");
+  const [accountPassword, setAccountPassword] = useState("");
+  const [accountPasswordConfirm, setAccountPasswordConfirm] = useState("");
+  const [accountRecoveryInput, setAccountRecoveryInput] = useState("");
+  const [accountRecoveryCode, setAccountRecoveryCode] = useState("");
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [accountError, setAccountError] = useState("");
   const [syncStatus, setSyncStatus] = useState<"saved" | "syncing" | "offline" | "error">("saved");
   const [customFocuses, setCustomFocuses] = useState<CustomFocus[]>(["core"]);
   const [customDifficulty, setCustomDifficulty] = useState<CustomDifficulty>("recommended");
@@ -512,9 +534,12 @@ export default function Home() {
     void listProfiles().then((items) => {
       setProfiles(items);
       const lastId = localStorage.getItem("parallette25-last-profile");
-      const last = items.find((item) => item.profileId === lastId) ?? items[0] ?? null;
+      const last = items.find((item) => item.profileId === lastId) ?? null;
       if (last) void openProfile(last);
-      else setProfileOpen(true);
+      else {
+        setSaveMode("guest");
+        setProfileOpen(true);
+      }
     });
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => undefined);
@@ -567,6 +592,7 @@ export default function Home() {
     const preferredSaveMode = (next.preferences as { saveMode?: SaveMode }).saveMode;
     setSaveMode(preferredSaveMode === "practice" || preferredSaveMode === "guest" ? preferredSaveMode : "normal");
     setProfile(next);
+    setSyncStatus(remoteSyncAvailable && hasProfileSession(next.profileId) ? "saved" : "offline");
     localStorage.setItem("parallette25-last-profile", next.profileId);
     setProfileOpen(false);
   };
@@ -583,25 +609,86 @@ export default function Home() {
     setProfileOpen(false);
   };
   const selectExistingProfile = (next: ProfileRecord) => {
-    if (profile?.profileId !== next.profileId && !window.confirm(`Open existing profile “${next.username}”?\n\nThere is no password in V2. Usernames identify saved training data but are not authentication.`)) return;
+    if (profile?.profileId !== next.profileId && !window.confirm(`Use “${next.username}” on this device?`)) return;
     void openProfile(next);
   };
-  const createProfile = async () => {
+  const clearAccountForm = () => {
+    setAccountPassword("");
+    setAccountPasswordConfirm("");
+    setAccountRecoveryInput("");
+    setAccountError("");
+  };
+  const showRecoveryCode = (code?: string) => {
+    if (!code) return;
+    setAccountRecoveryCode(code);
+    window.setTimeout(() => document.getElementById("recovery-code")?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
+  };
+  const createAccount = async () => {
     const name = newProfileName.trim();
-    if (!name) return;
-    if (profiles.some((item) => item.username.toLocaleLowerCase() === name.toLocaleLowerCase())) {
-      window.alert(`The username “${name}” already exists. Choose it above or use a different name.`);
-      return;
-    }
-    const next = await saveProfile(newProfile(name));
-    if (next.syncError?.toLocaleLowerCase().includes("username already exists")) {
-      await deleteProfile(next.profileId);
-      window.alert(`The username “${name}” already exists. Refresh the list and choose that profile, or use a different name.`);
-      return;
-    }
-    setNewProfileName("");
-    setProfiles(await listProfiles());
-    await openProfile(next);
+    if (!name || accountBusy) return;
+    if (accountPassword !== accountPasswordConfirm) { setAccountError("The two passwords do not match."); return; }
+    setAccountBusy(true);
+    setAccountError("");
+    try {
+      const result = await registerProfile(name, accountPassword);
+      showRecoveryCode(result.recoveryCode);
+      setNewProfileName("");
+      clearAccountForm();
+      setProfiles(await listProfiles());
+      await openProfile(result.profile);
+      setProfileOpen(true);
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "The account could not be created.");
+    } finally { setAccountBusy(false); }
+  };
+  const signInAccount = async () => {
+    const name = newProfileName.trim();
+    if (!name || accountBusy) return;
+    setAccountBusy(true);
+    setAccountError("");
+    try {
+      const next = await signInProfile(name, accountPassword);
+      clearAccountForm();
+      setNewProfileName("");
+      setProfiles(await listProfiles());
+      await openProfile(next);
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Sign-in failed.");
+    } finally { setAccountBusy(false); }
+  };
+  const secureCurrentProfile = async () => {
+    if (!profile || accountBusy) return;
+    if (accountPassword !== accountPasswordConfirm) { setAccountError("The two passwords do not match."); return; }
+    setAccountBusy(true);
+    setAccountError("");
+    try {
+      const result = await claimLegacyProfile(profile, accountPassword);
+      showRecoveryCode(result.recoveryCode);
+      clearAccountForm();
+      setProfiles(await listProfiles());
+      await openProfile(result.profile);
+      setProfileOpen(true);
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "This profile could not be secured.");
+    } finally { setAccountBusy(false); }
+  };
+  const recoverProfileAccount = async () => {
+    const name = newProfileName.trim();
+    if (!name || accountBusy) return;
+    if (accountPassword !== accountPasswordConfirm) { setAccountError("The two passwords do not match."); return; }
+    setAccountBusy(true);
+    setAccountError("");
+    try {
+      const result = await recoverAccount(name, accountRecoveryInput, accountPassword);
+      showRecoveryCode(result.recoveryCode);
+      clearAccountForm();
+      setNewProfileName("");
+      setProfiles(await listProfiles());
+      await openProfile(result.profile);
+      setProfileOpen(true);
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : "Recovery failed.");
+    } finally { setAccountBusy(false); }
   };
   const refreshProfiles = async (selectedId?: string) => {
     const items = await listProfiles();
@@ -610,6 +697,11 @@ export default function Home() {
   };
   const renameProfile = async () => {
     if (!profile) return;
+    if (remoteSyncAvailable && !hasProfileSession(profile.profileId)) {
+      setAccountError("Secure this profile before changing its username.");
+      setProfileOpen(true);
+      return;
+    }
     const username = window.prompt("Rename this profile", profile.username)?.trim();
     if (!username) return;
     if (profiles.some((item) => item.profileId !== profile.profileId && item.username.toLocaleLowerCase() === username.toLocaleLowerCase())) {
@@ -622,6 +714,11 @@ export default function Home() {
   const syncCurrentProfile = async () => {
     if (!profile) return;
     if (!remoteSyncAvailable) { setSyncStatus("offline"); return; }
+    if (!hasProfileSession(profile.profileId)) {
+      setSyncStatus("offline");
+      setAccountError("Secure this legacy profile, or sign in, to enable cross-device sync.");
+      return;
+    }
     setSyncStatus("syncing");
     try {
       const next = await syncProfile(profile);
@@ -650,7 +747,9 @@ export default function Home() {
     const phrase = window.prompt(`Type ${profile.username} to permanently delete this profile.`);
     if (phrase !== profile.username) return;
     try {
-      await deleteProfile(profile.profileId);
+      const password = hasProfileSession(profile.profileId) ? window.prompt("Enter your password to delete this account permanently.") ?? undefined : undefined;
+      if (hasProfileSession(profile.profileId) && !password) return;
+      await deleteProfile(profile.profileId, password);
       setProfile(null);
       setHistory([]);
       localStorage.removeItem("parallette25-last-profile");
@@ -658,6 +757,12 @@ export default function Home() {
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "The profile could not be deleted. Please reconnect and try again.");
     }
+  };
+  const signOutCurrentProfile = async () => {
+    if (!profile) return;
+    await signOutProfile(profile.profileId);
+    openGuest();
+    setProfiles(await listProfiles());
   };
   const toggleDefaultEquipment = async (item: string) => {
     if (!profile) return;
@@ -1120,7 +1225,7 @@ export default function Home() {
       </header>
 
       <section className="mode-bar" aria-label="Training modes">
-        <div><span className="eyebrow"><span /> TRAINING MODE</span><strong>{profile ? `Saved as ${profile.username}` : "Guest session — nothing permanent is saved"}</strong></div>
+        <div><span className="eyebrow"><span /> TRAINING MODE</span><strong>{profile ? `${hasProfileSession(profile.profileId) ? "Synced" : "On this device"} as ${profile.username}` : "Guest session — nothing permanent is saved"}</strong></div>
         <div className="mode-actions"><button type="button" className="secondary-button compact" onClick={() => setCustomOpen(true)}><WandSparkles /> Build Custom Session</button><button type="button" className="secondary-button compact" onClick={() => setReadinessOpen(true)}><ShieldCheck /> Skills</button></div>
       </section>
 
@@ -1312,7 +1417,7 @@ export default function Home() {
           const currentId = activeSwaps[slot.id] ?? slot.defaultExerciseId;
           const options = compatibleSwaps({ slot, exercises, day: day.day, level, readiness: ready, difficulty: swapFilter, includeLocked: true, equipment: todayEquipment });
           return (
-            <Drawer title="Swap exercise" subtitle="Focus, day and equipment purpose stay matched. Choose the same level or inspect one adjacent level." onClose={() => setSwapSlotId(null)}>
+            <Drawer title="Swap exercise" subtitle="Training block, day, equipment and difficulty stay compatible. Choose the recommended level or inspect one adjacent level." onClose={() => setSwapSlotId(null)}>
               <div className="swap-filter">
                 {(["same", "easier", "harder"] as SwapDifficulty[]).map((filter) => <button type="button" className={swapFilter === filter ? "active" : ""} key={filter} onClick={() => setSwapFilter(filter)}>{filter === "same" ? "Recommended" : filter === "easier" ? "One level easier" : "One level harder"}</button>)}
               </div>
@@ -1409,22 +1514,33 @@ export default function Home() {
         )}
 
         {profileOpen && (
-          <Drawer title="Who's training?" subtitle="Choose a permanent profile or start a disposable Guest session." onClose={() => setProfileOpen(false)}>
-            {profiles.length > 3 && <div className="profile-search"><label htmlFor="profile-search">Find username</label><input id="profile-search" value={profileSearch} placeholder="Search profiles" autoComplete="off" onChange={(event) => setProfileSearch(event.target.value)} /></div>}
+          <Drawer title="Who's training?" subtitle="Only accounts used on this device appear here. Sign in to use your profile elsewhere." onClose={() => setProfileOpen(false)}>
             <div className="profile-list">
-              {profiles.filter((item) => item.username.toLocaleLowerCase().includes(profileSearch.trim().toLocaleLowerCase())).map((item) => <button type="button" className={profile?.profileId === item.profileId ? "selected" : ""} key={item.profileId} onClick={() => selectExistingProfile(item)}><span className="profile-dot">{item.username.slice(0, 1).toUpperCase()}</span><strong>{item.username}</strong>{profile?.profileId === item.profileId && <Check />}</button>)}
+              {profiles.map((item) => <button type="button" className={profile?.profileId === item.profileId ? "selected" : ""} key={item.profileId} onClick={() => selectExistingProfile(item)}><span className="profile-dot">{item.username.slice(0, 1).toUpperCase()}</span><strong>{item.username}<small>{hasProfileSession(item.profileId) ? "Signed in" : "Local profile"}</small></strong>{profile?.profileId === item.profileId && <Check />}</button>)}
             </div>
-            <div className="new-profile-form">
-              <label htmlFor="new-profile-name">Create a username</label>
-              <div><input id="new-profile-name" value={newProfileName} maxLength={32} autoComplete="off" placeholder="e.g. Kyriakos" onChange={(event) => setNewProfileName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createProfile(); }} /><button type="button" disabled={!newProfileName.trim()} onClick={() => void createProfile()}><Plus /> Create</button></div>
-              <small>No email or password. Each username keeps separate progress.{remoteSyncAvailable ? " Changes sync when online." : " Export a backup before moving to another device."}</small>
-            </div>
+            {remoteSyncAvailable && profile && !hasProfileSession(profile.profileId) && <div className="account-security-card">
+              <LockKeyhole /><div><strong>Secure {profile.username}</strong><span>Choose a password once to protect this existing profile and sync it across your devices.</span></div>
+              <label>Password<input type="password" value={accountPassword} minLength={10} maxLength={128} autoComplete="new-password" onChange={(event) => setAccountPassword(event.target.value)} /></label>
+              <label>Confirm password<input type="password" value={accountPasswordConfirm} minLength={10} maxLength={128} autoComplete="new-password" onChange={(event) => setAccountPasswordConfirm(event.target.value)} /></label>
+              <button type="button" disabled={accountBusy || accountPassword.length < 10 || accountPassword !== accountPasswordConfirm} onClick={() => void secureCurrentProfile()}><ShieldCheck /> Secure this profile</button>
+            </div>}
+            {remoteSyncAvailable && <div className="account-form">
+              <div className="account-tabs">{(["signin", "create", "recover"] as const).map((mode) => <button type="button" className={accountMode === mode ? "active" : ""} key={mode} onClick={() => { setAccountMode(mode); clearAccountForm(); }}>{mode === "signin" ? "Sign in" : mode === "create" ? "Create account" : "Recover"}</button>)}</div>
+              <label htmlFor="account-name">Username<input id="account-name" value={newProfileName} maxLength={32} autoComplete="username" placeholder="e.g. Kyriakos" onChange={(event) => setNewProfileName(event.target.value)} /></label>
+              {accountMode === "recover" && <label>Recovery code<input type="text" value={accountRecoveryInput} autoCapitalize="characters" autoComplete="off" onChange={(event) => setAccountRecoveryInput(event.target.value)} /></label>}
+              <label>{accountMode === "recover" ? "New password" : "Password"}<input type="password" value={accountPassword} minLength={10} maxLength={128} autoComplete={accountMode === "signin" ? "current-password" : "new-password"} onChange={(event) => setAccountPassword(event.target.value)} /></label>
+              {accountMode !== "signin" && <label>Confirm password<input type="password" value={accountPasswordConfirm} minLength={10} maxLength={128} autoComplete="new-password" onChange={(event) => setAccountPasswordConfirm(event.target.value)} /></label>}
+              <button type="button" disabled={accountBusy || !newProfileName.trim() || accountPassword.length < 10 || (accountMode !== "signin" && accountPassword !== accountPasswordConfirm) || (accountMode === "recover" && !accountRecoveryInput.trim())} onClick={() => void (accountMode === "signin" ? signInAccount() : accountMode === "create" ? createAccount() : recoverProfileAccount())}>{accountBusy ? "Please wait…" : accountMode === "signin" ? "Sign in securely" : accountMode === "create" ? "Create secure account" : "Reset password"}</button>
+              <small>No email is required. Usernames are unique, passwords stay private, and only this device remembers your signed-in accounts.</small>
+            </div>}
+            {accountError && <p className="account-message account-error" role="alert">{accountError}</p>}
+            {accountRecoveryCode && <div className="recovery-code" id="recovery-code"><ShieldCheck /><div><strong>Save your new recovery code</strong><span>This is shown once. Store it somewhere private; it can reset your password without email.</span><code>{accountRecoveryCode}</code></div><button type="button" onClick={() => void navigator.clipboard?.writeText(accountRecoveryCode)}>Copy</button><button type="button" onClick={() => setAccountRecoveryCode("")}>I saved it</button></div>}
             <div className="drawer-actions"><button type="button" className="secondary-button" onClick={openGuest}>Guest session · don't save</button></div>
             {profile && <div className="profile-data-panel">
-              <p className="control-kicker">Profile</p><strong>{profile.username}</strong><button type="button" onClick={() => void renameProfile()}>Rename profile</button>
+              <p className="control-kicker">Profile</p><strong>{profile.username}</strong><button type="button" onClick={() => void renameProfile()}>Rename profile</button>{hasProfileSession(profile.profileId) && <button type="button" onClick={() => void signOutCurrentProfile()}>Sign out on this device</button>}
               <p className="control-kicker">Default equipment</p><div className="custom-chip-grid equipment-chips">{(["parallettes", "floor", "wall", "rope"] as const).map((item) => <button type="button" className={profile.equipment.includes(item) ? "active" : ""} key={item} onClick={() => void toggleDefaultEquipment(item)}>{item === "floor" ? "Mat / Floor" : item[0].toUpperCase() + item.slice(1)}</button>)}</div>
               <p className="control-kicker">Session saving</p><div className="custom-chip-grid"><button type="button" className={saveMode === "normal" ? "active" : ""} onClick={() => setSaveMode("normal")}>Normal</button><button type="button" className={saveMode === "practice" ? "active" : ""} onClick={() => setSaveMode("practice")}>Practice only</button><button type="button" className={saveMode === "guest" ? "active" : ""} onClick={() => setSaveMode("guest")}>Don't save</button></div>
-              <p className="control-kicker">Sync</p><div className="sync-line"><i className={`sync-${syncStatus}`} /><span>{syncStatus === "syncing" ? "Syncing…" : syncStatus === "error" ? "Sync error — retry" : profile.pendingSync ? "Sync needed" : remoteSyncAvailable ? "Saved" : "Offline — saved on this device"}</span></div>{profile.lastSyncedAt && <small>Last synced {new Date(profile.lastSyncedAt).toLocaleString()}</small>}<button type="button" onClick={() => void syncCurrentProfile()}>Sync now</button>
+              <p className="control-kicker">Sync</p><div className="sync-line"><i className={`sync-${syncStatus}`} /><span>{syncStatus === "syncing" ? "Syncing…" : syncStatus === "error" ? "Sync error — retry" : profile.pendingSync ? "Sync needed" : remoteSyncAvailable && hasProfileSession(profile.profileId) ? "Saved securely" : "Saved on this device"}</span></div>{profile.lastSyncedAt && <small>Last synced {new Date(profile.lastSyncedAt).toLocaleString()}</small>}<button type="button" onClick={() => void syncCurrentProfile()}>Sync now</button>
               <p className="control-kicker">Data</p><div className="profile-data-actions"><button type="button" onClick={() => downloadText(`parallette25-${profile.username}.json`, exportProfile(profile))}>Export backup</button><label>Import backup<input type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importProfileFile(file); event.currentTarget.value = ""; }} /></label><button type="button" className="danger" onClick={() => void resetCurrentProfile()}>Reset progress</button><button type="button" className="danger" onClick={() => void removeCurrentProfile()}>Delete profile</button></div>
             </div>}
           </Drawer>
