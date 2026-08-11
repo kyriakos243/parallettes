@@ -3,8 +3,13 @@ main = "worker.js"
 compatibility_date = "2026-08-10"
 
 [vars]
-ALLOWED_ORIGIN = "https://kyriakos243.github.io"
+ALLOWED_ORIGINS = "https://kyriakos243.github.io,http://127.0.0.1:4173,http://localhost:4173,http://localhost:3000"
 
 [[kv_namespaces]]
 binding = "PROFILES"
 id = "replace-with-your-kv-namespace-id"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "parallette25-profiles"
+# database_id may be omitted when Workers Builds automatic provisioning is enabled.

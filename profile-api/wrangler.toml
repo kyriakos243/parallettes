@@ -6,8 +6,14 @@ compatibility_date = "2026-08-10"
 enabled = true
 
 [vars]
-ALLOWED_ORIGIN = "https://kyriakos243.github.io"
+ALLOWED_ORIGINS = "https://kyriakos243.github.io,http://127.0.0.1:4173,http://localhost:4173,http://localhost:3000"
 
 [[kv_namespaces]]
 binding = "PROFILES"
 id = "f88ca998e55f4e4088fba334e78eb802"
+
+# Wrangler/Workers Builds can provision this free D1 database automatically
+# on the first deployment because no database_id is committed.
+[[d1_databases]]
+binding = "DB"
+database_name = "parallette25-profiles"
