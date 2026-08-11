@@ -45,6 +45,8 @@ const DB_VERSION = 2;
 const PROFILE_STORE = "profiles";
 const INDEX_KEY = "parallette25-profile-index-v1";
 const TOKEN_KEY = "parallette25-account-sessions-v1";
+const FACTORY_RESET_KEY = "parallette25-factory-reset";
+const FACTORY_RESET_EPOCH = "2026-08-11-1";
 const REMOTE_API = (import.meta.env.VITE_PROFILE_API_URL as string | undefined)?.replace(/\/$/u, "");
 export const remoteSyncAvailable = Boolean(REMOTE_API);
 
@@ -117,6 +119,41 @@ const openDb = (): Promise<IDBDatabase | null> => new Promise((resolve) => {
   request.onsuccess = () => resolve(request.result);
   request.onerror = () => resolve(null);
 });
+
+/**
+ * One-time owner-requested factory reset. It removes profiles, sessions,
+ * programme settings and workout history from this browser before hydration.
+ * The epoch marker prevents future accounts from being cleared.
+ */
+export async function applyFactoryReset(): Promise<boolean> {
+  if (typeof localStorage === "undefined") return false;
+  const resetRequired = localStorage.getItem(FACTORY_RESET_KEY) !== FACTORY_RESET_EPOCH;
+  if (resetRequired) {
+    const keys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
+      .filter((key): key is string => Boolean(key?.startsWith("parallette25-")));
+    for (const key of keys) localStorage.removeItem(key);
+
+    const db = await openDb();
+    if (db?.objectStoreNames.contains(PROFILE_STORE)) {
+      await new Promise<void>((resolve) => {
+        const request = db.transaction(PROFILE_STORE, "readwrite").objectStore(PROFILE_STORE).clear();
+        request.onsuccess = () => resolve();
+        request.onerror = () => resolve();
+      });
+      db.close();
+    }
+    localStorage.setItem(FACTORY_RESET_KEY, FACTORY_RESET_EPOCH);
+  }
+
+  // The Worker uses the same epoch to purge its private D1 and legacy KV data.
+  // This harmless health request ensures the cloud reset runs even before a
+  // user creates the first fresh account.
+  if (REMOTE_API) {
+    try { await fetch(`${REMOTE_API}/health`, { cache: "no-store" }); }
+    catch { /* A later online launch retries the health request. */ }
+  }
+  return resetRequired;
+}
 
 async function listLocalProfiles(): Promise<ProfileRecord[]> {
   const db = await openDb();

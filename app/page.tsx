@@ -34,6 +34,7 @@ import { ExerciseDemo } from "./ExerciseDemo";
 import { MotionGuide, type MotionPreset } from "./MotionGuide";
 import { buildCustomSession, type CustomBlocks, type CustomDifficulty, type CustomFocus } from "./custom";
 import {
+  applyFactoryReset,
   claimLegacyProfile,
   deleteProfile,
   exportProfile,
@@ -521,17 +522,22 @@ export default function Home() {
   const exactDefault = previewPlan.totalSeconds === expectedSeconds;
 
   useEffect(() => {
-    const current = localStorage.getItem(scopedKey(STORAGE_KEY));
-    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
-    setSettings(parseStoredAppState(current ?? legacy));
-    try {
-      const storedHistory = JSON.parse(localStorage.getItem(scopedKey(HISTORY_KEY)) ?? "[]");
-      if (Array.isArray(storedHistory)) setHistory(storedHistory.slice(0, 12));
-    } catch {
-      setHistory([]);
-    }
-    setHydrated(true);
-    void listProfiles().then((items) => {
+    let active = true;
+    void (async () => {
+      await applyFactoryReset();
+      if (!active) return;
+      const current = localStorage.getItem(scopedKey(STORAGE_KEY));
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+      setSettings(parseStoredAppState(current ?? legacy));
+      try {
+        const storedHistory = JSON.parse(localStorage.getItem(scopedKey(HISTORY_KEY)) ?? "[]");
+        if (Array.isArray(storedHistory)) setHistory(storedHistory.slice(0, 12));
+      } catch {
+        setHistory([]);
+      }
+      setHydrated(true);
+      const items = await listProfiles();
+      if (!active) return;
       setProfiles(items);
       const lastId = localStorage.getItem("parallette25-last-profile");
       const last = items.find((item) => item.profileId === lastId) ?? null;
@@ -540,10 +546,11 @@ export default function Home() {
         setSaveMode("guest");
         setProfileOpen(true);
       }
-    });
+    })();
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => undefined);
     }
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {

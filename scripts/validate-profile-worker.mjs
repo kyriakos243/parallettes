@@ -42,6 +42,14 @@ class MemoryKv {
     return type === "json" ? JSON.parse(value) : value;
   }
   async put(key, value) { this.data.set(key, String(value)); }
+  async delete(key) { this.data.delete(key); }
+  async list({ prefix = "" } = {}) {
+    return {
+      keys: [...this.data.keys()].filter((key) => key.startsWith(prefix)).map((name) => ({ name })),
+      list_complete: true,
+      cursor: "",
+    };
+  }
 }
 
 const origin = "https://kyriakos243.github.io";
@@ -56,6 +64,22 @@ const post = (path, body, token) => request(path, {
   headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
   body: JSON.stringify(body),
 });
+
+await env.PROFILES.put("profile:stale-device", JSON.stringify({ profileId: "stale-device" }));
+await env.PROFILES.put("profile:index", JSON.stringify([{ profileId: "stale-device", username: "Stale" }]));
+env.DB.database.prepare(`INSERT INTO accounts (
+  profile_id, username, username_key, password_hash, password_salt, password_iterations,
+  recovery_hash, revision, profile_json, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  "stale-account", "Stale", "stale", "hash", "salt", 1, "recovery", 1,
+  JSON.stringify({ profileId: "stale-account", username: "Stale" }),
+  "2026-08-01T00:00:00.000Z", "2026-08-01T00:00:00.000Z",
+);
+const resetHealth = await worker.fetch(request("/health"), env);
+if (resetHealth.status !== 200 || env.DB.database.prepare("SELECT COUNT(*) AS count FROM accounts").get().count !== 0 ||
+  [...env.PROFILES.data.keys()].some((key) => key.startsWith("profile:"))) {
+  throw new Error("Profile Worker factory reset did not purge D1 and legacy KV records");
+}
 
 const registered = await worker.fetch(post("/auth/register", { username: "QA Athlete", password: "correct horse battery staple" }), env);
 const registration = await registered.json();
@@ -132,4 +156,4 @@ const deleted = await worker.fetch(request("/profiles/me", {
 }), env);
 if (deleted.status !== 200) throw new Error("Profile Worker failed password-confirmed account deletion");
 
-console.log("Profile Worker: private registration/login, unique usernames, recovery, legacy claim, revision safety and protected deletion passed.");
+console.log("Profile Worker: factory reset, private registration/login, unique usernames, recovery, legacy claim, revision safety and protected deletion passed.");

@@ -59,6 +59,6 @@ The static Pages bundle never contains a write credential. The Cloudflare Worker
 1. Deploy `profile-api/worker.js` with the `DB` D1 binding and retain the existing `PROFILES` KV binding only while old passwordless profiles are being claimed.
 2. In the GitHub repository, set the Actions variable `VITE_PROFILE_API_URL` to the Worker URL without a trailing slash.
 3. Run the Pages workflow. A user can then sign in to the same account from another iPhone, iPad or Mac.
-4. On the first updated visit, an existing local profile is marked **On this device**. Choose **Secure this profile**, create a password, and save the one-time recovery code.
+4. Following the August 2026 owner-requested factory reset, every device starts as Guest. Create a fresh account, choose a password, and save the one-time recovery code.
 
 Usernames are unique without regard to capitalisation. Profiles are never publicly listed, new visitors start as Guest, and a saved browser session cannot expose another account on a different device.

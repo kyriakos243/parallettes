@@ -5,6 +5,8 @@ const SESSION_DAYS = 30;
 const MAX_PROFILE_BYTES = 750_000;
 const MAX_FAILED_ATTEMPTS = 8;
 const RATE_WINDOW_MS = 15 * 60 * 1000;
+const FACTORY_RESET_EPOCH = "2026-08-11-1";
+const FACTORY_RESET_MARKER = `system:factory-reset:${FACTORY_RESET_EPOCH}`;
 
 const ensureSchema = async (env) => env.DB.batch([
   env.DB.prepare(`CREATE TABLE IF NOT EXISTS accounts (
@@ -20,6 +22,23 @@ const ensureSchema = async (env) => env.DB.batch([
   env.DB.prepare("CREATE INDEX IF NOT EXISTS sessions_profile_id_idx ON sessions(profile_id)"),
   env.DB.prepare("CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at)"),
 ]);
+
+const ensureFactoryReset = async (env) => {
+  if (await env.PROFILES.get(FACTORY_RESET_MARKER)) return false;
+  let cursor;
+  do {
+    const page = await env.PROFILES.list({ prefix: "profile:", ...(cursor ? { cursor } : {}) });
+    await Promise.all(page.keys.map(({ name }) => env.PROFILES.delete(name)));
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM sessions"),
+    env.DB.prepare("DELETE FROM accounts"),
+    env.DB.prepare("DELETE FROM auth_limits"),
+  ]);
+  await env.PROFILES.put(FACTORY_RESET_MARKER, now());
+  return true;
+};
 
 const base64Url = (bytes) => {
   let binary = "";
@@ -375,8 +394,9 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: responseHeaders(origin) });
     try {
       const url = new URL(request.url);
-      if (url.pathname === "/health" && request.method === "GET") return json({ ok: true, auth: "password", storage: "d1" }, 200, origin);
       await ensureSchema(env);
+      await ensureFactoryReset(env);
+      if (url.pathname === "/health" && request.method === "GET") return json({ ok: true, auth: "password", storage: "d1" }, 200, origin);
       if (url.pathname === "/auth/register" && request.method === "POST") return register(request, env, origin);
       if (url.pathname === "/auth/login" && request.method === "POST") return login(request, env, origin);
       if (url.pathname === "/auth/claim" && request.method === "POST") return claimLegacy(request, env, origin);
