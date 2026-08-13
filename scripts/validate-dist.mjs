@@ -24,6 +24,10 @@ const files = walk(root);
 if (files.some((path) => path.toLowerCase().endsWith(".gif"))) throw new Error("Legacy GIFs are present in the production bundle");
 const textBundle = files.filter((path) => /\.(?:html|js|css|json|webmanifest)$/u.test(path)).map((path) => readFileSync(path, "utf8")).join("\n");
 if (/gho_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|GITHUB_TOKEN/gu.test(textBundle)) throw new Error("A repository credential appears in the production bundle");
+const appVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
+if (!textBundle.includes(appVersion) || !textBundle.includes("Set my starting level") || !textBundle.includes("Reassess my starting point")) {
+  throw new Error("Production bundle is missing the visible version or adaptive starting assessment");
+}
 if (!readFileSync(join(root, "sw.js"), "utf8").includes("cache.addAll([...new Set(assets)])")) throw new Error("Service worker does not pre-cache hashed app assets");
 
-console.log(`Production bundle: ${files.length} files, scoped PWA shell, no legacy GIFs and no repository credential passed.`);
+console.log(`Production bundle: ${files.length} files, v${appVersion}, adaptive assessment, scoped PWA shell, no legacy GIFs and no repository credential passed.`);
