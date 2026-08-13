@@ -33,6 +33,7 @@ import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { ExerciseDemo } from "./ExerciseDemo";
 import type { MotionPreset } from "./MotionGuide";
 import { buildCustomSession, type CustomBlocks, type CustomDifficulty, type CustomFocus } from "./custom";
+import { progressionPathState, recommendedProgressionAssignments } from "./progression";
 import {
   applyFactoryReset,
   claimLegacyProfile,
@@ -70,13 +71,14 @@ import {
 } from "./program";
 import {
   DEFAULT_BLOCK_TIMING,
-  applyExerciseReviews,
+  applySessionProgression,
   adaptSwapsForEquipment,
   buildSessionPlan,
   sessionBlockOrder,
   compatibleSwaps,
   defaultStoredAppState,
   locateTimerPosition,
+  nextProgramDayAfterSession,
   parseStoredAppState,
   performedExerciseIdsFor,
   reviewableExerciseIdsFor,
@@ -446,7 +448,7 @@ function ExerciseCard({
             <LockKeyhole /> {requested.name} is readiness-gated, so this safe regression is active.
           </p>
         )}
-        {equipmentAdjusted && <p className="substitution-note"><Check /> Adapted to today’s available equipment while keeping the same training role.</p>}
+        {equipmentAdjusted && <p className="substitution-note"><Check /> Adapted to today’s readiness or available equipment while keeping the same training role and avoiding duplicate drills.</p>}
         {progressionAdjusted && <p className="progression-note"><Sparkles /> Recommended from your latest review and clean-session evidence. Use Swap if you prefer another step today.</p>}
         <div className="exercise-actions">
           <button type="button" className="action-button" onClick={onSwap}><Shuffle /> Swap</button>
@@ -564,22 +566,21 @@ export default function Home() {
     [includeLab, variant],
   );
   const progressionSwaps = useMemo(() => {
-    const next = { ...activeSwaps };
-    for (const slot of slots) {
-      if (activeSwaps[slot.id]) continue;
-      const base = exercises[slot.defaultExerciseId];
-      const evidence = profile?.progression[base.id];
-      if (evidence?.lastFeedback === "hard" && base.easierId) {
-        const allowed = compatibleSwaps({ slot, exercises, day: day.day, level, readiness: ready, difficulty: "easier", equipment: todayEquipment });
-        if (allowed.some((candidate) => candidate.id === base.easierId)) next[slot.id] = base.easierId;
-        continue;
-      }
-      const harder = base.harderId ? exercises[base.harderId] : undefined;
-      if ((evidence?.cleanSessions ?? 0) < 2 || !harder || profile?.progression[harder.id]?.lastFeedback === "hard") continue;
-      const allowed = compatibleSwaps({ slot, exercises, day: day.day, level, readiness: ready, difficulty: "harder", equipment: todayEquipment });
-      if (allowed.some((candidate) => candidate.id === harder.id)) next[slot.id] = harder.id;
-    }
-    return next;
+    const compatibleBySlot = new Map<string, Set<string>>(slots.map((slot) => [slot.id, new Set(compatibleSwaps({
+      slot, exercises, day: day.day, level, readiness: ready,
+      difficulty: "all", equipment: todayEquipment,
+    }).map((candidate) => candidate.id))]));
+    const assignments = recommendedProgressionAssignments(
+      slots,
+      exercises,
+      profile?.progression ?? {},
+      (slot, candidate) => compatibleBySlot.get(slot.id)?.has(candidate.id) === true,
+      skillProgressionPaths,
+      activeSwaps,
+    );
+    return Object.fromEntries(slots.flatMap((slot) => assignments[slot.id] && assignments[slot.id] !== slot.defaultExerciseId
+      ? [[slot.id, assignments[slot.id]]]
+      : []));
   }, [activeSwaps, day.day, level, profile?.progression, ready, slots, todayEquipment]);
   const equipmentAdaptation = useMemo(() => adaptSwapsForEquipment({
     slots, exercises, swaps: progressionSwaps, day: day.day, level, readiness: ready, equipment: todayEquipment,
@@ -1110,11 +1111,8 @@ export default function Home() {
       }));
     }
     if (profile && saveMode !== "guest") {
-      let progression = { ...profile.progression };
-      if (saveMode === "normal") {
-        progression = applyExerciseReviews(progression, exerciseIds, reviews);
-      }
-      const nextProgramDay = saveMode === "normal" && status !== "partial" && plan.day > 0 ? (plan.day % 5) + 1 : profile.nextProgramDay;
+      const progression = applySessionProgression(profile.progression, exerciseIds, reviews, saveMode);
+      const nextProgramDay = nextProgramDayAfterSession(profile.nextProgramDay, plan.day, status, saveMode);
       const nextProfile = { ...profile, nextProgramDay, history: [...profile.history, { ...entry, mode: saveMode, status, exerciseIds, completedExerciseIds: exerciseIds, exerciseReviews: reviews }], progression };
       setProfile(nextProfile);
       if (saveMode === "normal" && status !== "partial" && plan.day > 0) {
@@ -1711,12 +1709,8 @@ export default function Home() {
               <h3>Progression paths</h3>
               {skillProgressionPaths.map((path) => {
                 const visible = path.steps.filter((id) => Boolean(exercises[id]));
-                let masteredIndex = -1;
-                visible.forEach((id, index) => {
-                  if (index === masteredIndex + 1 && (profile?.progression[id]?.cleanSessions ?? 0) >= 2) masteredIndex = index;
-                });
-                const currentIndex = Math.min(visible.length - 1, masteredIndex + 1);
-                return <article key={path.label}><strong>{path.label}</strong>{visible.map((id, index) => <div className={index <= masteredIndex ? "done" : index === currentIndex ? "current" : ""} key={id}><i>{index <= masteredIndex ? <Check /> : index + 1}</i><span>{exercises[id].name}</span>{index === currentIndex && <small>{masteredIndex >= 0 ? "READY TO TRY" : "CURRENT"}</small>}</div>)}<button type="button" className="path-challenge" onClick={() => openChallenge(path.customFocus as CustomFocus)}>Try the next appropriate step</button></article>;
+                const state = progressionPathState(visible, profile?.progression ?? {});
+                return <article key={path.label}><strong>{path.label}</strong>{visible.map((id, index) => <div className={index <= state.masteredThrough ? "done" : index === state.recommendedIndex ? "current" : ""} key={id}><i>{index <= state.masteredThrough ? <Check /> : index + 1}</i><span>{exercises[id].name}</span>{state.complete && index === visible.length - 1 ? <small>MASTERED</small> : index === state.recommendedIndex && <small>{state.activeHard ? "BUILD CONFIDENCE" : state.masteredThrough >= 0 ? "READY TO TRY" : "CURRENT"}</small>}</div>)}<button type="button" className="path-challenge" onClick={() => openChallenge(path.customFocus as CustomFocus)}>Try the next appropriate step</button></article>;
               })}
             </div>
             <div className="challenge-panel"><strong>Challenge me</strong><span>Choose a safe next challenge without skipping readiness gates.</span><div><button type="button" onClick={() => openChallenge()}>Whole workout</button>{(["handstand", "core", "lsit", "planche", "pushing"] as CustomFocus[]).map((focus) => <button type="button" key={focus} onClick={() => openChallenge(focus)}>{focus === "lsit" ? "L-Sit" : focus[0].toUpperCase() + focus.slice(1)}</button>)}</div></div>

@@ -188,7 +188,7 @@ export const applyExerciseReviews = (
     if (!review) continue;
     const previous = next[exerciseId] ?? { cleanSessions: 0 };
     next[exerciseId] = {
-      cleanSessions: review.achieved && review.feedback !== "hard"
+      cleanSessions: review.achieved && review.feedback === "easy"
         ? Math.min(2, previous.cleanSessions + 1)
         : previous.cleanSessions,
       lastFeedback: review.feedback,
@@ -196,6 +196,26 @@ export const applyExerciseReviews = (
   }
   return next;
 };
+
+/** Normal Recommended and Custom sessions contribute evidence; Practice and Guest never do. */
+export const applySessionProgression = (
+  current: ProgressionEvidence,
+  exerciseIds: readonly string[],
+  reviews: Readonly<Record<string, ExerciseReview>>,
+  saveMode: "normal" | "practice" | "guest",
+): ProgressionEvidence => saveMode === "normal"
+  ? applyExerciseReviews(current, exerciseIds, reviews)
+  : current;
+
+/** Custom (day 0), partial, Practice and Guest sessions never consume a Program day. */
+export const nextProgramDayAfterSession = (
+  currentDay: number,
+  performedDay: number,
+  status: "complete" | "modified" | "partial",
+  saveMode: "normal" | "practice" | "guest",
+): number => saveMode === "normal" && status !== "partial" && performedDay > 0
+  ? (performedDay % 5) + 1
+  : currentDay;
 
 export type BuildSessionOptions = Readonly<{
   variant: WorkoutVariant;
@@ -564,12 +584,20 @@ export function adaptSwapsForEquipment(options: Readonly<{
 }>): EquipmentAdaptation {
   const swaps: Partial<Record<StableSlotId, string>> = { ...(options.swaps ?? {}) };
   const unavailable: StableSlotId[] = [];
+  // Requested exercises can be unique while two locked movements still resolve
+  // to the same safe fallback. Reserve the exercise the athlete will actually
+  // perform, not only the authored/requested ID, so every visible slot remains
+  // distinct. Circuit rounds are still repeated explicitly by the timer.
+  const usedResolvedIds = new Set<string>();
   for (const slot of options.slots) {
     const currentId = swaps[slot.id] ?? slot.defaultExerciseId;
     const current = options.exercises[currentId];
     if (!current) { unavailable.push(slot.id); continue; }
     const resolved = resolveGatedExercise(currentId, options.exercises, options.readiness);
-    if (supportsEquipment(resolved, options.equipment)) continue;
+    if (supportsEquipment(resolved, options.equipment) && !usedResolvedIds.has(resolved.id)) {
+      usedResolvedIds.add(resolved.id);
+      continue;
+    }
     const candidates = compatibleSwaps({
       slot,
       exercises: options.exercises,
@@ -578,9 +606,15 @@ export function adaptSwapsForEquipment(options: Readonly<{
       readiness: options.readiness,
       difficulty: "all",
       equipment: options.equipment,
+    }).filter((candidate) => {
+      const performed = resolveGatedExercise(candidate.id, options.exercises, options.readiness);
+      return supportsEquipment(performed, options.equipment) && !usedResolvedIds.has(performed.id);
     });
     const replacement = candidates.find((item) => item.level === current.level || item.level === "ALL") ?? candidates[0];
-    if (replacement) swaps[slot.id] = replacement.id;
+    if (replacement) {
+      swaps[slot.id] = replacement.id;
+      usedResolvedIds.add(resolveGatedExercise(replacement.id, options.exercises, options.readiness).id);
+    }
     else unavailable.push(slot.id);
   }
   return { swaps, unavailable };

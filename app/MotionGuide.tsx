@@ -24,8 +24,8 @@ type Guide = {
   equipment?: Equipment | Equipment[];
   duration?: number;
   label: string;
-  /** Fixed eye offset makes gaze direction explicit, including face-up floor work. */
-  gaze?: Point;
+  /** One gaze vector per pose keeps the face readable when body orientation changes. */
+  gaze: Point[];
   static?: boolean;
 };
 
@@ -38,23 +38,42 @@ const shifted = (base: Pose, dx: number, dy: number): Pose =>
   Object.fromEntries(
     Object.entries(base).map(([joint, point]) => [joint, p(point.x + dx, point.y + dy)]),
   ) as Pose;
-const closeLoop = (poses: Pose[]) =>
-  poses.length < 2 ? poses : [...poses, ...poses.slice(0, -1).reverse()];
+const closeLoop = <T,>(items: T[]) =>
+  items.length < 2 ? items : [...items, ...items.slice(0, -1).reverse()];
+const gazeRight = p(13, 0);
+const gazeLeft = p(-13, 1);
+const gazeFloorForward = p(9, 8);
+const gazeFloor = p(0, 12);
+const gazeCeiling = p(0, -12);
+const gazeTowardKnees = p(-10, -6);
 const dynamic = (
   label: string,
   poses: Pose[],
   floor = 420,
   equipment?: Guide["equipment"],
   duration = 4.2,
-  gaze = p(10, 6),
-): Guide => ({ poses: closeLoop(poses), floor, equipment, duration, label, gaze });
+  gaze: Point | Point[] = p(10, 6),
+): Guide => {
+  const forwardGaze = "x" in gaze ? poses.map(() => gaze) : gaze;
+  if (forwardGaze.length !== poses.length) {
+    throw new Error(`${label}: gaze count must match pose count`);
+  }
+  return {
+    poses: closeLoop(poses),
+    floor,
+    equipment,
+    duration,
+    label,
+    gaze: closeLoop(forwardGaze),
+  };
+};
 const hold = (
   label: string,
   pose: Pose,
   floor = 420,
   equipment?: Guide["equipment"],
   gaze = p(10, 4),
-): Guide => ({ poses: [pose], floor, equipment, label, gaze, static: true });
+): Guide => ({ poses: [pose], floor, equipment, label, gaze: [gaze], static: true });
 
 const standing: Pose = {
   head: p(320, 78), neck: p(320, 120),
@@ -131,8 +150,8 @@ const support: Pose = {
 };
 
 const tuckSupport = change(support, {
-  lh: p(350, 300), lk: p(382, 348), la: p(330, 382),
-  rh: p(368, 307), rk: p(402, 355), ra: p(350, 389),
+  lh: p(350, 300), lk: p(302, 326), la: p(330, 382),
+  rh: p(368, 307), rk: p(318, 334), ra: p(346, 389),
 });
 
 const lSit = change(support, {
@@ -147,6 +166,14 @@ const seatedPike: Pose = {
   rs: p(414, 238), re: p(432, 316), rw: p(452, 396),
   lh: p(342, 330), lk: p(226, 345), la: p(92, 350),
   rh: p(360, 338), rk: p(242, 356), ra: p(108, 362),
+};
+
+const floorTuckVSit: Pose = {
+  head: p(424, 194), neck: p(404, 230),
+  ls: p(380, 250), le: p(348, 276), lw: p(300, 252),
+  rs: p(410, 256), re: p(370, 284), rw: p(318, 260),
+  lh: p(350, 334), lk: p(316, 288), la: p(286, 240),
+  rh: p(368, 342), rk: p(336, 296), ra: p(306, 248),
 };
 
 const sidePlank: Pose = {
@@ -231,6 +258,59 @@ const bearHover = change(quadruped, {
   lk: p(258, 346), la: p(188, 392), rk: p(286, 352), ra: p(216, 394),
 });
 
+const forearmPlank = change(plank, {
+  le: p(432, 400), lw: p(506, 400),
+  re: p(450, 406), rw: p(524, 406),
+});
+
+const forearmSidePlank = change(sidePlank, {
+  le: p(438, 400), lw: p(510, 400),
+});
+
+const plankSawBack = change(plank, {
+  head: p(474, 214), neck: p(440, 234),
+  ls: p(408, 250), rs: p(424, 254),
+  le: p(420, 324), re: p(438, 326),
+  lh: p(272, 292), rh: p(286, 300),
+  lk: p(178, 332), rk: p(192, 342),
+});
+
+const forearmSawBack = change(forearmPlank, {
+  head: p(474, 214), neck: p(440, 234),
+  ls: p(408, 250), rs: p(424, 254),
+  lh: p(272, 292), rh: p(286, 300),
+  lk: p(178, 332), rk: p(192, 342),
+});
+
+const wallBodyShift = (dx: number) => change(wallHandstand, {
+  head: p(wallHandstand.head.x + dx, wallHandstand.head.y),
+  neck: p(wallHandstand.neck.x + dx, wallHandstand.neck.y),
+  ls: p(wallHandstand.ls.x + dx, wallHandstand.ls.y),
+  rs: p(wallHandstand.rs.x + dx, wallHandstand.rs.y),
+  lh: p(wallHandstand.lh.x + dx, wallHandstand.lh.y),
+  rh: p(wallHandstand.rh.x + dx, wallHandstand.rh.y),
+  lk: p(wallHandstand.lk.x + dx * 0.5, wallHandstand.lk.y),
+  rk: p(wallHandstand.rk.x + dx * 0.5, wallHandstand.rk.y),
+});
+
+const freeHandstandBalance = change(wallHandstand, {
+  la: p(460, 38), ra: p(478, 40),
+  lk: p(464, 112), rk: p(482, 114),
+});
+
+const freeBalanceShift = (base: Pose, dx: number) => change(base, {
+  head: p(base.head.x + dx, base.head.y),
+  neck: p(base.neck.x + dx, base.neck.y),
+  ls: p(base.ls.x + dx, base.ls.y),
+  rs: p(base.rs.x + dx, base.rs.y),
+  lh: p(base.lh.x + dx, base.lh.y),
+  rh: p(base.rh.x + dx, base.rh.y),
+  lk: p(base.lk.x + dx * 1.5, base.lk.y),
+  rk: p(base.rk.x + dx * 1.5, base.rk.y),
+  la: p(base.la.x + dx * 1.8, base.la.y),
+  ra: p(base.ra.x + dx * 1.8, base.ra.y),
+});
+
 const plancheLean = change(plank, {
   head: p(530, 218), neck: p(494, 238),
   ls: p(466, 256), le: p(452, 328), lw: p(438, 400),
@@ -276,27 +356,45 @@ const legacyGuides = {
     change(supine, { le: p(474, 378), lw: p(560, 405), rk: p(210, 390), ra: p(100, 407) }),
     change(supine, { re: p(482, 386), rw: p(565, 412), lk: p(205, 384), la: p(98, 404) }),
   ], 426, undefined, 4.8, p(0, -12)),
-  "plank-tap": dynamic("Shift, tap, return", [plank, change(plank, {
-    le: p(486, 230), lw: p(446, 254), ls: p(430, 250), rh: p(304, 302),
-  })], 420, "parallettes", 4, p(10, 7)),
+  "plank-tap": dynamic("Shift fully, tap one shoulder, replace the hand, then alternate", [
+    plank,
+    change(plank, { le: p(520, 320), lw: p(460, 250), ls: p(430, 250), rh: p(304, 302) }),
+    plank,
+    change(plank, { re: p(540, 300), rw: p(420, 240), rs: p(446, 254), lh: p(292, 292) }),
+  ], 420, "parallettes", 5.6, p(10, 7)),
   "mountain-climber": dynamic("Slow alternating knee drives", [
     plank,
     change(plank, { rh: p(310, 302), rk: p(342, 350), ra: p(392, 396) }),
     change(plank, { lh: p(296, 294), lk: p(352, 342), la: p(400, 396) }),
   ], 420, "parallettes", 4.6, p(10, 7)),
   "hollow-rock": dynamic("Keep one hollow shape", [longHollow, shifted(longHollow, -8, -18)], 426, undefined, 3.8, p(0, -12)),
-  "plank-saw": dynamic("Move as one solid line", [plank, shifted(plank, -38, 0)], 420, "parallettes", 4, p(10, 7)),
-  "cross-press": dynamic("Press knee; extend the other side", [
-    change(supine, { lw: p(292, 306), le: p(350, 324) }),
-    change(supine, { lw: p(292, 306), le: p(350, 324), rk: p(210, 390), ra: p(98, 408), re: p(490, 390), rw: p(565, 414) }),
-  ], 426, undefined, 4.4, p(0, -12)),
-  "kneeling-plank-tap": dynamic("Knees down; hips quiet", [
+  "plank-saw": dynamic("Move as one solid line while hands stay planted", [plank, plankSawBack], 420, "parallettes", 4, gazeFloorForward),
+  "cross-press": dynamic("Press one hand into the opposite knee while the free arm and other leg extend; alternate sides", [
+    supine,
+    change(supine, {
+      le: p(350, 324), lw: p(294, 304),
+      lk: p(210, 390), la: p(98, 408),
+      re: p(490, 390), rw: p(565, 414),
+    }),
+    supine,
+    change(supine, {
+      re: p(370, 336), rw: p(286, 286),
+      rk: p(220, 400), ra: p(108, 418),
+      le: p(480, 380), lw: p(560, 405),
+    }),
+  ], 426, undefined, 6, gazeCeiling),
+  "kneeling-plank-tap": dynamic("Knees stay down; tap one shoulder, replace the hand, then alternate", [
     change(plank, { lk: p(240, 400), la: p(170, 405), rk: p(260, 405), ra: p(190, 410) }),
-    change(plank, { lk: p(240, 400), la: p(170, 405), rk: p(260, 405), ra: p(190, 410), le: p(486, 230), lw: p(446, 254) }),
-  ], 420, "parallettes", 4, p(10, 7)),
-  "plank-knee": dynamic("Knee travels toward elbow", [plank, change(plank, {
-    rh: p(310, 302), rk: p(385, 320), ra: p(420, 350),
-  })], 420, "parallettes", 4.2, p(10, 7)),
+    change(plank, { lk: p(240, 400), la: p(170, 405), rk: p(260, 405), ra: p(190, 410), le: p(520, 320), lw: p(460, 250) }),
+    change(plank, { lk: p(240, 400), la: p(170, 405), rk: p(260, 405), ra: p(190, 410) }),
+    change(plank, { lk: p(240, 400), la: p(170, 405), rk: p(260, 405), ra: p(190, 410), re: p(540, 300), rw: p(420, 240) }),
+  ], 420, "parallettes", 5.6, p(10, 7)),
+  "plank-knee": dynamic("Drive one knee toward its elbow, return to plank, then alternate", [
+    plank,
+    change(plank, { rh: p(310, 302), rk: p(385, 320), ra: p(420, 350) }),
+    plank,
+    change(plank, { lh: p(296, 294), lk: p(377, 310), la: p(412, 342) }),
+  ], 420, "parallettes", 5.6, p(10, 7)),
   "hollow-reach": dynamic("Reach only while the back stays flat", [
     change(longHollow, { le: p(420, 290), lw: p(410, 230), re: p(438, 306), rw: p(430, 245) }),
     longHollow,
@@ -305,9 +403,12 @@ const legacyGuides = {
     change(longHollow, { lk: p(250, 320), la: p(220, 245) }),
     change(longHollow, { rk: p(254, 330), ra: p(226, 252) }),
   ], 426, undefined, 4.4, p(0, -12)),
-  "plank-tap-out": dynamic("Tap wide without twisting", [plank, change(plank, {
-    le: p(468, 330), lw: p(520, 400), ls: p(430, 250),
-  })], 420, "parallettes", 4, p(10, 7)),
+  "plank-tap-out": dynamic("Tap one hand wide, replace it on the bar, then alternate without twisting", [
+    plank,
+    change(plank, { le: p(468, 330), lw: p(520, 400), ls: p(430, 250) }),
+    plank,
+    change(plank, { re: p(414, 330), rw: p(370, 400), rs: p(446, 254) }),
+  ], 420, "parallettes", 5.6, p(10, 7)),
   "wrist-flexor-rock": hold("Palms down; hold a mild stretch with fingers forward", change(quadruped, {
     head: p(515, 208), neck: p(478, 226), ls: p(454, 246), rs: p(468, 252), lh: p(292, 250), rh: p(310, 260),
   }), 420, undefined, p(10, 7)),
@@ -348,7 +449,7 @@ const newGuides = {
     change(wallStandingSide, { le: p(500, 126), lw: p(558, 82), re: p(514, 138), rw: p(558, 94) }),
     change(wallStandingSide, { le: p(510, 88), lw: p(558, 35), re: p(524, 100), rw: p(558, 48) }),
   ], 486, "wall", 4.8, p(13, 0)),
-  "kneeling-thoracic-rotation": dynamic("Rotate through the upper back", [quadruped, change(quadruped, {
+  "kneeling-thoracic-rotation": dynamic("Rotate through the upper back; complete the target on both sides", [quadruped, change(quadruped, {
     rs: p(420, 238), re: p(382, 166), rw: p(350, 94), head: p(432, 172), neck: p(410, 212),
   })], 420, undefined, 4.8, p(7, -10)),
   "inchworm-pike-walkout": dynamic("Walk out under control; return to pike", [
@@ -360,10 +461,12 @@ const newGuides = {
   // Pre-handstand (8)
   "parallette-forward-lean-hold": hold("Shoulders slightly beyond hands; elbows locked", plancheLean, 420, "parallettes", p(10, 7)),
   "bear-to-pike-shoulder-load": dynamic("Keep arms straight as hips rise", [bearHover, pike], 420, "parallettes", 4.8, p(10, 7)),
-  "standing-kickup-line-rehearsal": dynamic("Reach long from fingers to lifted heel", [
+  "standing-kickup-line-rehearsal": dynamic("Reach long from fingers to the lifted heel; rehearse both lead legs", [
     standing,
     change(standing, { le: p(284, 78), lw: p(300, 24), re: p(356, 78), rw: p(340, 24), lh: p(302, 280), lk: p(208, 230), la: p(110, 170), rh: p(338, 285), rk: p(345, 380), ra: p(350, 470) }),
-  ], 486, undefined, 4.4, p(13, 0)),
+    standing,
+    change(standing, { le: p(284, 78), lw: p(300, 24), re: p(356, 78), rw: p(340, 24), lh: p(302, 285), lk: p(295, 380), la: p(290, 470), rh: p(338, 280), rk: p(208, 230), ra: p(110, 170) }),
+  ], 486, undefined, 6, p(13, 0)),
   "pike-scapular-shrugs": dynamic("Elbows stay locked; elevate and depress only", [pike, change(pike, {
     head: p(468, 246), neck: p(440, 266), ls: p(416, 286), rs: p(434, 292),
   })], 420, "parallettes", 3.8, p(9, 8)),
@@ -379,9 +482,12 @@ const newGuides = {
     head: p(504, 264), neck: p(472, 280), ls: p(448, 294), rs: p(466, 300),
     le: p(442, 346), re: p(458, 350),
   })], 420, ["wall", "parallettes"], 4.2, p(9, 8)),
-  "box-pike-one-leg-line-lift": dynamic("One foot stays on wall as the free leg reaches tall", [invertedL, change(invertedL, {
-    lh: p(408, 152), lk: p(430, 84), la: p(448, 24),
-  })], 420, ["wall", "parallettes"], 4.6, p(9, 8)),
+  "box-pike-one-leg-line-lift": dynamic("One foot stays on the wall while the free leg reaches tall; alternate legs", [
+    invertedL,
+    change(invertedL, { lh: p(408, 152), lk: p(430, 84), la: p(448, 24) }),
+    invertedL,
+    change(invertedL, { rh: p(424, 158), rk: p(446, 88), ra: p(464, 28) }),
+  ], 420, ["wall", "parallettes"], 6, gazeFloor),
 
   // Abs and core (16)
   "deadbug-heel-tap": dynamic("Tap one heel without arching the back", [supine, change(supine, {
@@ -398,30 +504,33 @@ const newGuides = {
   ], 426, undefined, 3.4, p(0, -12)),
   "hollow-to-tuck-rock": dynamic("Rock without losing posterior pelvic tilt", [longHollow, change(supine, {
     head: p(500, 352), neck: p(462, 342), le: p(420, 330), lw: p(360, 314), re: p(432, 344), rw: p(372, 328), lh: p(300, 360), lk: p(348, 318), la: p(370, 270), rh: p(314, 374), rk: p(362, 332), ra: p(382, 284),
-  })], 426, undefined, 4.2, p(0, -12)),
+  })], 426, undefined, 4.2, [gazeCeiling, gazeTowardKnees]),
   "deadbug-double-leg-lower": dynamic("Lower both heels only while the back stays flat", [supine, change(supine, {
     lk: p(210, 388), la: p(90, 410), rk: p(220, 400), ra: p(100, 418),
   })], 426, undefined, 4.8, p(0, -12)),
-  "plank-knee-drive-isometric": hold("Drive knee forward and pause; hips stay square", change(plank, {
-    rh: p(310, 302), rk: p(386, 326), ra: p(420, 360),
-  }), 420, "parallettes", p(10, 7)),
+  "plank-knee-drive-isometric": dynamic("Drive one knee forward, pause with square hips, reset, then alternate", [
+    plank,
+    change(plank, { rh: p(310, 302), rk: p(386, 326), ra: p(420, 360) }),
+    plank,
+    change(plank, { lh: p(294, 292), lk: p(374, 316), la: p(410, 352) }),
+  ], 420, "parallettes", 5.8, p(10, 7)),
   "crossbody-mountain-climber": dynamic("Knee travels toward opposite elbow", [plank, change(plank, {
     rh: p(310, 302), rk: p(390, 314), ra: p(428, 350),
   }), change(plank, { lh: p(294, 292), lk: p(382, 324), la: p(424, 360) })], 420, "parallettes", 4.8, p(10, 7)),
-  "side-plank-hip-lift": dynamic("Lift hips into one long line", [change(sidePlank, {
+  "side-plank-hip-lift": dynamic("Lift hips into one long line; complete the target on both sides", [change(sidePlank, {
     lh: p(300, 350), rh: p(314, 358), head: p(470, 270), neck: p(438, 286), ls: p(416, 300),
   }), sidePlank], 420, "parallettes", 4.2, p(11, 2)),
-  "side-plank-reach-through": dynamic("Rotate under slowly; feet remain on the floor", [sidePlank, change(sidePlank, {
+  "side-plank-reach-through": dynamic("Rotate under slowly with feet on the floor; repeat the other side", [sidePlank, change(sidePlank, {
     rs: p(428, 272), re: p(350, 318), rw: p(278, 360), head: p(452, 284), neck: p(424, 292),
   })], 420, "parallettes", 4.8, p(10, 4)),
   "seated-pike-compression-pulses": dynamic("Press down and float both heels", [seatedPike, change(seatedPike, {
     lk: p(226, 325), la: p(92, 322), rk: p(242, 336), ra: p(108, 332),
-  })], 420, "parallettes", 3.8, p(13, 0)),
+  })], 420, "parallettes", 3.8, gazeLeft),
   "alternating-pike-leg-lift": dynamic("Lift one straight leg at a time", [
     seatedPike,
     change(seatedPike, { lk: p(220, 300), la: p(92, 276) }),
     change(seatedPike, { rk: p(236, 310), ra: p(108, 286) }),
-  ], 420, "parallettes", 4.6, p(13, 0)),
+  ], 420, "parallettes", 4.6, gazeLeft),
   "parallette-plank-leg-lift": dynamic("Squeeze one glute; do not arch", [plank, change(plank, {
     lk: p(186, 300), la: p(74, 260),
   }), change(plank, { rk: p(200, 310), ra: p(92, 270) })], 420, "parallettes", 4.6, p(10, 7)),
@@ -432,14 +541,17 @@ const newGuides = {
   "straddle-compression-lift": dynamic("Lock knees; lift both heels from the hips", [
     change(seatedPike, { lk: p(216, 348), la: p(76, 378), rk: p(252, 348), ra: p(122, 314) }),
     change(seatedPike, { lk: p(216, 320), la: p(76, 338), rk: p(252, 320), ra: p(122, 286) }),
-  ], 420, "parallettes", 4.2, p(13, 0)),
+  ], 420, "parallettes", 4.2, gazeLeft),
 
   // Handstand skill (8)
   "grounded-side-exit-rehearsal": dynamic("Step one leg sideways; keep hands until feet are safe", [
     pike,
     change(pike, { lh: p(286, 160), lk: p(226, 250), la: p(170, 342), rh: p(300, 168), rk: p(356, 248), ra: p(430, 326) }),
     change(pike, { lh: p(310, 220), lk: p(248, 314), la: p(184, 400), rh: p(326, 228), rk: p(390, 318), ra: p(470, 402) }),
-  ], 420, "parallettes", 5.2, p(9, 8)),
+    pike,
+    change(pike, { lh: p(286, 160), lk: p(360, 248), la: p(444, 326), rh: p(300, 168), rk: p(230, 250), ra: p(164, 342) }),
+    change(pike, { lh: p(310, 220), lk: p(394, 318), la: p(474, 402), rh: p(326, 228), rk: p(252, 314), ra: p(180, 400) }),
+  ], 420, "parallettes", 7, gazeFloorForward),
   "wall-facing-handstand-weight-shift": dynamic("Shift shoulder pressure left and right", [
     wallHandstand,
     change(wallHandstand, { ls: p(438, 286), rs: p(462, 286), head: p(456, 338) }),
@@ -450,38 +562,77 @@ const newGuides = {
     change(wallHandstand, { lk: p(500, 112), la: p(520, 62) }),
     change(wallHandstand, { rk: p(510, 116), ra: p(530, 66) }),
   ], 420, ["wall", "parallettes"], 4.8, p(0, 12)),
-  "kickup-stop-short-drill": dynamic("Kick softly and stop below vertical", [kickupStart, change(kickupSplit, {
+  "kickup-stop-short-drill": dynamic("Grip first, kick softly below vertical, then replace both feet", [pike, kickupStart, change(kickupSplit, {
     lh: p(444, 210), lk: p(470, 145), la: p(492, 86), rh: p(460, 220), rk: p(376, 224), ra: p(286, 230),
-  })], 420, "parallettes", 4.8, p(8, 9)),
-  "parallette-kickup-to-wall": dynamic("Grip first; kick softly to the wall", [kickupStart, kickupSplit, wallHandstand], 420, ["wall", "parallettes"], 5.4, p(10, 7)),
+  })], 420, "parallettes", 5.6, [gazeFloorForward, gazeFloorForward, gazeFloor]),
+  "parallette-kickup-to-wall": dynamic("Grip first; kick softly to the wall, then step both feet down", [pike, kickupStart, kickupSplit, wallHandstand], 420, ["wall", "parallettes"], 6.4, [gazeFloorForward, gazeFloorForward, gazeFloor, gazeFloor]),
   "split-leg-wall-pullaway": dynamic("Split, float briefly, then return to the wall", [wallHandstand, kickupSplit, change(kickupSplit, {
     lh: p(470, 184), lk: p(480, 108), la: p(490, 38), rh: p(490, 194), rk: p(420, 166), ra: p(350, 132),
-  })], 420, ["wall", "parallettes"], 5, p(12, 1)),
-  "wall-handstand-side-exit": dynamic("Turn hips and step down to the side", [wallHandstand, change(kickupSplit, {
-    lh: p(480, 190), lk: p(540, 160), la: p(558, 132), rh: p(496, 198), rk: p(402, 242), ra: p(306, 294),
-  }), change(kickupStart, { rh: p(326, 264), rk: p(390, 330), ra: p(470, 400) })], 420, ["wall", "parallettes"], 5.4, p(10, 6)),
-  "freestanding-parallette-kickup": dynamic("Calm entry, stacked line, controlled return", [kickupStart, kickupSplit, change(wallHandstand, {
-    lh: p(468, 188), lk: p(464, 112), la: p(460, 38), rh: p(486, 190), rk: p(482, 114), ra: p(478, 40),
-  })], 420, "parallettes", 5.4, p(9, 8)),
+  })], 420, ["wall", "parallettes"], 5, gazeFloor),
+  "wall-handstand-side-exit": dynamic("Turn the hips and practise a controlled step-down with each lead leg", [
+    wallHandstand,
+    change(kickupSplit, {
+      lh: p(480, 190), lk: p(540, 160), la: p(558, 132),
+      rh: p(496, 198), rk: p(402, 242), ra: p(306, 294),
+    }),
+    change(kickupStart, { rh: p(326, 264), rk: p(390, 330), ra: p(470, 400) }),
+    wallHandstand,
+    change(kickupSplit, {
+      lh: p(480, 190), lk: p(402, 242), la: p(306, 294),
+      rh: p(496, 198), rk: p(540, 160), ra: p(558, 132),
+    }),
+    change(kickupStart, {
+      lh: p(304, 256), lk: p(390, 330), la: p(470, 400),
+      rh: p(324, 264), rk: p(210, 328), ra: p(112, 400),
+    }),
+  ], 420, ["wall", "parallettes"], 8, [gazeFloor, gazeFloor, gazeFloorForward, gazeFloor, gazeFloor, gazeFloorForward]),
+  "freestanding-parallette-kickup": dynamic("Kick up calmly, balance, then exit sideways one foot at a time; alternate exit sides", [
+    pike,
+    kickupStart,
+    kickupSplit,
+    freeHandstandBalance,
+    change(kickupSplit, {
+      lh: p(480, 190), lk: p(540, 160), la: p(558, 132),
+      rh: p(496, 198), rk: p(402, 242), ra: p(306, 294),
+    }),
+    change(kickupStart, { rh: p(326, 264), rk: p(390, 330), ra: p(470, 400) }),
+    pike,
+    kickupStart,
+    kickupSplit,
+    freeHandstandBalance,
+    change(kickupSplit, {
+      lh: p(480, 190), lk: p(402, 242), la: p(306, 294),
+      rh: p(496, 198), rk: p(540, 160), ra: p(558, 132),
+    }),
+    change(kickupStart, {
+      lh: p(304, 256), lk: p(390, 330), la: p(470, 400),
+      rh: p(324, 264), rk: p(210, 328), ra: p(112, 400),
+    }),
+  ], 420, "parallettes", 10, [
+    gazeFloorForward, gazeFloorForward, gazeFloor, gazeFloor, gazeFloor, gazeFloorForward,
+    gazeFloorForward, gazeFloorForward, gazeFloor, gazeFloor, gazeFloor, gazeFloorForward,
+  ]),
 
   // Cooldown (6)
   "forearms-parallette-prayer-rock": hold("Forearms supported; breathe in a mild lat stretch", change(quadruped, { head: p(454, 230), neck: p(418, 246), ls: p(390, 264), rs: p(406, 270), le: p(392, 332), lw: p(430, 380), re: p(424, 336), rw: p(448, 380), lh: p(260, 260), rh: p(278, 270) }), 420, "parallettes", p(8, 9)),
-  "seated-wrist-extension-stretch": hold("Palm up; draw fingers back gently", change(seatedPike, {
+  "seated-wrist-extension-stretch": hold("Palm up; draw fingers back gently; repeat the other wrist", change(seatedPike, {
     le: p(344, 250), lw: p(292, 230), re: p(360, 254), rw: p(298, 230),
-  }), 420, undefined, p(13, 0)),
-  "forearm-pronator-stretch": dynamic("Rotate palm up and down without forcing", [
+  }), 420, undefined, gazeLeft),
+  "forearm-pronator-stretch": dynamic("Rotate palm up and down without forcing; repeat the other forearm", [
     change(standing, { le: p(282, 208), lw: p(340, 220), re: p(358, 208), rw: p(300, 220) }),
     change(standing, { le: p(282, 208), lw: p(340, 198), re: p(358, 208), rw: p(300, 242) }),
   ], 486, undefined, 4, p(13, 0)),
-  "crossbody-shoulder-stretch": hold("Draw arm across without lifting the shoulder", change(standing, {
+  "crossbody-shoulder-stretch": hold("Draw one arm across without lifting the shoulder; repeat the other side", change(standing, {
     le: p(352, 184), lw: p(408, 190), re: p(338, 214), rw: p(370, 186),
   }), 486, undefined, p(13, 0)),
   "supine-thoracic-opener": hold("Let the upper back open; breathe softly", change(supine, {
     le: p(420, 286), lw: p(400, 210), re: p(446, 290), rw: p(466, 214), lk: p(270, 360), la: p(250, 414), rk: p(286, 370), ra: p(268, 416),
   }), 426, undefined, p(0, -12)),
-  "supine-90-90-breathing-reset": hold("Feet grounded; exhale ribs down", change(supine, {
-    le: p(430, 330), lw: p(366, 310), re: p(444, 344), rw: p(380, 324), lk: p(240, 350), la: p(220, 414), rk: p(258, 360), ra: p(238, 416),
-  }), 426, undefined, p(0, -12)),
+  "supine-90-90-breathing-reset": hold("Feet supported on the wall; hips and knees stay near 90 degrees", change(supine, {
+    le: p(430, 330), lw: p(366, 310), re: p(444, 344), rw: p(380, 324),
+    lh: p(306, 372), lk: p(386, 330), la: p(558, 330),
+    rh: p(320, 386), rk: p(400, 344), ra: p(558, 344),
+  }), 426, "wall", gazeCeiling),
 
   // Optional five-minute Calisthenics Lab (16)
   "controlled-parallette-pushup": dynamic("Lower between the bars; stop at a safe depth", [plank, change(plank, {
@@ -497,35 +648,52 @@ const newGuides = {
   })], 420, "parallettes", 4, p(13, 1)),
   "foot-assisted-lsit": hold("Press tall; keep only light heel assistance", change(lSit, {
     la: p(98, 400), ra: p(110, 404),
-  }), 420, "parallettes", p(13, 0)),
+  }), 420, "parallettes", gazeLeft),
   "alternating-lsit-extension": dynamic("Extend one knee while the other stays tucked", [tuckSupport, change(tuckSupport, {
     lk: p(248, 326), la: p(112, 318),
-  }), change(tuckSupport, { rk: p(258, 336), ra: p(122, 328) })], 420, "parallettes", 4.6, p(13, 0)),
-  "tuck-to-one-leg-lsit-transition": dynamic("Move from tuck to one long leg", [tuckSupport, change(lSit, {
-    rk: p(380, 352), ra: p(340, 386),
-  })], 420, "parallettes", 4.6, p(13, 0)),
-  "eccentric-pike-pushup": dynamic("Lower for the full count; reset with control", [pike, change(pike, {
+  }), change(tuckSupport, { rk: p(258, 336), ra: p(122, 328) })], 420, "parallettes", 4.6, gazeLeft),
+  "tuck-to-one-leg-lsit-transition": dynamic("Extend one leg from a stable tuck, return, then change legs", [
+    tuckSupport,
+    change(lSit, { rk: p(380, 352), ra: p(340, 386) }),
+    tuckSupport,
+    change(lSit, { lk: p(366, 344), la: p(328, 380) }),
+  ], 420, "parallettes", 6, gazeLeft),
+  "eccentric-pike-pushup": dynamic("Lower for the full count, place knees down, then reset safely", [pike, change(pike, {
     head: p(476, 312), neck: p(444, 300), ls: p(414, 292), le: p(472, 340), lw: p(438, 400), rs: p(432, 298), re: p(488, 346), rw: p(456, 400),
-  }), change(pike, { head: p(474, 348), neck: p(442, 324), ls: p(412, 306), le: p(482, 352), lw: p(438, 400), rs: p(430, 312), re: p(498, 358), rw: p(456, 400) })], 420, "parallettes", 6, p(9, 8)),
+  }), change(pike, {
+    head: p(474, 348), neck: p(442, 324), ls: p(412, 306), le: p(482, 352), lw: p(438, 400), rs: p(430, 312), re: p(498, 358), rw: p(456, 400),
+  }), change(quadruped, {
+    head: p(474, 292), neck: p(444, 310), ls: p(416, 326), le: p(430, 356), lw: p(438, 400),
+    rs: p(434, 332), re: p(448, 360), rw: p(456, 400), lh: p(296, 324), rh: p(314, 332),
+    lk: p(236, 400), la: p(170, 410), rk: p(254, 402), ra: p(188, 414),
+  })], 420, "parallettes", 7, p(9, 8)),
   "pseudo-planche-parallette-pushup": dynamic("Lean first; bend without losing the body line", [plancheLean, change(plancheLean, {
     head: p(530, 278), neck: p(494, 290), ls: p(460, 300), le: p(486, 346), lw: p(438, 400), rs: p(478, 304), re: p(502, 350), rw: p(456, 400), lh: p(314, 326), rh: p(328, 334),
   })], 420, "parallettes", 4.8, p(10, 7)),
-  "planche-lean-toe-lightener": dynamic("Lean until toes become light; do not hop", [plancheLean, change(plancheLean, {
-    la: p(82, 382), ra: p(102, 382), head: p(538, 216), neck: p(502, 236), ls: p(474, 254), rs: p(492, 258),
-  })], 420, "parallettes", 4.2, p(10, 7)),
+  "planche-lean-toe-lightener": (() => {
+    const loadedLean = change(plancheLean, {
+      head: p(538, 216), neck: p(502, 236), ls: p(474, 254), rs: p(492, 258),
+    });
+    return dynamic("Lean until one toe becomes light; replace it before alternating—never hop", [
+      loadedLean,
+      change(loadedLean, { la: p(82, 382) }),
+      loadedLean,
+      change(loadedLean, { ra: p(102, 382) }),
+    ], 420, "parallettes", 5.4, p(10, 7));
+  })(),
   "foot-assisted-tuck-planche": hold("Push tall; keep one toe as a safety contact", change(tuckPlanche, {
     la: p(330, 398), ra: p(378, 338),
   }), 420, "parallettes", p(12, 4)),
-  "one-leg-lsit-hold": hold("One leg long; shoulders remain tall", change(lSit, {
+  "one-leg-lsit-hold": hold("One leg long; shoulders remain tall; repeat the other side", change(lSit, {
     rk: p(382, 350), ra: p(338, 386),
-  }), 420, "parallettes", p(13, 0)),
-  "full-lsit-attempt": hold("Press tall before both straight legs float", lSit, 420, "parallettes", p(13, 0)),
+  }), 420, "parallettes", gazeLeft),
+  "full-lsit-attempt": hold("Press tall before both straight legs float", lSit, 420, "parallettes", gazeLeft),
   "tuck-to-lsit-transition": dynamic("Extend and return without swinging", [tuckSupport, change(lSit, {
     lk: p(278, 306), la: p(168, 302), rk: p(292, 316), ra: p(180, 312),
-  }), lSit], 420, "parallettes", 5, p(13, 0)),
+  }), lSit], 420, "parallettes", 5, gazeLeft),
   "straddle-lsit-compression-prep": dynamic("Open to straddle; lift from the hips", [tuckSupport, change(seatedPike, {
     lk: p(222, 322), la: p(82, 288), rk: p(250, 326), ra: p(132, 374),
-  })], 420, "parallettes", 4.8, p(13, 0)),
+  })], 420, "parallettes", 4.8, gazeLeft),
 } as const;
 
 const existingTechniqueGuides = {
@@ -533,32 +701,35 @@ const existingTechniqueGuides = {
   "pike-shift": dynamic("Feet grounded; shoulders glide past locked elbows", [pike, change(pike, {
     head: p(512, 236), neck: p(480, 256), ls: p(454, 270), rs: p(472, 276), le: p(446, 334), re: p(462, 337), lh: p(296, 158), rh: p(314, 166),
   })], 420, "parallettes", 4.2, p(9, 8)),
-  "support-hold": hold("Straight arms; feet remain grounded for assistance", support, 420, "parallettes", p(13, 0)),
+  "support-hold": hold("Straight arms; feet remain grounded in front for assistance", support, 420, "parallettes", gazeLeft),
   "bent-compression": dynamic("Press down; lift bent knees without swinging", [seatedPike, change(seatedPike, {
-    lh: p(342, 324), lk: p(350, 344), la: p(330, 378), rh: p(360, 332), rk: p(370, 352), ra: p(350, 386),
-  })], 420, "parallettes", 4, p(13, 0)),
+    lh: p(342, 324), lk: p(286, 306), la: p(318, 370), rh: p(360, 332), rk: p(302, 314), ra: p(334, 378),
+  })], 420, "parallettes", 4, gazeLeft),
   "hollow-tuck": hold("Face the ceiling; lower back stays pressed down", change(supine, {
     head: p(504, 366), neck: p(466, 354), le: p(438, 332), lw: p(376, 316), re: p(450, 346), rw: p(388, 330),
     lk: p(342, 316), la: p(362, 266), rk: p(356, 330), ra: p(376, 280),
   }), 426, undefined, p(0, -12)),
-  "wall-l": hold("Feet contact the wall; hips stack over shoulders", invertedL, 420, ["wall", "parallettes"], p(13, 0)),
+  "wall-l": hold("Feet contact the wall; hips stack over shoulders; eyes look between bars", invertedL, 420, ["wall", "parallettes"], gazeFloor),
   "support-shrugs": dynamic("Elbows locked; press tall then lower slightly", [support, change(support, {
     head: p(430, 154), neck: p(426, 198), ls: p(408, 234), rs: p(438, 236),
-  })], 420, "parallettes", 3.8, p(13, 0)),
-  "box-pike": hold("Feet stay on wall; shoulders stack over hands", invertedL, 420, ["wall", "parallettes"], p(9, 8)),
-  "tuck-support": hold("Press tall; knees lift without swinging", tuckSupport, 420, "parallettes", p(13, 0)),
+  })], 420, "parallettes", 3.8, gazeLeft),
+  "box-pike": hold("Feet stay on wall; shoulders stack over hands; eyes look between bars", invertedL, 420, ["wall", "parallettes"], gazeFloor),
+  "tuck-support": hold("Press tall; knees lift in front without swinging", tuckSupport, 420, "parallettes", gazeLeft),
   "straight-compression": dynamic("Locked knees; lift from the hips", [seatedPike, change(seatedPike, {
     lk: p(226, 322), la: p(92, 314), rk: p(242, 332), ra: p(108, 324),
-  })], 420, "parallettes", 4, p(13, 0)),
-  "box-toe-light": dynamic("Reduce wall pressure through control; never jump", [invertedL, change(invertedL, {
-    la: p(196, 226), ra: p(212, 226),
-  })], 420, ["wall", "parallettes"], 4.2, p(9, 8)),
+  })], 420, "parallettes", 4, gazeLeft),
+  "box-toe-light": dynamic("Shift shoulders, peel one foot, replace it, then change sides", [
+    invertedL,
+    change(invertedL, { ls: p(431, 292), rs: p(448, 298), head: p(490, 260), neck: p(459, 278), la: p(520, 196) }),
+    invertedL,
+    change(invertedL, { ls: p(431, 292), rs: p(448, 298), head: p(490, 260), neck: p(459, 278), ra: p(522, 204) }),
+  ], 420, ["wall", "parallettes"], 5.6, gazeFloor),
   "kneeling-lean": dynamic("Load shoulders with straight arms", [quadruped, change(quadruped, {
     head: p(534, 204), neck: p(496, 224), ls: p(466, 244), rs: p(482, 250), le: p(450, 318), re: p(466, 322), lh: p(300, 250), rh: p(318, 260),
   })], 420, "parallettes", 4.2, p(10, 7)),
   "partial-wall-walk": dynamic("Feet stay on the wall; climb only to control", [change(plank, {
     la: p(558, 360), ra: p(558, 376), lh: p(360, 290), rh: p(376, 300), lk: p(470, 326), rk: p(486, 336), head: p(360, 220), neck: p(390, 236), ls: p(418, 250), rs: p(434, 256)
-  }), invertedL], 420, ["wall", "parallettes"], 5.2, p(10, 7)),
+  }), invertedL], 420, ["wall", "parallettes"], 5.2, [gazeFloorForward, gazeFloor]),
   "wall-alignment": hold("Chest faces wall; toes maintain light contact", wallHandstand, 420, ["wall", "parallettes"], p(0, 12)),
   "chest-wall-line": hold("Chest faces wall; toes touch lightly; body stays hollow", wallHandstand, 420, ["wall", "parallettes"], p(0, 12)),
   "frog-prep": dynamic("Gaze forward; keep toes available", [change(frog, {
@@ -567,25 +738,28 @@ const existingTechniqueGuides = {
   "pike-elevation": dynamic("Straight arms; shoulders press toward ears", [pike, change(pike, {
     head: p(466, 246), neck: p(438, 266), ls: p(414, 286), rs: p(432, 292),
   })], 420, "parallettes", 3.8, p(9, 8)),
-  "supported-knee-raise": dynamic("Curl pelvis as knees rise; no swing", [support, tuckSupport], 420, "parallettes", 4.4, p(13, 0)),
-  "plank-knee-elbow": dynamic("Knee approaches elbow; return to a full plank", [plank, change(plank, {
-    rh: p(310, 302), rk: p(385, 320), ra: p(420, 350),
-  })], 420, "parallettes", 4.2, p(10, 7)),
+  "supported-knee-raise": dynamic("Curl pelvis as knees rise in front; no swing", [support, tuckSupport], 420, "parallettes", 4.4, gazeLeft),
+  "plank-knee-elbow": dynamic("Bring one knee toward its elbow, return to plank, then alternate", [
+    plank,
+    change(plank, { rh: p(310, 302), rk: p(385, 320), ra: p(420, 350) }),
+    plank,
+    change(plank, { lh: p(296, 294), lk: p(377, 310), la: p(412, 342) }),
+  ], 420, "parallettes", 5.6, p(10, 7)),
   "boat-hold": hold("Chest stays lifted; gaze forward rather than down", change(seatedPike, {
     head: p(414, 186), neck: p(400, 224), ls: p(382, 246), rs: p(414, 250),
     le: p(330, 268), lw: p(258, 282), re: p(346, 278), rw: p(274, 292),
     lh: p(342, 326), lk: p(278, 280), la: p(226, 224), rh: p(360, 334), rk: p(296, 290), ra: p(244, 234),
-  }), 420, undefined, p(13, 0)),
-  "side-plank": hold("Feet stay on the floor; unused bar remains clear", sidePlank, 420, "parallettes", p(11, 2)),
+  }), 420, undefined, gazeLeft),
+  "side-plank": hold("Feet stay on the floor; unused bar remains clear; repeat the other side", sidePlank, 420, "parallettes", p(11, 2)),
   "wall-elevation": dynamic("Elbows locked; elevate through the shoulders", [wallHandstand, change(wallHandstand, {
     head: p(468, 346), neck: p(468, 317), ls: p(449, 298), rs: p(472, 298), lh: p(482, 198), rh: p(498, 200),
   })], 420, ["wall", "parallettes"], 3.8, p(0, 12)),
-  "wall-kickup": dynamic("Grip both bars before the feet leave", [kickupStart, kickupSplit, wallHandstand], 420, ["wall", "parallettes"], 5.2, p(10, 7)),
+  "wall-kickup": dynamic("Grip both bars before the feet leave; step both feet down to finish", [pike, kickupStart, kickupSplit, wallHandstand], 420, ["wall", "parallettes"], 6.4, [gazeFloorForward, gazeFloorForward, gazeFloor, gazeFloor]),
   "chest-wall": hold("Chest faces wall; ribs in; toes touch lightly", wallHandstand, 420, ["wall", "parallettes"], p(0, 12)),
-  "tuck-support-2": hold("Press tall; lift knees without leaning back", tuckSupport, 420, "parallettes", p(13, 0)),
+  "tuck-support-2": hold("Press tall; lift knees in front without leaning back", tuckSupport, 420, "parallettes", gazeLeft),
   "single-leg-compression": dynamic("One locked knee lifts at a time", [seatedPike, change(seatedPike, {
     lk: p(220, 304), la: p(92, 282),
-  }), change(seatedPike, { rk: p(236, 314), ra: p(108, 292) })], 420, "parallettes", 4.6, p(13, 0)),
+  }), change(seatedPike, { rk: p(236, 314), ra: p(108, 292) })], 420, "parallettes", 4.6, gazeLeft),
   "heel-pullaway": dynamic("Face away; pull heels a few centimetres; return before arching", [wallHandstand, change(wallHandstand, {
     lk: p(494, 112), la: p(510, 54), rk: p(508, 116), ra: p(522, 62),
   })], 420, ["wall", "parallettes"], 4.4, p(-8, 12)),
@@ -594,21 +768,21 @@ const existingTechniqueGuides = {
   }), pike], 420, undefined, 4.2, p(9, 8)),
   "full-wall-walk": dynamic("Keep feet on the wall; walk in and back out under control", [change(plank, {
     la: p(558, 360), ra: p(558, 376), lh: p(360, 290), rh: p(376, 300), lk: p(470, 326), rk: p(486, 336), head: p(360, 220), neck: p(390, 236), ls: p(418, 250), rs: p(434, 256),
-  }), invertedL, wallHandstand, invertedL], 420, ["wall", "parallettes"], 6.4, p(8, 9)),
-  "one-foot-assisted-lsit": hold("Press tall; one straight leg floats while the other foot assists", change(support, {
+  }), invertedL, wallHandstand, invertedL], 420, ["wall", "parallettes"], 6.4, [gazeFloorForward, gazeFloor, gazeFloor, gazeFloor]),
+  "one-foot-assisted-lsit": hold("Press tall; one straight leg floats while the other foot assists; repeat the other side", change(support, {
     lk: p(276, 328), la: p(132, 318), rk: p(308, 374), ra: p(286, 418),
-  }), 420, "parallettes", p(13, 0)),
+  }), 420, "parallettes", gazeLeft),
   "tuck-support-knee-extensions": dynamic("Keep the tuck high; extend one knee at a time without swinging", [tuckSupport, change(tuckSupport, {
     lk: p(274, 326), la: p(124, 316),
-  }), tuckSupport, change(tuckSupport, { rk: p(292, 336), ra: p(142, 326) })], 420, "parallettes", 5.2, p(13, 0)),
+  }), tuckSupport, change(tuckSupport, { rk: p(292, 336), ra: p(142, 326) })], 420, "parallettes", 5.2, gazeLeft),
   "shallow-range-pike-pushup": dynamic("Use a shallow head path; keep hips high and feet grounded", [pike, change(pike, {
     head: p(470, 304), neck: p(442, 316), ls: p(416, 326), rs: p(434, 332), le: p(452, 350), re: p(470, 356),
   }), pike], 420, "parallettes", 4.8, p(9, 8)),
   "straddle-planche-lean": hold("Lean with locked elbows; wide feet stay grounded", change(plancheLean, {
     lk: p(206, 330), la: p(76, 392), rk: p(224, 350), ra: p(130, 418),
   }), 420, "parallettes", p(10, 7)),
-  "support-to-tuck-transition": dynamic("Press tall before both knees lift; return without dropping", [support, tuckSupport, support], 420, "parallettes", 4.8, p(13, 0)),
-  "seated-pike-breathing-reset": hold("Sit tall, soften the knees if needed and use a long exhale", seatedPike, 420, undefined, p(13, 0)),
+  "support-to-tuck-transition": dynamic("Press tall before both knees lift in front; return without dropping", [support, tuckSupport, support], 420, "parallettes", 4.8, gazeLeft),
+  "seated-pike-breathing-reset": hold("Sit tall, look toward the legs and use a long exhale", seatedPike, 420, undefined, gazeLeft),
 } as const;
 
 const v2ExpansionGuideIds = [
@@ -620,8 +794,17 @@ const v2ExpansionGuideIds = [
 
 const expansionGuide = (id: (typeof v2ExpansionGuideIds)[number]): Guide => {
   if (id === "cat-cow-flow") return dynamic("Round and extend the spine slowly", [quadruped, change(quadruped, { head: p(480, 230), neck: p(438, 250), ls: p(402, 272), rs: p(420, 278), lh: p(282, 220), rh: p(300, 230) }), change(quadruped, { head: p(516, 184), neck: p(474, 210), ls: p(434, 232), rs: p(450, 238), lh: p(282, 278), rh: p(300, 288) })], 420, undefined, 5, p(10, 4));
-  if (id === "bear-shoulder-circles") return dynamic("Knees hover; make small shoulder circles", [bearHover, shifted(bearHover, 10, -4), shifted(bearHover, -6, 5)], 420, undefined, 4.8, p(10, 6));
-  if (id === "prone-y-t-w-raises") return dynamic("Lift into Y, T and W without arching", [prone, change(prone, { le: p(420, 328), lw: p(474, 286), re: p(432, 340), rw: p(486, 298) }), change(prone, { le: p(410, 350), lw: p(370, 316), re: p(422, 364), rw: p(382, 330) })], 426, undefined, 5.5, p(0, 10));
+  if (id === "bear-shoulder-circles") return dynamic("Hands and toes stay planted through small shoulder circles", [
+    bearHover,
+    change(bearHover, { head: p(500, 198), neck: p(462, 216), ls: p(434, 236), rs: p(450, 242), lh: p(288, 248), rh: p(306, 258) }),
+    change(bearHover, { head: p(486, 212), neck: p(446, 232), ls: p(416, 252), rs: p(432, 258), lh: p(278, 250), rh: p(296, 260) }),
+  ], 420, undefined, 4.8, p(10, 6));
+  if (id === "prone-y-t-w-raises") return dynamic("Lift into Y, T and W without arching", [
+    prone,
+    change(prone, { le: p(476, 342), lw: p(552, 310), re: p(484, 356), rw: p(558, 326) }),
+    change(prone, { le: p(444, 330), lw: p(444, 268), re: p(454, 344), rw: p(454, 282) }),
+    change(prone, { le: p(454, 334), lw: p(414, 296), re: p(464, 348), rw: p(424, 310) }),
+  ], 426, undefined, 6.4, p(0, 10));
   if (["easy-rope-bounce", "basic-two-foot-bounce", "alternate-foot-step", "boxer-step", "side-to-side-ski-hop", "forward-back-hop", "high-knee-rope", "fast-single-under-cadence", "recovery-bounce", "rope-step-through-mobility"].includes(id)) {
     const low = change(standing, { lk: p(292, 390), la: p(282, 462), rk: p(348, 390), ra: p(358, 462), le: p(276, 226), lw: p(242, 280), re: p(364, 226), rw: p(398, 280) });
     const airborne = change(low, { head: p(320, 66), neck: p(320, 108), ls: p(284, 126), rs: p(356, 126), lh: p(302, 273), rh: p(338, 273), lk: p(292, 370), rk: p(348, 370), la: p(282, 448), ra: p(358, 448) });
@@ -636,61 +819,118 @@ const expansionGuide = (id: (typeof v2ExpansionGuideIds)[number]): Guide => {
     return dynamic("Turn from the wrists; use low symmetrical jumps", [low, airborne, low], 486, "rope", 3.8, p(13, 0));
   }
   if (id === "wall-shoulder-flexion-line-drill") return dynamic("Ribs stay controlled; hands slide up the wall", [wallStandingSide, change(wallStandingSide, { le: p(500, 126), lw: p(558, 70), re: p(514, 138), rw: p(558, 84) })], 486, "wall", 4.4, p(13, 0));
-  if (id === "prone-handstand-line-hold") return hold("Long prone hollow line; ribs and pelvis controlled", change(prone, { le: p(424, 350), lw: p(518, 338), re: p(436, 364), rw: p(530, 352), lk: p(198, 382), la: p(78, 388), rk: p(212, 396), ra: p(92, 402) }), 426, undefined, p(0, 10));
+  if (id === "prone-handstand-line-hold") return hold("Long prone hollow line; arms reach overhead with the face toward the mat", change(prone, { le: p(480, 350), lw: p(560, 328), re: p(488, 364), rw: p(568, 344), lk: p(198, 382), la: p(78, 388), rk: p(212, 396), ra: p(92, 402) }), 426, undefined, p(0, 10));
   if (id === "bear-shoulder-tap") return dynamic("Tap slowly without rotating the torso", [bearHover, change(bearHover, { le: p(454, 282), lw: p(414, 246) }), change(bearHover, { re: p(438, 286), rw: p(396, 250) })], 420, undefined, 4.8, p(10, 6));
   if (id === "down-dog-to-pike-weight-shift") return dynamic("Elbows locked; shoulders glide toward hands", [pike, change(pike, { head: p(520, 236), neck: p(486, 254), ls: p(456, 270), rs: p(474, 276), lh: p(296, 170), rh: p(314, 178) })], 420, undefined, 4.5, p(9, 8));
   if (id === "floor-frog-stand-setup" || id === "floor-frog-stand") return dynamic("Knees rest lightly on arms; return feet safely", [change(frog, { la: p(330, 402), ra: p(350, 406) }), frog], 420, undefined, 4.8, p(13, 1));
-  if (id === "floor-crane-one-knee-float") return dynamic("Float one knee while the other stays supported", [frog, change(frog, { rh: p(366, 250), rk: p(414, 286), ra: p(374, 338) })], 420, undefined, 4.6, p(13, 1));
+  if (id === "floor-crane-one-knee-float") return dynamic("Float one knee, replace it, then change sides", [
+    frog,
+    change(frog, { rh: p(366, 250), rk: p(414, 286), ra: p(374, 338) }),
+    frog,
+    change(frog, { lh: p(350, 242), lk: p(402, 278), la: p(362, 332) }),
+  ], 420, undefined, 5.8, p(13, 1));
   if (id === "floor-tuck-planche-attempt") return dynamic("Press tall; float briefly with locked elbows", [change(tuckPlanche, { la: p(330, 402) }), tuckPlanche], 420, undefined, 4.8, p(12, 4));
-  if (id === "wall-split-kick-entry-rehearsal" || id === "floor-controlled-kick-up-to-wall") return dynamic("Kick softly to the wall and step down", [kickupStart, kickupSplit, wallHandstand], 420, "wall", 5.4, p(10, 7));
+  if (id === "wall-split-kick-entry-rehearsal" || id === "floor-controlled-kick-up-to-wall") return dynamic("Kick softly to the wall, then replace both feet under control", [pike, kickupStart, kickupSplit, wallHandstand], 420, "wall", 6.4, [gazeFloorForward, gazeFloorForward, gazeFloor, gazeFloor]);
   if (id.startsWith("floor-") && id.includes("wall") && (id.includes("handstand") || id.includes("pull") || id.includes("shift"))) {
     if (id.includes("heel")) return dynamic("Face away; peel heels gently and return", [wallHandstand, change(wallHandstand, { la: p(514, 52), ra: p(526, 60) })], 420, "wall", 4.6, p(-8, 12));
     if (id.includes("toe")) return dynamic("Face the wall; pull toes away without pushing", [wallHandstand, change(wallHandstand, { la: p(532, 50), ra: p(540, 58) })], 420, "wall", 4.6, p(8, 12));
-    if (id.includes("shift")) return dynamic("Shift a few centimetres with both hands planted", [wallHandstand, shifted(wallHandstand, -8, 0), shifted(wallHandstand, 8, 0)], 420, "wall", 4.6, p(0, 12));
+    if (id.includes("shift")) return dynamic("Shift a few centimetres while hands and wall-contact feet stay planted", [wallHandstand, wallBodyShift(-8), wallBodyShift(8)], 420, "wall", 4.6, gazeFloor);
     return hold("Active shoulders; chest faces wall; toes touch lightly", wallHandstand, 420, "wall", p(8, 12));
   }
-  if (id === "floor-freestanding-kick-up") return dynamic("Kick to a stacked line, then return one foot at a time", [kickupStart, kickupSplit, change(wallHandstand, { la: p(460, 38), ra: p(478, 40), lk: p(464, 112), rk: p(482, 114) }), kickupSplit, kickupStart], 420, undefined, 6.2, p(9, 8));
+  if (id === "floor-freestanding-kick-up") return dynamic("Kick to a stacked line, then replace both feet one at a time", [pike, kickupStart, kickupSplit, freeHandstandBalance], 420, undefined, 7, [gazeFloorForward, gazeFloorForward, gazeFloor, gazeFloor]);
   if (id === "floor-freestanding-balance-attempt") {
-    const balance = change(wallHandstand, { la: p(460, 38), ra: p(478, 40), lk: p(464, 112), rk: p(482, 114) });
-    return dynamic("Enter calmly; balance with tiny shoulder and finger-pressure changes", [kickupStart, kickupSplit, balance, shifted(balance, -7, 0), shifted(balance, 5, 0), balance], 420, undefined, 7, p(9, 8));
+    return dynamic("Enter calmly; hands stay planted through tiny corrections; replace both feet to finish", [pike, kickupStart, kickupSplit, freeHandstandBalance, freeBalanceShift(freeHandstandBalance, -5), freeBalanceShift(freeHandstandBalance, 4)], 420, undefined, 8, [gazeFloorForward, gazeFloorForward, gazeFloor, gazeFloor, gazeFloor, gazeFloor]);
   }
-  if (id === "floor-side-exit-practice") return dynamic("Turn hips and land one foot at a time", [kickupSplit, change(kickupSplit, { lk: p(540, 160), la: p(558, 132), rk: p(402, 242), ra: p(306, 294) }), kickupStart], 420, undefined, 5.4, p(10, 6));
+  if (id === "floor-side-exit-practice") return dynamic("Turn the hips and land one foot at a time with each lead leg", [
+    kickupSplit,
+    change(kickupSplit, { lk: p(540, 160), la: p(558, 132), rk: p(402, 242), ra: p(306, 294) }),
+    change(kickupStart, { rh: p(326, 264), rk: p(390, 330), ra: p(470, 400) }),
+    kickupSplit,
+    change(kickupSplit, { lk: p(402, 242), la: p(306, 294), rk: p(540, 160), ra: p(558, 132) }),
+    change(kickupStart, {
+      lh: p(304, 256), lk: p(390, 330), la: p(470, 400),
+      rh: p(324, 264), rk: p(210, 328), ra: p(112, 400),
+    }),
+  ], 420, undefined, 8, [gazeFloor, gazeFloor, gazeFloorForward, gazeFloor, gazeFloor, gazeFloorForward]);
   if (id.includes("side-plank")) {
-    if (id.includes("knee-drive")) return dynamic("Keep hips lifted as the top knee drives", [sidePlank, change(sidePlank, { rk: p(326, 286), ra: p(390, 310) })], 420, undefined, 4.5, p(11, 2));
-    if (id.includes("star")) return hold("Lift the top leg without losing the body line", change(sidePlank, { rk: p(248, 250), ra: p(138, 188) }), 420, undefined, p(11, 2));
-    return hold("Shoulder stacked; body stays in one line", sidePlank, 420, undefined, p(11, 2));
+    if (id.includes("knee-drive")) return dynamic("Keep hips lifted as the top knee drives; repeat the other side", [sidePlank, change(sidePlank, { rk: p(326, 286), ra: p(390, 310) })], 420, undefined, 4.5, p(11, 2));
+    if (id.includes("star")) return hold("Lift the top leg without losing the body line; repeat the other side", change(sidePlank, { rk: p(248, 250), ra: p(138, 188) }), 420, undefined, p(11, 2));
+    if (id.includes("forearm")) return hold("Forearm planted; shoulder stacked; repeat the other side", forearmSidePlank, 420, undefined, p(11, 2));
+    return hold("Shoulder stacked; body stays in one line; repeat the other side", sidePlank, 420, undefined, p(11, 2));
   }
-  if (id.includes("bird-dog")) return dynamic("Reach opposite arm and leg; keep hips square", [quadruped, change(quadruped, { le: p(484, 212), lw: p(552, 188), rk: p(204, 278), ra: p(92, 250) }), ...(id.includes("knee-to-elbow") ? [change(quadruped, { le: p(402, 274), lw: p(360, 300), rk: p(330, 300), ra: p(370, 332) })] : [])], 420, undefined, 5, p(10, 6));
-  if (id.includes("bear-crawl")) return dynamic("Keep knees low through small controlled steps", [bearHover, shifted(bearHover, 18, 0), shifted(bearHover, 34, 0)], 420, undefined, 4.6, p(10, 6));
+  if (id.includes("bird-dog")) {
+    const leftArmRightLeg = change(quadruped, { le: p(484, 212), lw: p(552, 188), rk: p(204, 278), ra: p(92, 250) });
+    const leftElbowRightKnee = change(quadruped, { le: p(402, 274), lw: p(360, 300), rk: p(330, 300), ra: p(370, 332) });
+    const rightArmLeftLeg = change(quadruped, { re: p(500, 220), rw: p(568, 196), lk: p(190, 268), la: p(78, 238) });
+    const rightElbowLeftKnee = change(quadruped, { re: p(414, 282), rw: p(372, 308), lk: p(314, 292), la: p(354, 326) });
+    const poses = id.includes("knee-to-elbow")
+      ? [quadruped, leftArmRightLeg, leftElbowRightKnee, leftArmRightLeg, quadruped, rightArmLeftLeg, rightElbowLeftKnee, rightArmLeftLeg]
+      : [quadruped, leftArmRightLeg, quadruped, rightArmLeftLeg];
+    return dynamic("Reach opposite arm and leg, return with square hips, then alternate sides", poses, 420, undefined, id.includes("knee-to-elbow") ? 8 : 6, p(10, 6));
+  }
+  if (id.includes("bear-crawl")) return dynamic("Keep knees low through small opposite hand-and-foot steps", [
+    bearHover,
+    change(bearHover, { le: p(442, 310), lw: p(458, 400), rk: p(296, 346), ra: p(246, 394) }),
+    change(bearHover, { re: p(464, 314), rw: p(480, 400), lk: p(276, 340), la: p(218, 392) }),
+  ], 420, undefined, 5, p(10, 6));
   if (id.includes("plank") && !id.includes("reverse")) {
-    if (id.includes("forearm") || id === "rkc-plank") return id.includes("saw") ? dynamic("Move as one rigid unit", [change(plank, { le: p(432, 352), lw: p(402, 400), re: p(450, 354), rw: p(420, 400) }), shifted(change(plank, { le: p(432, 352), lw: p(402, 400), re: p(450, 354), rw: p(420, 400) }), 18, 0)], 420, undefined, 4.4, p(10, 7)) : hold("Ribs tucked; glutes active; breathe", change(plank, { le: p(432, 352), lw: p(402, 400), re: p(450, 354), rw: p(420, 400) }), 420, undefined, p(10, 7));
+    if (id.includes("forearm") || id === "rkc-plank") return id.includes("saw") ? dynamic("Forearms stay planted as the rigid body shifts", [forearmPlank, forearmSawBack], 420, undefined, 4.4, gazeFloorForward) : hold("Forearms planted; ribs tucked; glutes active", forearmPlank, 420, undefined, gazeFloorForward);
     if (id.includes("reach")) return dynamic("Reach one arm without rotating the hips", [plank, change(plank, { le: p(474, 250), lw: p(554, 222) })], 420, undefined, 4.4, p(10, 7));
-    if (id.includes("leg-lift")) return dynamic("Lift one straight leg without arching", [plank, change(plank, { lk: p(180, 300), la: p(74, 270) })], 420, undefined, 4.4, p(10, 7));
+    if (id.includes("leg-lift")) return dynamic("Lift one straight leg without arching, replace it, then alternate", [
+      plank,
+      change(plank, { lk: p(180, 300), la: p(74, 270) }),
+      plank,
+      change(plank, { rk: p(194, 310), ra: p(92, 280) }),
+    ], 420, undefined, 5.6, p(10, 7));
     return hold("Maintain a straight, braced plank", plank, 420, undefined, p(10, 7));
   }
-  if (id.includes("glute-bridge")) return dynamic("Lift through the hips without arching the back", [supine, bridge, ...(id.includes("single") ? [change(bridge, { rk: p(286, 260), ra: p(300, 190) })] : id.includes("march") ? [change(bridge, { rk: p(300, 292), ra: p(314, 236) })] : [])], 426, undefined, 4.8, p(0, -12));
+  if (id === "glute-bridge-march") return dynamic("Keep hips lifted while alternating one controlled march", [
+    bridge,
+    change(bridge, { rk: p(300, 292), ra: p(314, 236) }),
+    bridge,
+    change(bridge, { lk: p(282, 282), la: p(296, 226) }),
+  ], 426, undefined, 5.2, gazeCeiling);
+  if (id === "single-leg-glute-bridge") {
+    const singleDown = change(supine, { rk: p(286, 260), ra: p(300, 190) });
+    const singleUp = change(bridge, { rk: p(286, 260), ra: p(300, 190) });
+    return dynamic("Keep one leg raised as the planted foot lifts and lowers the hips", [singleDown, singleUp], 426, undefined, 4.8, gazeCeiling);
+  }
   if (id === "reverse-plank-hold") return hold("Hips lifted; shoulders controlled; body long", reversePlank, 420, undefined, p(5, -11));
   if (id === "prone-swimmer") return dynamic("Alternate a small arm and leg lift", [prone, change(prone, { le: p(420, 330), lw: p(500, 290), rk: p(210, 370), ra: p(90, 350) }), change(prone, { re: p(432, 344), rw: p(512, 304), lk: p(196, 356), la: p(76, 336) })], 426, undefined, 5, p(0, 10));
   if (id === "floor-seated-knee-lift") {
     const bent = change(seatedPike, { lk: p(250, 314), la: p(284, 368), rk: p(270, 324), ra: p(304, 378) });
-    return dynamic("Keep the chest tall; draw both bent knees upward", [bent, change(bent, { lk: p(270, 270), la: p(306, 326), rk: p(290, 280), ra: p(326, 336) }), bent], 420, undefined, 4.8, p(13, 0));
+    return dynamic("Keep the chest tall; draw both bent knees upward", [bent, change(bent, { lk: p(270, 270), la: p(306, 326), rk: p(290, 280), ra: p(326, 336) }), bent], 420, undefined, 4.8, gazeLeft);
   }
-  if (id === "floor-single-leg-pike-lift") return dynamic("One locked knee lifts while the other heel stays grounded", [seatedPike, change(seatedPike, { lk: p(220, 296), la: p(88, 270) }), seatedPike], 420, undefined, 4.6, p(13, 0));
-  if (id === "floor-double-leg-pike-lift") return dynamic("Lift both straight heels together without leaning back", [seatedPike, change(seatedPike, { lk: p(220, 286), la: p(88, 258), rk: p(238, 296), ra: p(106, 268) }), seatedPike], 420, undefined, 4.8, p(13, 0));
+  if (id === "floor-single-leg-pike-lift") return dynamic("Lift one locked leg, replace the heel, then change sides", [
+    seatedPike,
+    change(seatedPike, { lk: p(220, 296), la: p(88, 270) }),
+    seatedPike,
+    change(seatedPike, { rk: p(236, 306), ra: p(104, 280) }),
+  ], 420, undefined, 5.6, gazeLeft);
+  if (id === "floor-double-leg-pike-lift") return dynamic("Lift both straight heels together without leaning back", [seatedPike, change(seatedPike, { lk: p(220, 286), la: p(88, 258), rk: p(238, 296), ra: p(106, 268) }), seatedPike], 420, undefined, 4.8, gazeLeft);
   if (id === "straddle-pike-pulses") {
     const straddle = change(seatedPike, { lk: p(214, 330), la: p(82, 380), rk: p(250, 338), ra: p(142, 416) });
-    return dynamic("Keep both knees locked; pulse the wide heels clear of the floor", [straddle, change(straddle, { la: p(78, 354), ra: p(136, 390) }), straddle], 420, undefined, 4.6, p(13, 0));
+    return dynamic("Keep both knees locked; pulse the wide heels clear of the floor", [straddle, change(straddle, { la: p(78, 354), ra: p(136, 390) }), straddle], 420, undefined, 4.6, gazeLeft);
   }
-  if (id === "seated-pike-hold-lift-off") return hold("Press down, stay tall and hold both straight heels clear", change(seatedPike, { lk: p(220, 286), la: p(88, 258), rk: p(238, 296), ra: p(106, 268) }), 420, undefined, p(13, 0));
-  if (id === "floor-tuck-v-sit-balance") return hold("Balance tall in a compact tuck", tuckSupport, 420, undefined, p(13, 0));
+  if (id === "seated-pike-hold-lift-off") return dynamic("Press down, float both straight heels briefly, then return without leaning back", [
+    seatedPike,
+    change(seatedPike, { lk: p(220, 286), la: p(88, 258), rk: p(238, 296), ra: p(106, 268) }),
+  ], 420, undefined, 4.8, gazeLeft);
+  if (id === "floor-tuck-v-sit-balance") return hold("Balance on the sitting bones; hands reach forward and do not support the floor", floorTuckVSit, 420, undefined, gazeLeft);
   if (id.includes("push-up")) {
     const base = id.includes("pike") ? pike : id.includes("knee") ? change(plank, { lk: p(210, 400), la: p(150, 412), rk: p(228, 404), ra: p(168, 416) }) : plank;
-    return dynamic("Lower and press as one controlled unit", [base, change(base, { head: p(base.head.x, base.head.y + 62), neck: p(base.neck.x, base.neck.y + 52), ls: p(base.ls.x, base.ls.y + 46), rs: p(base.rs.x, base.rs.y + 46), le: p(base.le.x + 34, base.le.y + 16), re: p(base.re.x + 34, base.re.y + 16) })], 420, undefined, id.includes("tempo") ? 6 : 4.5, p(10, 7));
+    const lowered = id.includes("pike")
+      ? change(base, { head: p(510, 326), neck: p(478, 310), ls: p(446, 302), rs: p(464, 308), le: p(478, 350), re: p(496, 356) })
+      : change(base, { head: p(base.head.x, base.head.y + 62), neck: p(base.neck.x, base.neck.y + 52), ls: p(base.ls.x, base.ls.y + 46), rs: p(base.rs.x, base.rs.y + 46), le: p(base.le.x + 34, base.le.y + 16), re: p(base.re.x + 34, base.re.y + 16), lh: p(base.lh.x, base.lh.y + 38), rh: p(base.rh.x, base.rh.y + 38) });
+    return dynamic(id.includes("pike") ? "Hips stay high as the head travels forward between the hands" : "Lower and press as one controlled unit", [base, lowered], 420, undefined, id.includes("tempo") ? 6 : 4.5, gazeFloorForward);
   }
   if (id === "floor-planche-lean") return hold("Protract and lean with elbows locked", plancheLean, 420, undefined, p(10, 7));
-  if (id.includes("spinal-twist")) return hold("Let bent knees rest to one side and breathe", change(supine, { lk: p(330, 370), la: p(390, 408), rk: p(344, 384), ra: p(404, 416) }), 426, undefined, p(0, -12));
-  if (id.includes("sphinx")) return hold("Breathe gently without compressing the lower back", change(prone, { head: p(500, 314), neck: p(458, 330), ls: p(426, 346), rs: p(438, 360), le: p(444, 382), re: p(456, 394), lw: p(414, 414), rw: p(426, 418) }), 426, undefined, p(10, -6));
-  if (id.includes("hip-flexor")) return hold("Back knee grounded; glute engaged; pelvis controlled", halfKneeling, 486, undefined, p(13, 0));
+  if (id.includes("spinal-twist")) return hold("Let bent knees rest to one side and breathe; repeat the other side", change(supine, { lk: p(330, 370), la: p(390, 408), rk: p(344, 384), ra: p(404, 416) }), 426, undefined, p(0, -12));
+  if (id.includes("sphinx")) return hold("Elbows stay under shoulders; forearms reach forward as the chest lifts gently", change(prone, {
+    head: p(500, 302), neck: p(462, 322), ls: p(430, 344), rs: p(444, 356),
+    le: p(438, 400), lw: p(520, 400), re: p(454, 406), rw: p(536, 406),
+  }), 426, undefined, p(10, -6));
+  if (id.includes("hip-flexor")) return hold("Back knee grounded; glute engaged; pelvis controlled; repeat the other leg", halfKneeling, 486, undefined, p(13, 0));
   if (id.includes("straddle-fold")) return hold("Hinge forward gently with long breaths", { head: p(320, 260), neck: p(320, 292), ls: p(292, 310), le: p(280, 346), lw: p(252, 382), rs: p(348, 310), re: p(360, 346), rw: p(388, 382), lh: p(306, 350), lk: p(206, 366), la: p(72, 404), rh: p(334, 350), rk: p(434, 366), ra: p(568, 404) }, 426, undefined, p(0, 10));
   if (id.includes("wall-lat")) return hold("Hands on wall; hips travel back; ribs stay controlled", { head: p(430, 300), neck: p(402, 318), ls: p(372, 330), le: p(474, 286), lw: p(558, 244), rs: p(388, 338), re: p(486, 300), rw: p(558, 258), lh: p(306, 310), lk: p(230, 374), la: p(150, 420), rh: p(324, 320), rk: p(250, 384), ra: p(170, 426) }, 426, "wall", p(10, 4));
   if (id === "reverse-crunch") {
@@ -711,34 +951,34 @@ const expansionGuide = (id: (typeof v2ExpansionGuideIds)[number]): Guide => {
   if (id === "tuck-up") {
     const long = change(supine, { le: p(462, 366), lw: p(542, 352), re: p(474, 380), rw: p(554, 366), lk: p(220, 374), la: p(92, 370), rk: p(234, 388), ra: p(106, 384) });
     const tuck = change(long, { head: p(410, 286), neck: p(382, 318), ls: p(356, 340), rs: p(372, 352), le: p(340, 314), lw: p(316, 276), re: p(354, 326), rw: p(330, 288), lh: p(302, 340), lk: p(330, 292), la: p(300, 236), rh: p(320, 350), rk: p(348, 302), ra: p(318, 246) });
-    return dynamic("Close ribs and knees together; return to a long hollow", [long, tuck, long], 426, undefined, 5, p(0, -12));
+    return dynamic("Close ribs and knees together; return to a long hollow", [long, tuck, long], 426, undefined, 5, [gazeCeiling, gazeTowardKnees, gazeCeiling]);
   }
   if (id === "controlled-v-up") {
     const long = change(supine, { le: p(462, 366), lw: p(542, 352), re: p(474, 380), rw: p(554, 366), lk: p(220, 374), la: p(92, 370), rk: p(234, 388), ra: p(106, 384) });
     const vee = change(long, { head: p(404, 226), neck: p(380, 258), ls: p(356, 278), rs: p(372, 290), le: p(326, 244), lw: p(282, 190), re: p(340, 256), rw: p(296, 202), lh: p(320, 340), lk: p(288, 250), la: p(270, 136), rh: p(338, 350), rk: p(306, 260), ra: p(288, 146) });
-    return dynamic("Lift trunk and straight legs together; lower with control", [long, vee, long], 426, undefined, 5.4, p(0, -12));
+    return dynamic("Lift trunk and straight legs together; look toward the toes", [long, vee, long], 426, undefined, 5.4, [gazeCeiling, p(-10, -8), gazeCeiling]);
   }
   if (id === "alternating-jackknife") {
     const long = change(supine, { le: p(462, 366), lw: p(542, 352), re: p(474, 380), rw: p(554, 366), lk: p(220, 374), la: p(92, 370), rk: p(234, 388), ra: p(106, 384) });
     const left = change(long, { head: p(410, 284), neck: p(384, 314), lw: p(286, 190), le: p(334, 252), lk: p(282, 260), la: p(270, 136) });
     const right = change(long, { head: p(410, 284), neck: p(384, 314), rw: p(302, 202), re: p(348, 264), rk: p(300, 270), ra: p(288, 146) });
-    return dynamic("Reach opposite hand toward the rising straight leg", [long, left, long, right], 426, undefined, 5.8, p(0, -12));
+    return dynamic("Reach opposite hand toward the rising straight leg", [long, left, long, right], 426, undefined, 5.8, [gazeCeiling, p(-10, -8), gazeCeiling, p(-10, -8)]);
   }
   if (id === "supine-toe-reach") {
     const legsUp = change(supine, { lk: p(270, 264), la: p(266, 128), rk: p(288, 274), ra: p(284, 138) });
     const reach = change(legsUp, { head: p(414, 290), neck: p(388, 318), ls: p(362, 338), rs: p(378, 350), le: p(330, 276), lw: p(286, 206), re: p(344, 288), rw: p(300, 218) });
-    return dynamic("Keep legs vertical; lift shoulder blades and reach upward", [legsUp, reach, legsUp], 426, undefined, 4.6, p(0, -12));
+    return dynamic("Keep legs vertical; lift shoulder blades and look toward the toes", [legsUp, reach, legsUp], 426, undefined, 4.6, [gazeCeiling, p(-8, -10), gazeCeiling]);
   }
   if (id === "heel-touches") {
     const curled = change(supine, { head: p(416, 300), neck: p(390, 326), ls: p(362, 346), rs: p(378, 358), lk: p(270, 354), la: p(222, 400), rk: p(288, 364), ra: p(240, 410) });
-    return dynamic("Keep shoulders lifted; reach side to side toward each heel", [change(curled, { lw: p(250, 388) }), change(curled, { rw: p(230, 402) })], 426, undefined, 3.8, p(0, -12));
+    return dynamic("Keep shoulders lifted; reach side to side toward each heel", [change(curled, { lw: p(250, 388) }), change(curled, { rw: p(230, 402) })], 426, undefined, 3.8, p(-10, 5));
   }
   if (id === "bicycle-crunch-slow") {
     const left = change(supine, { head: p(410, 286), neck: p(382, 316), ls: p(350, 334), rs: p(372, 350), le: p(326, 276), lw: p(360, 240), re: p(344, 288), rw: p(386, 260), lk: p(330, 292), la: p(298, 238), rk: p(224, 360), ra: p(108, 374) });
     const right = change(left, { le: p(342, 288), lw: p(386, 260), re: p(324, 276), rw: p(360, 240), lk: p(222, 358), la: p(106, 372), rk: p(348, 302), ra: p(316, 248) });
-    return dynamic("Rotate slowly as the opposite knee comes in", [left, right], 426, undefined, 4.8, p(0, -12));
+    return dynamic("Rotate slowly as the opposite knee comes in", [left, right], 426, undefined, 4.8, p(-9, -8));
   }
-  return dynamic("Move slowly through the demonstrated range", [quadruped, shifted(quadruped, 12, -6), quadruped], 420, undefined, 4.4, p(10, 6));
+  throw new Error(`Missing dedicated motion guide for ${id}`);
 };
 
 const v2ExpansionGuides = Object.fromEntries(
@@ -769,8 +1009,8 @@ const researchExpansionGuides = {
       le: p(220, 300), lw: p(186, 364), re: p(238, 292), rw: p(202, 354),
       lh: p(308, 294), rh: p(330, 286), lk: p(274, 386), la: p(202, 470), rk: p(378, 374), ra: p(426, 470),
     }),
-  ], 486, undefined, 6, p(12, 2)),
-  "dynamic-half-kneeling-hip-flexor-reach": dynamic("Tuck the pelvis, shift gently, reach overhead", [
+  ], 486, undefined, 6, [gazeRight, gazeRight, gazeLeft, gazeLeft]),
+  "dynamic-half-kneeling-hip-flexor-reach": dynamic("Tuck the pelvis, shift gently and reach overhead; repeat the other leg", [
     halfKneeling,
     change(halfKneeling, {
       head: p(340, 116), neck: p(334, 158), ls: p(308, 178), rs: p(360, 178),
@@ -783,26 +1023,26 @@ const researchExpansionGuides = {
     change(standing, { head: p(238, 156), neck: p(248, 198), ls: p(224, 216), rs: p(274, 220), lh: p(232, 314), rh: p(268, 318), lk: p(164, 364), la: p(116, 470), rk: p(390, 386), ra: p(524, 470), le: p(180, 272), lw: p(142, 322), re: p(300, 272), rw: p(342, 320) }),
     change(standing, { lh: p(302, 286), rh: p(338, 286), lk: p(224, 382), la: p(116, 470), rk: p(416, 382), ra: p(524, 470) }),
     change(standing, { head: p(402, 156), neck: p(392, 198), ls: p(366, 220), rs: p(416, 216), lh: p(372, 318), rh: p(408, 314), lk: p(250, 386), la: p(116, 470), rk: p(476, 364), ra: p(524, 470), le: p(340, 272), lw: p(298, 320), re: p(460, 272), rw: p(498, 322) }),
-  ], 486, undefined, 6, p(13, 0)),
+  ], 486, undefined, 6, [gazeRight, gazeLeft, gazeRight, gazeRight]),
 
-  "parallette-wall-grip-pressure-shift": dynamic("Keep the wall contact light; change pressure through the bars", [
+  "parallette-wall-grip-pressure-shift": dynamic("Hands stay planted; shift body pressure between the bars", [
     wallHandstand,
-    change(wallHandstand, { head: p(462, 338), neck: p(462, 309), ls: p(443, 286), rs: p(466, 286), lh: p(476, 188), rh: p(492, 190), lk: p(512, 116), rk: p(524, 118) }),
-    change(wallHandstand, { head: p(474, 338), neck: p(474, 309), ls: p(455, 286), rs: p(478, 286), lh: p(488, 188), rh: p(504, 190), lk: p(524, 116), rk: p(536, 118) }),
-  ], 420, ["wall", "parallettes"], 5, p(0, 12)),
+    wallBodyShift(-8),
+    wallBodyShift(8),
+  ], 420, ["wall", "parallettes"], 5, gazeFloor),
   "chest-wall-micro-shoulder-tap": dynamic("Shift first; make only a tiny controlled tap", [
     wallHandstand,
-    change(wallHandstand, { ls: p(456, 286), le: p(472, 326), lw: p(454, 286), rs: p(478, 286), re: p(470, 343), rw: p(456, 400), lh: p(486, 188), rh: p(502, 190) }),
+    change(wallHandstand, { ls: p(456, 286), le: p(390, 326), lw: p(454, 286), rs: p(478, 286), re: p(470, 343), rw: p(456, 400), lh: p(486, 188), rh: p(502, 190) }),
     wallHandstand,
-    change(wallHandstand, { rs: p(465, 286), re: p(448, 326), rw: p(466, 286), ls: p(447, 286), le: p(442, 342), lw: p(438, 400), lh: p(478, 188), rh: p(494, 190) }),
+    change(wallHandstand, { rs: p(465, 286), re: p(520, 326), rw: p(466, 286), ls: p(447, 286), le: p(442, 342), lw: p(438, 400), lh: p(478, 188), rh: p(494, 190) }),
   ], 420, ["wall", "parallettes"], 6, p(0, 12)),
-  "entry-balance-side-exit-chain": dynamic("Enter calmly, balance briefly, then take the trained side exit", [
+  "entry-balance-side-exit-chain": dynamic("Enter calmly, balance briefly, then use the trained side exit; alternate exit sides between attempts", [
     kickupStart,
     kickupSplit,
-    change(wallHandstand, { lh: p(468, 188), lk: p(464, 112), la: p(460, 38), rh: p(486, 190), rk: p(482, 114), ra: p(478, 40) }),
+    freeHandstandBalance,
     change(kickupSplit, { lh: p(480, 190), lk: p(540, 160), la: p(558, 132), rh: p(496, 198), rk: p(402, 242), ra: p(306, 294) }),
     change(kickupStart, { rh: p(326, 264), rk: p(390, 330), ra: p(470, 400) }),
-  ], 420, "parallettes", 7, p(10, 6)),
+  ], 420, "parallettes", 7, [gazeFloorForward, gazeFloor, gazeFloor, gazeFloor, gazeFloorForward]),
 
   "prone-arch-body-hold": hold("Reach long in a shallow arch; face stays toward the mat", change(prone, {
     head: p(500, 366), neck: p(458, 362), ls: p(426, 354), rs: p(434, 368),
@@ -813,7 +1053,7 @@ const researchExpansionGuides = {
     longHollow,
     change(longHollow, { head: p(500, 350), neck: p(462, 350), ls: p(426, 350), rs: p(432, 374), lh: p(300, 350), rh: p(308, 382), le: p(492, 324), lw: p(568, 304), re: p(496, 360), rw: p(572, 346), lk: p(204, 354), la: p(82, 344), rk: p(214, 390), ra: p(92, 386) }),
     change(prone, { head: p(500, 366), neck: p(458, 362), ls: p(426, 354), rs: p(434, 368), le: p(476, 338), lw: p(552, 320), re: p(484, 352), rw: p(558, 336), lk: p(202, 370), la: p(82, 354), rk: p(216, 384), ra: p(94, 370) }),
-  ], 426, undefined, 6, p(0, 11)),
+  ], 426, undefined, 6, [gazeCeiling, p(0, 12), p(0, 11)]),
   "bridge-walkout": dynamic("Take small heel steps while the pelvis stays level", [
     bridge,
     change(bridge, { lk: p(224, 342), la: p(146, 410), rk: p(242, 354), ra: p(164, 414) }),
@@ -835,15 +1075,15 @@ const researchExpansionGuides = {
     lSit,
     change(lSit, { lk: p(280, 312), la: p(172, 314), rk: p(294, 322), ra: p(184, 324) }),
     tuckSupport,
-  ], 420, "parallettes", 6, p(13, 0)),
+  ], 420, "parallettes", 6, gazeLeft),
   "assisted-straddle-lsit-hold": hold("Press tall; wide straight heels provide light floor assistance", change(support, {
     lh: p(354, 304), rh: p(370, 312), lk: p(234, 330), la: p(86, 398), rk: p(286, 334), ra: p(218, 414),
-  }), 420, "parallettes", p(13, 0)),
+  }), 420, "parallettes", gazeLeft),
   "alternating-one-leg-lsit-switch": dynamic("Switch the long leg without dropping the support", [
     change(lSit, { rk: p(380, 352), ra: p(340, 386) }),
     tuckSupport,
     change(lSit, { lk: p(382, 344), la: p(342, 380), rk: p(250, 310), ra: p(110, 308) }),
-  ], 420, "parallettes", 5.2, p(13, 0)),
+  ], 420, "parallettes", 5.2, gazeLeft),
 
   "parallette-push-up-plus": dynamic("Finish with straight elbows and spread the shoulder blades", [
     change(plank, { head: p(500, 282), neck: p(466, 296), ls: p(432, 308), le: p(470, 350), lw: p(434, 400), rs: p(448, 312), re: p(486, 354), rw: p(456, 400), lh: p(294, 330), rh: p(308, 338) }),
@@ -859,11 +1099,11 @@ const researchExpansionGuides = {
     change(plank, { head: p(500, 282), neck: p(466, 296), ls: p(432, 308), rs: p(448, 312), le: p(458, 350), lw: p(420, 400), re: p(496, 338), rw: p(470, 372), lh: p(294, 330), rh: p(308, 338) }),
   ], 420, "parallettes", 4.8, p(10, 7)),
 
-  "supine-hamstring-stretch": hold("Support behind the thigh; lengthen the knee gently", change(supine, {
+  "supine-hamstring-stretch": hold("Support behind the thigh; lengthen the knee gently; repeat the other leg", change(supine, {
     le: p(350, 318), lw: p(310, 270), re: p(370, 330), rw: p(330, 282),
     lh: p(310, 372), lk: p(322, 248), la: p(330, 104), rh: p(320, 386), rk: p(250, 354), ra: p(190, 414),
   }), 426, undefined, p(0, -12)),
-  "figure-four-glute-stretch": hold("Ankle rests across the opposite thigh; shoulders stay relaxed", change(supine, {
+  "figure-four-glute-stretch": hold("Ankle rests across the opposite thigh; shoulders stay relaxed; repeat the other side", change(supine, {
     le: p(366, 328), lw: p(304, 310), re: p(388, 344), rw: p(326, 326),
     lh: p(314, 370), lk: p(350, 318), la: p(302, 278), rh: p(328, 384), rk: p(256, 344), ra: p(222, 414),
   }), 426, undefined, p(0, -12)),
@@ -985,7 +1225,7 @@ function EquipmentLayer({ guide, preset }: { guide: Guide; preset: string }) {
           filter={`url(#motion-shadow-${preset})`}
         >
           <path d={`M390 ${guide.floor - 20} L478 ${guide.floor - 20} M404 ${guide.floor - 20} L398 ${guide.floor + 4} M464 ${guide.floor - 20} L470 ${guide.floor + 4}`} />
-          <path d={`M414 ${guide.floor - 48} L502 ${guide.floor - 48} M428 ${guide.floor - 48} L422 ${guide.floor - 24} M488 ${guide.floor - 48} L494 ${guide.floor - 24}`} opacity=".72" />
+          <path d={`M414 ${guide.floor - 20} L502 ${guide.floor - 20} M428 ${guide.floor - 20} L422 ${guide.floor + 4} M488 ${guide.floor - 20} L494 ${guide.floor + 4}`} opacity=".72" />
         </g>
       )}
 
@@ -999,16 +1239,43 @@ function EquipmentLayer({ guide, preset }: { guide: Guide; preset: string }) {
   );
 }
 
-export function MotionGuide({ preset, compact = false }: { preset: MotionPreset; compact?: boolean }) {
+type AuditFrame = "start" | "middle" | "end";
+
+export function MotionGuide({
+  preset,
+  compact = false,
+  auditFrame,
+}: {
+  preset: MotionPreset;
+  compact?: boolean;
+  /** Freezes a deterministic keyframe for visual QA and screenshot comparison. */
+  auditFrame?: AuditFrame;
+}) {
   const reduceMotion = useReducedMotion();
   const guide = guides[preset];
-  const stillIndex = Math.floor(guide.poses.length / 2);
-  const poses = reduceMotion ? [guide.poses[stillIndex]] : guide.poses;
+  const queryFrame = typeof window === "undefined"
+    ? null
+    : new URLSearchParams(window.location.search).get("media-audit-frame");
+  const selectedAuditFrame = auditFrame ?? (
+    queryFrame === "start" || queryFrame === "middle" || queryFrame === "end"
+      ? queryFrame
+      : undefined
+  );
+  const turnaroundIndex = Math.floor(guide.poses.length / 2);
+  const stillIndex = selectedAuditFrame === "start"
+    ? 0
+    : selectedAuditFrame === "end"
+      ? turnaroundIndex
+      : selectedAuditFrame === "middle"
+        ? Math.ceil(turnaroundIndex / 2)
+        : turnaroundIndex;
+  const freeze = Boolean(selectedAuditFrame) || reduceMotion;
+  const poses = freeze ? [guide.poses[stillIndex]] : guide.poses;
+  const gazes = freeze ? [guide.gaze[stillIndex]] : guide.gaze;
   const times = poses.map((_, index) => index / Math.max(1, poses.length - 1));
-  const transition = reduceMotion || guide.static
+  const transition = freeze || guide.static
     ? { duration: 0 }
     : { duration: guide.duration ?? 4.2, repeat: Infinity, ease: "easeInOut" as const, times };
-  const gaze = guide.gaze ?? p(10, 5);
 
   return (
     <div className={`motion-guide ${compact ? "motion-guide-compact" : ""}`}>
@@ -1056,9 +1323,9 @@ export function MotionGuide({ preset, compact = false }: { preset: MotionPreset;
             transition={transition}
           />
           <motion.path
-            d={hairPath(poses[0], gaze)}
+            d={hairPath(poses[0], gazes[0])}
             animate={{
-              d: poses.map((pose) => hairPath(pose, gaze)),
+              d: poses.map((pose, index) => hairPath(pose, gazes[index])),
             }}
             transition={transition}
             fill="none"
@@ -1068,26 +1335,26 @@ export function MotionGuide({ preset, compact = false }: { preset: MotionPreset;
             opacity=".9"
           />
           <motion.circle
-            cx={poses[0].head.x + gaze.x}
-            cy={poses[0].head.y + gaze.y}
+            cx={poses[0].head.x + gazes[0].x}
+            cy={poses[0].head.y + gazes[0].y}
             r="3.8"
             fill="#263b39"
             animate={{
-              cx: joints(poses, "head", "x").map((value) => value + gaze.x),
-              cy: joints(poses, "head", "y").map((value) => value + gaze.y),
+              cx: joints(poses, "head", "x").map((value, index) => value + gazes[index].x),
+              cy: joints(poses, "head", "y").map((value, index) => value + gazes[index].y),
             }}
             transition={transition}
           />
           <motion.line
-            x1={poses[0].head.x + gaze.x * 0.7}
-            y1={poses[0].head.y + gaze.y * 0.7 + 7}
-            x2={poses[0].head.x + gaze.x * 1.25}
-            y2={poses[0].head.y + gaze.y * 1.25 + 7}
+            x1={poses[0].head.x + gazes[0].x * 0.7}
+            y1={poses[0].head.y + gazes[0].y * 0.7 + 7}
+            x2={poses[0].head.x + gazes[0].x * 1.25}
+            y2={poses[0].head.y + gazes[0].y * 1.25 + 7}
             animate={{
-              x1: joints(poses, "head", "x").map((value) => value + gaze.x * 0.7),
-              y1: joints(poses, "head", "y").map((value) => value + gaze.y * 0.7 + 7),
-              x2: joints(poses, "head", "x").map((value) => value + gaze.x * 1.25),
-              y2: joints(poses, "head", "y").map((value) => value + gaze.y * 1.25 + 7),
+              x1: joints(poses, "head", "x").map((value, index) => value + gazes[index].x * 0.7),
+              y1: joints(poses, "head", "y").map((value, index) => value + gazes[index].y * 0.7 + 7),
+              x2: joints(poses, "head", "x").map((value, index) => value + gazes[index].x * 1.25),
+              y2: joints(poses, "head", "y").map((value, index) => value + gazes[index].y * 1.25 + 7),
             }}
             transition={transition}
             stroke="#9c6549"

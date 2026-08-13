@@ -6,8 +6,10 @@ const compile = (path) => ts.transpileModule(readFileSync(path, "utf8").replaceA
 }).outputText;
 const programModule = { exports: {} };
 new Function("exports", "module", "require", compile("app/program.ts"))(programModule.exports, programModule, () => { throw new Error("unexpected import"); });
+const progressionModule = { exports: {} };
+new Function("exports", "module", "require", compile("app/progression.ts"))(progressionModule.exports, progressionModule, (name) => name === "./program" ? programModule.exports : require(name));
 const customModule = { exports: {} };
-new Function("exports", "module", "require", compile("app/custom.ts"))(customModule.exports, customModule, (name) => name === "./program" ? programModule.exports : require(name));
+new Function("exports", "module", "require", compile("app/custom.ts"))(customModule.exports, customModule, (name) => name === "./program" ? programModule.exports : name === "./progression" ? progressionModule.exports : require(name));
 
 const focuses = ["handstand", "core", "compression", "lsit", "planche", "pushing", "support", "mobility", "conditioning"];
 const durations = [300, 600, 900, 1200, 1500, 1800];

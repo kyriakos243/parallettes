@@ -1,4 +1,5 @@
-import { exercises, type DifficultyLevel, type Equipment, type Exercise, type Focus } from "./program";
+import { exercises, skillProgressionPaths, type DifficultyLevel, type Equipment, type Exercise, type Focus } from "./program";
+import { progressionScoreAdjustment } from "./progression";
 
 export type CustomDifficulty = "easy" | "recommended" | "hard";
 export type CustomFocus = "handstand" | "core" | "compression" | "lsit" | "planche" | "pushing" | "support" | "mobility" | "conditioning";
@@ -14,7 +15,7 @@ export type CustomRequest = {
   preferNextProgression?: boolean;
   preferVariety?: boolean;
   feedbackByExercise?: Record<string, "easy" | "right" | "hard">;
-  progressionEvidence?: Record<string, { cleanSessions?: number }>;
+  progressionEvidence?: Record<string, { cleanSessions?: number; lastFeedback?: "easy" | "right" | "hard" }>;
   /** Changes the top-ranked choices without weakening readiness or equipment filters. */
   variationSeed?: number;
 };
@@ -130,6 +131,24 @@ const exerciseMatchesFocus = (exercise: Exercise, focus: CustomFocus) => {
   return [exercise.primaryFocus, ...exercise.secondaryFocus].some((tag) => focusMap[focus].includes(tag));
 };
 const levelFor = (difficulty: CustomDifficulty): DifficultyLevel => difficulty === "easy" ? "L1" : difficulty === "hard" ? "L3" : "L2";
+
+/** Shared eligibility gate used by generation and progression QA. */
+export const isCustomExerciseEligible = (
+  exercise: Exercise,
+  request: Pick<CustomRequest, "focuses" | "equipment" | "difficulty" | "readiness">,
+): boolean => {
+  const level = levelFor(request.difficulty);
+  const equipment = new Set(request.equipment);
+  if (!(exercise.requiredEquipment ?? (exercise.category === "Cooldown" || exercise.category === "Warm-up" ? ["floor"] : ["parallettes", "floor"]))
+    .every((item) => equipment.has(item))) return false;
+  if (exercise.level !== "ALL" && !exercise.availableLevels.includes(level)) return false;
+  if (exercise.gate && request.readiness?.[exercise.gate] !== true) return false;
+  return exercise.category === "Warm-up" || exercise.category === "Pre-Handstand" || exercise.category === "Cooldown" ||
+    request.focuses.length === 0 || request.focuses.some((focus) => focus === "conditioning"
+      ? exercise.primaryFocus === "conditioning" || exercise.primaryFocus === "anti-extension" || exercise.primaryFocus === "pelvic-control"
+      : exerciseMatchesFocus(exercise, focus));
+};
+
 const score = (
   exercise: Exercise,
   focuses: CustomFocus[],
@@ -138,18 +157,24 @@ const score = (
   preferNextProgression: boolean,
   preferVariety: boolean,
   feedbackByExercise: Record<string, "easy" | "right" | "hard">,
-  progressionEvidence: Record<string, { cleanSessions?: number }>,
+  progressionEvidence: Record<string, { cleanSessions?: number; lastFeedback?: "easy" | "right" | "hard" }>,
+  canUseProgression: (candidate: Exercise) => boolean,
 ) => {
   const focusSet = new Set(focuses.flatMap((focus) => focusMap[focus]));
   let value = focusSet.has(exercise.primaryFocus) ? 8 : exercise.secondaryFocus.some((focus) => focusSet.has(focus)) ? 4 : 0;
   if (focuses.includes("conditioning")) {
-    value += exercise.requiredEquipment?.includes("rope") ? 12 : -8;
+    value += exercise.requiredEquipment?.includes("rope") ? 12 : exercise.category === "Conditioning" ? 8 : -8;
     if (exercise.category === "Conditioning") value += 6;
   }
   if (exercise.availableLevels.includes(level)) value += 3;
   if (recent.has(exercise.id)) value -= preferVariety ? 9 : 2;
-  if (preferNextProgression && exercise.progressionStage === (level === "L1" ? 1 : level === "L2" ? 2 : 3)) value += 4;
-  if (preferNextProgression && exercise.easierId && (progressionEvidence[exercise.easierId]?.cleanSessions ?? 0) >= 2) value += 8;
+  if (preferNextProgression && exercise.category !== "Warm-up" && exercise.category !== "Cooldown" && exercise.category !== "Conditioning") value += progressionScoreAdjustment(
+    exercise,
+    exercises,
+    progressionEvidence,
+    canUseProgression,
+    skillProgressionPaths,
+  );
   if (feedbackByExercise[exercise.id] === "hard") value -= 8;
   if (feedbackByExercise[exercise.id] === "right") value += 2;
   if (exercise.easierId && feedbackByExercise[exercise.easierId] === "easy") value += 7;
@@ -172,17 +197,11 @@ export function buildCustomSession(request: CustomRequest): CustomPlan {
   if (request.focuses.includes("conditioning") && !equipment.has("rope")) {
     warnings.push("Skipping rope is not selected, so conditioning uses dynamic mat-based movements instead.");
   }
-  const eligible = Object.values(exercises)
-    .filter((exercise) => (exercise.requiredEquipment ?? (exercise.category === "Cooldown" || exercise.category === "Warm-up" ? ["floor"] : ["parallettes", "floor"]))
-      .every((item) => equipment.has(item)))
-    .filter((exercise) => exercise.level === "ALL" || exercise.availableLevels.includes(level))
-    .filter((exercise) => !exercise.gate || request.readiness?.[exercise.gate] === true)
-    .filter((exercise) => exercise.category === "Warm-up" || exercise.category === "Pre-Handstand" || exercise.category === "Cooldown" ||
-      request.focuses.length === 0 || request.focuses.some((focus) => focus === "conditioning"
-        ? exercise.primaryFocus === "conditioning" || exercise.primaryFocus === "anti-extension" || exercise.primaryFocus === "pelvic-control"
-        : [exercise.primaryFocus, ...exercise.secondaryFocus].some((tag) => focusMap[focus].includes(tag))))
-    .sort((a, b) => score(b, request.focuses, level, recent, request.preferNextProgression !== false, request.preferVariety !== false, request.feedbackByExercise ?? {}, request.progressionEvidence ?? {}) -
-      score(a, request.focuses, level, recent, request.preferNextProgression !== false, request.preferVariety !== false, request.feedbackByExercise ?? {}, request.progressionEvidence ?? {}));
+  const eligible = Object.values(exercises).filter((exercise) => isCustomExerciseEligible(exercise, request));
+  const eligibleIds = new Set(eligible.map((exercise) => exercise.id));
+  const canUseProgression = (candidate: Exercise) => eligibleIds.has(candidate.id);
+  eligible.sort((a, b) => score(b, request.focuses, level, recent, request.preferNextProgression !== false, request.preferVariety !== false, request.feedbackByExercise ?? {}, request.progressionEvidence ?? {}, canUseProgression) -
+    score(a, request.focuses, level, recent, request.preferNextProgression !== false, request.preferVariety !== false, request.feedbackByExercise ?? {}, request.progressionEvidence ?? {}, canUseProgression));
 
   const seed = Math.abs(Math.round(request.variationSeed ?? 0));
   const hash = (value: string) => {

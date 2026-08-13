@@ -11,7 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "validate:dist": "node scripts/validate-dist.mjs",
-    "validate": "node scripts/validate-program.mjs && node scripts/validate-custom.mjs && node scripts/validate-profile.mjs && node scripts/validate-profile-worker.mjs",
+    "validate": "node scripts/validate-program.mjs && node scripts/validate-progression.mjs && node scripts/validate-custom.mjs && node scripts/validate-motion-guides.mjs && node scripts/validate-profile.mjs && node scripts/validate-profile-worker.mjs",
     "typecheck": "tsc --noEmit",
     "check": "pnpm validate && pnpm typecheck",
     "preview": "vite preview"
