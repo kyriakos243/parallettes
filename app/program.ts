@@ -462,7 +462,7 @@ const ropeWarmupIds = new Set(["easy-rope-bounce", "recovery-bounce", "rope-step
 const v2ExpansionStaticIds = new Set([
   "prone-handstand-line-hold", "forearm-plank", "rkc-plank", "side-plank-star-hold",
   "forearm-side-plank", "floor-tuck-v-sit-balance", "floor-chest-wall-handstand-hold",
-  "floor-planche-lean", "sphinx-breathing-hold", "supine-spinal-twist",
+  "floor-planche-lean", "reverse-plank-hold", "sphinx-breathing-hold", "supine-spinal-twist",
   "kneeling-hip-flexor-stretch", "seated-straddle-fold-gentle", "shoulder-wall-lat-stretch",
 ]);
 const isRopeExercise = (id: string) => ropeExerciseIds.has(id);
@@ -620,7 +620,8 @@ export const exercises: Record<string, Exercise> = Object.fromEntries([
 // V2 equipment audit: retain stable IDs for saved plans, but remove the old
 // box/bench assumption from the visible instruction and generator metadata.
 const equipmentFor = (exercise: Exercise): Equipment[] => {
-  if (["box-pike", "box-toe-light", "box-pike-scapular-shrugs", "box-pike-shoulder-shift", "box-pike-one-leg-line-lift"].includes(exercise.id)) return ["wall", "floor"];
+  if (["box-pike", "box-toe-light", "box-pike-scapular-shrugs", "box-pike-shoulder-shift", "box-pike-one-leg-line-lift"].includes(exercise.id)) return ["parallettes", "wall", "floor"];
+  if (["wall-facing-handstand-weight-shift", "chest-wall-alternating-toe-peel", "split-leg-wall-pullaway", "wall-handstand-side-exit", "chest-wall-micro-shoulder-tap"].includes(exercise.id)) return ["parallettes", "wall", "floor"];
   if (exercise.category === "Cooldown" || exercise.category === "Warm-up") return exercise.requiredEquipment ?? ["floor"];
   if (exercise.category === "Handstand" && exercise.id.includes("wall")) return ["wall", "floor", ...(exercise.id.includes("parallette") ? ["parallettes" as Equipment] : [])];
   return exercise.requiredEquipment ?? ["parallettes", "floor"];
@@ -694,20 +695,19 @@ for (const [id, day] of [
 ] as Array<[string, DayNumber]>) addCanonicalDay(id, day);
 
 export const skillProgressionPaths = [
-  { label: "Wrist & Loading", customFocus: "mobility", steps: ["wrist-circles", "forearm-turn-finger-spread", "wrist-palms", "palm-lift-wrist-conditioning", "fingertip-wrist-pulses"] },
   { label: "Straight-Arm Support", customFocus: "support", steps: ["support-hold", "support-shrugs", "tuck-support", "supported-knee-raise"] },
-  { label: "Hollow / Anti-Extension", customFocus: "core", steps: ["dead-bug", "deadbug-heel-tap", "deadbug-double-leg-lower", "hollow-tuck", "hollow-one-leg", "long-lever-hollow-hold", "hollow-rocks", "hollow-to-arch-log-roll", "hollow-scissor-kicks"] },
+  { label: "Hollow / Anti-Extension", customFocus: "core", steps: ["dead-bug", "deadbug-heel-tap", "hollow-tuck", "hollow-one-leg", "deadbug-double-leg-lower", "long-lever-hollow-hold", "hollow-rocks", "hollow-to-arch-log-roll", "hollow-scissor-kicks"] },
   { label: "Posterior Chain", customFocus: "core", steps: ["glute-bridge-march", "reverse-plank-hold", "prone-arch-body-hold", "bridge-walkout", "hollow-to-arch-log-roll"] },
   { label: "Pelvic Control", customFocus: "core", steps: ["reverse-crunch", "bent-knee-leg-lower", "straight-leg-raise", "controlled-v-up"] },
-  { label: "Anti-Rotation", customFocus: "core", steps: ["side-plank", "forearm-side-plank", "lateral-bear-crawl", "side-plank-hip-lift", "high-plank-bird-dog", "side-plank-reach-through", "side-plank-star-hold"] },
+  { label: "Anti-Rotation", customFocus: "core", steps: ["forearm-side-plank", "side-plank", "lateral-bear-crawl", "side-plank-hip-lift", "high-plank-bird-dog", "side-plank-reach-through", "side-plank-star-hold"] },
   { label: "Compression", customFocus: "compression", steps: ["bent-compression", "single-leg-compression", "alternating-pike-leg-lift", "straight-compression", "seated-pike-compression-pulses", "straddle-compression-lift"] },
   { label: "L-Sit", customFocus: "lsit", steps: ["foot-assisted-lsit", "one-foot-assisted-lsit", "tuck-support-knee-extensions", "alternating-lsit-extension", "assisted-straddle-lsit-hold", "eccentric-lsit-to-tuck-lower", "one-leg-lsit-hold", "alternating-one-leg-lsit-switch", "full-lsit-attempt"] },
   { label: "Handstand Line", customFocus: "handstand", steps: ["pike-shift", "wall-l", "partial-wall-walk", "chest-wall-line", "chest-wall-alternating-toe-peel"] },
   { label: "Handstand Entry", customFocus: "handstand", steps: ["standing-kickup-line-rehearsal", "wall-kickup", "kickup-stop-short-drill", "freestanding-parallette-kickup"] },
   { label: "Handstand Balance", customFocus: "handstand", steps: ["wall-facing-handstand-weight-shift", "parallette-wall-grip-pressure-shift", "chest-wall-micro-shoulder-tap", "heel-pullaway", "split-leg-wall-pullaway", "freestanding-parallette-kickup"] },
-  { label: "Handstand Exit", customFocus: "handstand", steps: ["grounded-side-exit-rehearsal", "wall-handstand-side-exit", "floor-side-exit-practice", "entry-balance-side-exit-chain"] },
+  { label: "Handstand Exit", customFocus: "handstand", steps: ["grounded-side-exit-rehearsal", "floor-side-exit-practice", "wall-handstand-side-exit", "entry-balance-side-exit-chain"] },
   { label: "Planche Foundation", customFocus: "planche", steps: ["parallette-forward-lean-hold", "planche-lean-hold", "planche-lean-scapular-pulse", "planche-lean-toe-lightener", "foot-assisted-tuck-planche", "floor-tuck-planche-attempt"] },
-  { label: "Pushing Strength", customFocus: "pushing", steps: ["knee-push-up", "parallette-push-up-plus", "floor-push-up", "controlled-parallette-pushup", "staggered-parallette-push-up", "tempo-floor-push-up", "pseudo-planche-parallette-pushup"] },
+  { label: "Pushing Strength", customFocus: "pushing", steps: ["knee-push-up", "floor-push-up", "parallette-push-up-plus", "controlled-parallette-pushup", "staggered-parallette-push-up", "tempo-floor-push-up", "pseudo-planche-parallette-pushup"] },
   { label: "Overhead Strength", customFocus: "pushing", steps: ["pike-elevation", "shallow-range-pike-pushup", "floor-pike-push-up", "parallette-pike-pushup", "eccentric-pike-pushup"] },
   { label: "Support Transitions", customFocus: "support", steps: ["support-to-tuck-transition", "tuck-to-one-leg-lsit-transition", "tuck-to-lsit-transition"] },
 ] as const;

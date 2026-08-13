@@ -95,7 +95,7 @@ for (const id of researchExpansionIds) assert(Boolean(exercises[id]), `Missing r
 assert(programmeSummary?.newExercises === 155, "Programme summary does not report 155 additions");
 assert(programmeSummary?.totalUniqueExercises === 195,
   "Programme summary does not report 195 unique exercises");
-assert(skillProgressionPaths.length === 16, `Expected 16 visible skill progression paths; found ${skillProgressionPaths.length}`);
+assert(skillProgressionPaths.length === 15, `Expected 15 reviewable skill progression paths; found ${skillProgressionPaths.length}`);
 for (const path of skillProgressionPaths) {
   assert(path.label?.trim() && path.steps.length >= 3, `Invalid progression path ${path.label ?? "unnamed"}`);
   path.steps.forEach((id) => assert(Boolean(exercises[id]), `${path.label}: missing progression exercise ${id}`));
@@ -473,7 +473,7 @@ const firstReview = applyExerciseReviews({}, ["review-drill", "review-drill"], {
   "review-drill": { feedback: "easy", achieved: true },
 });
 const secondReview = applyExerciseReviews(firstReview, ["review-drill"], {
-  "review-drill": { feedback: "right", achieved: true },
+  "review-drill": { feedback: "easy", achieved: true },
 });
 const hardReview = applyExerciseReviews(secondReview, ["review-drill"], {
   "review-drill": { feedback: "hard", achieved: false },
