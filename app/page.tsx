@@ -32,6 +32,20 @@ import {
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ExerciseDemo } from "./ExerciseDemo";
 import type { MotionPreset } from "./MotionGuide";
+import {
+  answerAssessmentQuestion,
+  assessmentProgress,
+  assessmentQuestions,
+  assessmentSections,
+  assessmentTracks,
+  emptyStartingAssessment,
+  evidenceWithProvisionalPlacement,
+  parseStartingAssessment,
+  restartStartingAssessment,
+  visibleProvisionalIndex,
+  type AssessmentAnswer,
+  type StartingAssessment,
+} from "./assessment";
 import { buildCustomSession, type CustomBlocks, type CustomDifficulty, type CustomFocus } from "./custom";
 import { progressionPathState, recommendedProgressionAssignments } from "./progression";
 import {
@@ -101,6 +115,7 @@ const STORAGE_KEY = "parallette25-settings-v2";
 const LEGACY_STORAGE_KEY = "parallette25-settings";
 const HISTORY_KEY = "parallette25-history-v1";
 const ACTIVE_SESSION_KEY = "parallette25-active-session-v1";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? "development";
 const scopedKey = (base: string, profileId?: string) => `${base}:${profileId ?? "guest"}`;
 const MotionGuide = lazy(async () => ({ default: (await import("./MotionGuide")).MotionGuide }));
 
@@ -507,6 +522,8 @@ export default function Home() {
   const [readinessOpen, setReadinessOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [assessmentOpen, setAssessmentOpen] = useState(false);
+  const [assessmentDraft, setAssessmentDraft] = useState<StartingAssessment>(() => emptyStartingAssessment());
   const [customizeTodayOpen, setCustomizeTodayOpen] = useState(false);
   const [todaySkippedByVariant, setTodaySkippedByVariant] = useState<Record<string, StableSlotId[]>>({});
   const [todayTimingMode, setTodayTimingMode] = useState<TodayTimingMode>("shorter");
@@ -520,6 +537,7 @@ export default function Home() {
   const [accountRecoveryInput, setAccountRecoveryInput] = useState("");
   const [accountRecoveryCode, setAccountRecoveryCode] = useState("");
   const [accountBusy, setAccountBusy] = useState(false);
+  const [assessmentBusy, setAssessmentBusy] = useState(false);
   const [accountError, setAccountError] = useState("");
   const [syncStatus, setSyncStatus] = useState<"saved" | "syncing" | "offline" | "error">("saved");
   const [customFocuses, setCustomFocuses] = useState<CustomFocus[]>(["core"]);
@@ -550,6 +568,8 @@ export default function Home() {
   const customGenerationRef = useRef(0);
   const audioRef = useRef<AudioContext | null>(null);
   const wakeLockRef = useRef<{ release: () => Promise<void>; released: boolean } | null>(null);
+  const profileRef = useRef<ProfileRecord | null>(null);
+  profileRef.current = profile;
 
   const day = workouts.find((item) => item.day === settings.selectedDay) ?? workouts[0];
   const preferredLevel = settings.levelsByDay[String(day.day)] ?? "L1";
@@ -560,6 +580,15 @@ export default function Home() {
   const activeSwaps = settings.swapsByVariant[key] ?? {};
   const activeTimings = settings.timingsByVariant[key] ?? {};
   const ready = useMemo(() => effectiveReadiness(settings.readiness), [settings.readiness]);
+  const appliedPlacements = useMemo(() => assessmentDraft.appliedPlacements, [assessmentDraft.appliedPlacements]);
+  const effectiveProgression = useMemo(() => evidenceWithProvisionalPlacement(
+    profile?.progression ?? {},
+    appliedPlacements,
+    skillProgressionPaths,
+  ), [appliedPlacements, profile?.progression]);
+  const currentAssessmentQuestions = useMemo(() => assessmentQuestions(assessmentDraft), [assessmentDraft]);
+  const currentAssessmentQuestion = currentAssessmentQuestions[0];
+  const currentAssessmentProgress = useMemo(() => assessmentProgress(assessmentDraft), [assessmentDraft]);
 
   const slots = useMemo(
     () => slotsForVariant(variant, exercises, includeLab),
@@ -573,7 +602,7 @@ export default function Home() {
     const assignments = recommendedProgressionAssignments(
       slots,
       exercises,
-      profile?.progression ?? {},
+      effectiveProgression,
       (slot, candidate) => compatibleBySlot.get(slot.id)?.has(candidate.id) === true,
       skillProgressionPaths,
       activeSwaps,
@@ -581,7 +610,7 @@ export default function Home() {
     return Object.fromEntries(slots.flatMap((slot) => assignments[slot.id] && assignments[slot.id] !== slot.defaultExerciseId
       ? [[slot.id, assignments[slot.id]]]
       : []));
-  }, [activeSwaps, day.day, level, profile?.progression, ready, slots, todayEquipment]);
+  }, [activeSwaps, day.day, effectiveProgression, level, ready, slots, todayEquipment]);
   const equipmentAdaptation = useMemo(() => adaptSwapsForEquipment({
     slots, exercises, swaps: progressionSwaps, day: day.day, level, readiness: ready, equipment: todayEquipment,
   }), [day.day, level, progressionSwaps, ready, slots, todayEquipment]);
@@ -697,6 +726,8 @@ export default function Home() {
     setTodayEquipment(next.equipment.length ? next.equipment : ["parallettes", "floor", "wall"]);
     const preferredSaveMode = (next.preferences as { saveMode?: SaveMode }).saveMode;
     setSaveMode(preferredSaveMode === "practice" || preferredSaveMode === "guest" ? preferredSaveMode : "normal");
+    setAssessmentDraft(parseStartingAssessment((next.preferences as { startingAssessment?: unknown }).startingAssessment));
+    profileRef.current = next;
     setProfile(next);
     setSyncStatus(remoteSyncAvailable && hasProfileSession(next.profileId) ? "saved" : "offline");
     localStorage.setItem("parallette25-last-profile", next.profileId);
@@ -709,7 +740,9 @@ export default function Home() {
     catch { setHistory([]); }
     setCustomEquipment(["parallettes", "floor", "wall"]);
     setTodayEquipment(["parallettes", "floor", "wall"]);
+    profileRef.current = null;
     setProfile(null);
+    setAssessmentDraft(emptyStartingAssessment());
     setSaveMode("guest");
     localStorage.removeItem("parallette25-last-profile");
     setProfileOpen(false);
@@ -799,7 +832,12 @@ export default function Home() {
   const refreshProfiles = async (selectedId?: string) => {
     const items = await listProfiles();
     setProfiles(items);
-    if (selectedId) setProfile(items.find((item) => item.profileId === selectedId) ?? null);
+    if (selectedId) {
+      const selected = items.find((item) => item.profileId === selectedId) ?? null;
+      profileRef.current = selected;
+      setProfile(selected);
+      if (selected) setAssessmentDraft(parseStartingAssessment((selected.preferences as { startingAssessment?: unknown }).startingAssessment));
+    }
   };
   const renameProfile = async () => {
     if (!profile) return;
@@ -828,6 +866,7 @@ export default function Home() {
     setSyncStatus("syncing");
     try {
       const next = await syncProfile(profile);
+      profileRef.current = next;
       setProfile(next);
       await refreshProfiles(next.profileId);
       setSyncStatus(next.pendingSync ? "error" : "saved");
@@ -844,7 +883,9 @@ export default function Home() {
   };
   const resetCurrentProfile = async () => {
     if (!profile || !window.confirm(`Reset all training progress for ${profile.username}? This keeps the profile name and preferences.`)) return;
-    await saveProfile({ ...profile, history: [], readiness: {}, readinessUpdatedAt: {}, progression: {}, nextProgramDay: 1 });
+    const startingAssessment = emptyStartingAssessment();
+    await saveProfile({ ...profile, history: [], readiness: {}, readinessUpdatedAt: {}, progression: {}, nextProgramDay: 1, preferences: { ...profile.preferences, startingAssessment } });
+    setAssessmentDraft(startingAssessment);
     setHistory([]);
     await refreshProfiles(profile.profileId);
   };
@@ -856,6 +897,7 @@ export default function Home() {
       const password = hasProfileSession(profile.profileId) ? window.prompt("Enter your password to delete this account permanently.") ?? undefined : undefined;
       if (hasProfileSession(profile.profileId) && !password) return;
       await deleteProfile(profile.profileId, password);
+      profileRef.current = null;
       setProfile(null);
       setHistory([]);
       localStorage.removeItem("parallette25-last-profile");
@@ -877,10 +919,56 @@ export default function Home() {
       ? (current.length > 1 ? current.filter((value) => value !== item) : current)
       : [...current, item];
     const updated = await saveProfile({ ...profile, equipment });
+    profileRef.current = updated;
     setProfile(updated);
     setCustomEquipment(equipment);
     setTodayEquipment(equipment);
     await refreshProfiles(updated.profileId);
+  };
+  const persistStartingAssessment = async (next: StartingAssessment) => {
+    const current = profileRef.current;
+    if (!current) return;
+    setAssessmentDraft(next);
+    const optimistic = { ...current, preferences: { ...current.preferences, startingAssessment: next } };
+    profileRef.current = optimistic;
+    setProfile(optimistic);
+    setAssessmentBusy(true);
+    try {
+      const updated = await saveProfile(optimistic);
+      profileRef.current = updated;
+      setProfile(updated);
+      setProfiles((items) => items.map((item) => item.profileId === updated.profileId ? updated : item));
+      setSyncStatus(updated.pendingSync ? "offline" : "saved");
+    } finally { setAssessmentBusy(false); }
+  };
+  const startStartingAssessment = (restart = false) => {
+    if (!profile) {
+      setAccountError("Create an account or sign in before setting a permanent starting level.");
+      setProfileOpen(true);
+      return;
+    }
+    const next = restart || assessmentDraft.status === "offered" || assessmentDraft.status === "dismissed"
+      ? restartStartingAssessment(restart ? assessmentDraft : undefined)
+      : assessmentDraft;
+    setAssessmentDraft(next);
+    setReadinessOpen(false);
+    setProfileOpen(false);
+    setAssessmentOpen(true);
+    if (next !== assessmentDraft) void persistStartingAssessment(next);
+  };
+  const dismissStartingAssessment = () => {
+    const next = { ...assessmentDraft, status: "dismissed" as const, updatedAt: new Date().toISOString() };
+    void persistStartingAssessment(next);
+  };
+  const recordAssessmentAnswer = (answer: AssessmentAnswer) => {
+    const question = assessmentQuestions(assessmentDraft)[0];
+    if (!question || assessmentBusy) return;
+    void persistStartingAssessment(answerAssessmentQuestion(assessmentDraft, question, answer, skillProgressionPaths));
+  };
+  const applyStartingAssessment = () => {
+    if (assessmentBusy || assessmentDraft.status !== "review") return;
+    const next = { ...assessmentDraft, status: "completed" as const, appliedPlacements: { ...assessmentDraft.placements }, updatedAt: new Date().toISOString() };
+    void persistStartingAssessment(next).then(() => setAssessmentOpen(false));
   };
   const generateCustom = () => {
     customGenerationRef.current += 1;
@@ -895,7 +983,7 @@ export default function Home() {
       preferNextProgression: customPreferProgression,
       preferVariety: customPreferVariety,
       feedbackByExercise: settings.feedbackByExercise,
-      progressionEvidence: profile?.progression,
+      progressionEvidence: effectiveProgression,
       variationSeed: Date.now() + customGenerationRef.current,
     }));
   };
@@ -930,18 +1018,21 @@ export default function Home() {
     if (!hydrated || !profile) return;
     const profileId = profile.profileId;
     const timer = window.setTimeout(() => {
-      const readinessUpdatedAt = { ...profile.readinessUpdatedAt };
+      const activeProfile = profileRef.current;
+      if (!activeProfile || activeProfile.profileId !== profileId) return;
+      const readinessUpdatedAt = { ...activeProfile.readinessUpdatedAt };
       const changedAt = new Date().toISOString();
-      for (const id of new Set([...Object.keys(profile.readiness), ...Object.keys(settings.readiness)])) {
-        if ((profile.readiness[id] === true) !== (settings.readiness[id] === true)) readinessUpdatedAt[id] = changedAt;
+      for (const id of new Set([...Object.keys(activeProfile.readiness), ...Object.keys(settings.readiness)])) {
+        if ((activeProfile.readiness[id] === true) !== (settings.readiness[id] === true)) readinessUpdatedAt[id] = changedAt;
       }
       void saveProfile({
-        ...profile,
+        ...activeProfile,
         readiness: settings.readiness,
         readinessUpdatedAt,
-        equipment: profile.equipment,
-        preferences: { ...profile.preferences, appState: settings, saveMode },
+        equipment: activeProfile.equipment,
+        preferences: { ...activeProfile.preferences, appState: settings, saveMode },
       }).then((updated) => {
+        profileRef.current = updated;
         setProfiles((current) => current.map((item) => item.profileId === profileId ? updated : item));
         setProfile((current) => current?.profileId === profileId ? updated : current);
         setSyncStatus(updated.pendingSync ? "offline" : "saved");
@@ -958,6 +1049,7 @@ export default function Home() {
       setSyncStatus("syncing");
       void syncProfile(profile).then((updated) => {
         if (cancelled) return;
+        profileRef.current = updated;
         setProfile(updated);
         setProfiles((current) => current.map((item) => item.profileId === updated.profileId ? updated : item));
         setSyncStatus(updated.pendingSync ? "error" : "saved");
@@ -1114,11 +1206,12 @@ export default function Home() {
       const progression = applySessionProgression(profile.progression, exerciseIds, reviews, saveMode);
       const nextProgramDay = nextProgramDayAfterSession(profile.nextProgramDay, plan.day, status, saveMode);
       const nextProfile = { ...profile, nextProgramDay, history: [...profile.history, { ...entry, mode: saveMode, status, exerciseIds, completedExerciseIds: exerciseIds, exerciseReviews: reviews }], progression };
+      profileRef.current = nextProfile;
       setProfile(nextProfile);
       if (saveMode === "normal" && status !== "partial" && plan.day > 0) {
         setSettings((previous) => ({ ...previous, selectedDay: nextProgramDay }));
       }
-      void saveProfile(nextProfile).then(setProfile);
+      void saveProfile(nextProfile).then((updated) => { profileRef.current = updated; setProfile(updated); });
     }
   }, [day, profile, saveMode]);
 
@@ -1259,7 +1352,7 @@ export default function Home() {
           if (settings.feedbackByExercise[candidate.id] === "right") score += 2;
           if (detailed.easierId && settings.feedbackByExercise[detailed.easierId] === "easy") score += 8;
           if (detailed.harderId && settings.feedbackByExercise[detailed.harderId] === "hard") score += 8;
-          if (detailed.easierId && (profile?.progression[detailed.easierId]?.cleanSessions ?? 0) >= 2) score += 6;
+          if (detailed.easierId && (effectiveProgression[detailed.easierId]?.cleanSessions ?? 0) >= 2) score += 6;
           return { candidate, score };
         }).sort((a, b) => b.score - a.score);
         next[slot.id] = scored[0].candidate.id;
@@ -1693,7 +1786,14 @@ export default function Home() {
         })()}
 
         {readinessOpen && (
-          <Drawer title="Readiness standards" subtitle="Mark a standard only after you can demonstrate every item with calm, clean form." onClose={() => setReadinessOpen(false)}>
+          <Drawer title="Skills & readiness" subtitle="See achieved skills, follow your next steps, or set a more accurate starting point." onClose={() => setReadinessOpen(false)}>
+            <div className="assessment-entry-card">
+              <div><Sparkles /><span><strong>{assessmentDraft.status === "completed" ? "Starting point applied" : assessmentDraft.status === "in-progress" || assessmentDraft.status === "review" ? "Assessment saved" : "Already have training experience?"}</strong><small>{assessmentDraft.status === "completed" ? "Your provisional placements guide recommendations until tracked workouts verify them." : assessmentDraft.status === "in-progress" || assessmentDraft.status === "review" ? "Continue exactly where you stopped." : "Use a short adaptive assessment instead of beginning every path at Foundation."}</small></span></div>
+              <button type="button" onClick={() => startStartingAssessment(assessmentDraft.status === "completed")}>
+                {assessmentDraft.status === "completed" ? "Reassess my starting point" : assessmentDraft.status === "in-progress" || assessmentDraft.status === "review" ? "Resume assessment" : "Set my starting level"}
+              </button>
+              {!profile && <small>Sign in or create an account first so your placement can sync across devices.</small>}
+            </div>
             <div className="readiness-list">
               {(Object.values(readiness) as typeof readiness[ReadinessGateId][]).filter((item) => item.id !== "G0_LOAD").map((item) => {
                 const checked = settings.readiness[item.id] === true;
@@ -1710,11 +1810,73 @@ export default function Home() {
               {skillProgressionPaths.map((path) => {
                 const visible = path.steps.filter((id) => Boolean(exercises[id]));
                 const state = progressionPathState(visible, profile?.progression ?? {});
-                return <article key={path.label}><strong>{path.label}</strong>{visible.map((id, index) => <div className={index <= state.masteredThrough ? "done" : index === state.recommendedIndex ? "current" : ""} key={id}><i>{index <= state.masteredThrough ? <Check /> : index + 1}</i><span>{exercises[id].name}</span>{state.complete && index === visible.length - 1 ? <small>MASTERED</small> : index === state.recommendedIndex && <small>{state.activeHard ? "BUILD CONFIDENCE" : state.masteredThrough >= 0 ? "READY TO TRY" : "CURRENT"}</small>}</div>)}<button type="button" className="path-challenge" onClick={() => openChallenge(path.customFocus as CustomFocus)}>Try the next appropriate step</button></article>;
+                const provisionalIndex = visibleProvisionalIndex(path, assessmentDraft.appliedPlacements[path.label], profile?.progression ?? {});
+                const recommendedIndex = provisionalIndex >= 0 ? provisionalIndex : state.recommendedIndex;
+                return <article key={path.label}><strong>{path.label}</strong>{visible.map((id, index) => {
+                  const achieved = index <= state.masteredThrough;
+                  const provisionallyPassed = provisionalIndex >= 0 && index < provisionalIndex && !achieved;
+                  return <div className={achieved ? "done" : provisionallyPassed ? "provisional" : index === recommendedIndex ? "current" : ""} key={id}><i>{achieved ? <Check /> : provisionallyPassed ? <Sparkles /> : index + 1}</i><span>{exercises[id].name}</span>{state.complete && index === visible.length - 1 ? <small>MASTERED</small> : index === recommendedIndex && <small>{provisionalIndex >= 0 ? "PROVISIONAL START" : state.activeHard ? "BUILD CONFIDENCE" : state.masteredThrough >= 0 ? "READY TO TRY" : "CURRENT"}</small>}</div>;
+                })}<button type="button" className="path-challenge" onClick={() => openChallenge(path.customFocus as CustomFocus)}>Try the next appropriate step</button></article>;
               })}
             </div>
             <div className="challenge-panel"><strong>Challenge me</strong><span>Choose a safe next challenge without skipping readiness gates.</span><div><button type="button" onClick={() => openChallenge()}>Whole workout</button>{(["handstand", "core", "lsit", "planche", "pushing"] as CustomFocus[]).map((focus) => <button type="button" key={focus} onClick={() => openChallenge(focus)}>{focus === "lsit" ? "L-Sit" : focus[0].toUpperCase() + focus.slice(1)}</button>)}</div></div>
             <p className="install-note"><ShieldCheck /> A locked drill is automatically replaced by its declared safe regression. Readiness never changes your whole-day level automatically.</p>
+          </Drawer>
+        )}
+
+        {assessmentOpen && profile && (
+          <Drawer
+            title={assessmentDraft.status === "review" || assessmentDraft.status === "completed" ? "Your starting points" : "Set my starting level"}
+            subtitle="Adaptive, optional and resumable. Answers guide recommendations but never award achievements or bypass readiness standards."
+            onClose={() => setAssessmentOpen(false)}
+          >
+            <div className="starting-assessment">
+              <div className="assessment-progress-copy">
+                <span>{currentAssessmentProgress.completedTracks} of {currentAssessmentProgress.totalTracks} skill families placed</span>
+                <strong>{Math.round((currentAssessmentProgress.completedTracks / currentAssessmentProgress.totalTracks) * 100)}%</strong>
+              </div>
+              <div className="assessment-progress-track"><i style={{ width: `${(currentAssessmentProgress.completedTracks / currentAssessmentProgress.totalTracks) * 100}%` }} /></div>
+              <div className="assessment-section-strip">
+                {assessmentSections.map((section) => {
+                  const tracks = assessmentTracks.filter((track) => track.section === section);
+                  const completed = tracks.filter((track) => assessmentDraft.placements[track.pathLabel]).length;
+                  const active = currentAssessmentQuestion?.track.section === section;
+                  return <div className={`${active ? "active" : ""} ${completed === tracks.length ? "complete" : ""}`} key={section}><i>{completed === tracks.length ? <Check /> : completed + 1}</i><span>{section}</span></div>;
+                })}
+              </div>
+
+              {currentAssessmentQuestion && assessmentDraft.status !== "review" && assessmentDraft.status !== "completed" ? (() => {
+                const exercise = exercises[currentAssessmentQuestion.exerciseId];
+                return <article className="assessment-question">
+                  <p className="control-kicker">{currentAssessmentQuestion.track.section} • {currentAssessmentQuestion.track.label}</p>
+                  <div className="assessment-demo"><ExerciseDemo exercise={exercise} /></div>
+                  <h3>{exercise.name}</h3>
+                  <p className="assessment-target"><strong>Target:</strong> {exercise.target}</p>
+                  <ul><li>{exercise.cues[0]}</li><li>{exercise.cues[1]}</li></ul>
+                  <p className="assessment-honesty">Choose “Yes” only if you can meet the full target now with the form shown—not because you have tried it before.</p>
+                  <div className="assessment-answers">
+                    <button type="button" disabled={assessmentBusy} onClick={() => recordAssessmentAnswer("clean")}><Check /><span><strong>Yes — clean at target</strong><small>Check the next harder anchor.</small></span></button>
+                    <button type="button" disabled={assessmentBusy} onClick={() => recordAssessmentAnswer("almost")}><Gauge /><span><strong>Almost — inconsistent</strong><small>Start at this exercise.</small></span></button>
+                    <button type="button" disabled={assessmentBusy} onClick={() => recordAssessmentAnswer("not-yet")}><ArrowLeft /><span><strong>Not yet / not sure</strong><small>Start one step easier.</small></span></button>
+                  </div>
+                  {currentAssessmentQuestion.track.section === "Handstand" && <p className="assessment-safety"><ShieldCheck /> Handstand answers never unlock readiness gates. Support, wall control and safe exits must still be demonstrated separately.</p>}
+                </article>;
+              })() : (
+                <div className="assessment-results">
+                  <div className="assessment-result-intro"><Sparkles /><div><strong>Proposed provisional placements</strong><span>These choose where recommendations begin. No exercise receives an achieved checkmark until verified in tracked workouts.</span></div></div>
+                  {assessmentSections.map((section) => <section key={section}><h3>{section}</h3>{assessmentTracks.filter((track) => track.section === section).map((track) => {
+                    const placementId = assessmentDraft.placements[track.pathLabel];
+                    return <div key={track.id}><span>{track.label}</span><strong>{placementId ? exercises[placementId]?.name : "Foundation"}</strong></div>;
+                  })}</section>)}
+                  {assessmentDraft.status === "review" && <button type="button" className="primary-button assessment-apply" disabled={assessmentBusy} onClick={applyStartingAssessment}><Check /> Apply my starting points</button>}
+                  {assessmentDraft.status === "completed" && <p className="assessment-applied"><Check /> Applied. Recommended normal and custom workouts can now meet you closer to your current ability.</p>}
+                </div>
+              )}
+              <div className="assessment-footer-actions">
+                <button type="button" onClick={() => setAssessmentOpen(false)}>Save & continue later</button>
+                <button type="button" onClick={() => void persistStartingAssessment(restartStartingAssessment(assessmentDraft))}>Start assessment again</button>
+              </div>
+            </div>
           </Drawer>
         )}
 
@@ -1763,6 +1925,11 @@ export default function Home() {
             </div>}
             {accountError && <p className="account-message account-error" role="alert">{accountError}</p>}
             {accountRecoveryCode && <div className="recovery-code" id="recovery-code"><ShieldCheck /><div><strong>Save your new recovery code</strong><span>This is shown once. Store it somewhere private; it can reset your password without email.</span><code>{accountRecoveryCode}</code></div><button type="button" onClick={() => void navigator.clipboard?.writeText(accountRecoveryCode)}>Copy</button><button type="button" onClick={() => setAccountRecoveryCode("")}>I saved it</button></div>}
+            {profile && assessmentDraft.status !== "completed" && assessmentDraft.status !== "dismissed" && <div className="assessment-onboarding-card">
+              <Sparkles /><div><strong>{assessmentDraft.status === "in-progress" || assessmentDraft.status === "review" ? "Continue your starting-level assessment" : "Already have training experience?"}</strong><span>{assessmentDraft.status === "in-progress" || assessmentDraft.status === "review" ? "Your answers are saved. Resume from the next exercise." : "Set a provisional starting point so recommendations do not make you repeat weeks of work you already own."}</span></div>
+              <button type="button" onClick={() => startStartingAssessment()}>{assessmentDraft.status === "in-progress" || assessmentDraft.status === "review" ? "Resume assessment" : "Set my starting level"}</button>
+              {assessmentDraft.status === "offered" && <button type="button" className="assessment-skip" onClick={dismissStartingAssessment}>Skip for now</button>}
+            </div>}
             <div className="drawer-actions"><button type="button" className="secondary-button" onClick={openGuest}>Guest session · don't save</button></div>
             {profile && <div className="profile-data-panel">
               <p className="control-kicker">Profile</p><strong>{profile.username}</strong><button type="button" onClick={() => void renameProfile()}>Rename profile</button>{hasProfileSession(profile.profileId) && <button type="button" onClick={() => void signOutCurrentProfile()}>Sign out on this device</button>}
@@ -1771,6 +1938,7 @@ export default function Home() {
               <p className="control-kicker">Sync</p><div className="sync-line"><i className={`sync-${syncStatus}`} /><span>{syncStatus === "syncing" ? "Syncing…" : syncStatus === "error" ? "Sync error — retry" : profile.pendingSync ? "Sync needed" : remoteSyncAvailable && hasProfileSession(profile.profileId) ? "Saved securely" : "Saved on this device"}</span></div>{profile.lastSyncedAt && <small>Last synced {new Date(profile.lastSyncedAt).toLocaleString()}</small>}<button type="button" onClick={() => void syncCurrentProfile()}>Sync now</button>
               <p className="control-kicker">Data</p><div className="profile-data-actions"><button type="button" onClick={() => downloadText(`parallette25-${profile.username}.json`, exportProfile(profile))}>Export backup</button><label>Import backup<input type="file" accept="application/json,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importProfileFile(file); event.currentTarget.value = ""; }} /></label><button type="button" className="danger" onClick={() => void resetCurrentProfile()}>Reset progress</button><button type="button" className="danger" onClick={() => void removeCurrentProfile()}>Delete profile</button></div>
             </div>}
+            <div className="app-version"><span>Parallette 25+ version</span><strong>v{APP_VERSION}</strong></div>
           </Drawer>
         )}
 

@@ -60,8 +60,20 @@ const remoteNewer = mergeProfiles({ ...local, updatedAt: "2026-08-10T10:03:00.00
 if (!remoteNewer.pendingSync || !remoteNewer.history.some((item) => item.id === "local-session")) {
   throw new Error("A newer remote revision suppressed unsynced local session evidence");
 }
+const assessmentLocal = {
+  ...local,
+  preferences: { startingAssessment: { version: 1, status: "in-progress", answers: { "hollow:0": "clean" }, placements: {}, updatedAt: "2026-08-10T11:00:00.000Z" } },
+};
+const assessmentRemote = {
+  ...remote,
+  preferences: { startingAssessment: { version: 1, status: "offered", answers: {}, placements: {}, updatedAt: "2026-08-10T10:00:00.000Z" } },
+};
+const mergedAssessment = mergeProfiles(assessmentLocal, assessmentRemote).preferences.startingAssessment;
+if (mergedAssessment.status !== "in-progress" || mergedAssessment.answers["hollow:0"] !== "clean") {
+  throw new Error("Cross-device merge discarded the newest resumable starting assessment");
+}
 const restored = importProfile(exportProfile(merged));
 if (!restored || restored.profileId !== merged.profileId || restored.history.length !== 2) {
   throw new Error("Profile backup round-trip failed");
 }
-console.log("Profiles: factory reset, stable ID, revocable readiness, backup round-trip and conflict-safe append-only history passed.");
+console.log("Profiles: factory reset, stable ID, revocable readiness, resumable assessment merge, backup round-trip and conflict-safe append-only history passed.");

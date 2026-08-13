@@ -219,9 +219,20 @@ export function mergeProfiles(local: ProfileRecord, remote: ProfileRecord): Prof
     if (changedAt) readinessUpdatedAt[id] = changedAt;
   }
   const remoteSessions = new Set(remoteProfile.history.map((item) => item.id));
+  const localAssessment = localProfile.preferences.startingAssessment as { updatedAt?: string } | undefined;
+  const remoteAssessment = remoteProfile.preferences.startingAssessment as { updatedAt?: string } | undefined;
+  const startingAssessment = timestamp(localAssessment?.updatedAt) >= timestamp(remoteAssessment?.updatedAt)
+    ? localProfile.preferences.startingAssessment
+    : remoteProfile.preferences.startingAssessment;
+  const preferences = {
+    ...older.preferences,
+    ...preferred.preferences,
+    ...(startingAssessment ? { startingAssessment } : {}),
+  };
   const remoteMissingEvidence = localProfile.history.some((item) => !remoteSessions.has(item.id)) ||
     Object.entries(progression).some(([id, value]) => value.cleanSessions > (remoteProfile.progression[id]?.cleanSessions ?? 0)) ||
-    Object.keys(readinessUpdatedAt).some((id) => timestamp(readinessUpdatedAt[id]) > timestamp(remoteProfile.readinessUpdatedAt[id]));
+    Object.keys(readinessUpdatedAt).some((id) => timestamp(readinessUpdatedAt[id]) > timestamp(remoteProfile.readinessUpdatedAt[id])) ||
+    timestamp(localAssessment?.updatedAt) > timestamp(remoteAssessment?.updatedAt);
   return normalizeProfile({
     ...older,
     ...preferred,
@@ -230,6 +241,7 @@ export function mergeProfiles(local: ProfileRecord, remote: ProfileRecord): Prof
     readiness: mergedReadiness,
     readinessUpdatedAt,
     progression,
+    preferences,
     revision: Math.max(localProfile.revision, remoteProfile.revision),
     pendingSync: localProfile.pendingSync === true || remoteMissingEvidence,
     lastSyncedAt: remoteProfile.lastSyncedAt ?? localProfile.lastSyncedAt,

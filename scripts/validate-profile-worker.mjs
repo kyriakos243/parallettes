@@ -115,14 +115,27 @@ if (loggedIn.status !== 200 || !login.token || login.profile.profileId !== regis
 const session = await worker.fetch(request("/auth/session", { headers: { authorization: `Bearer ${login.token}` } }), env);
 if (session.status !== 200 || (await session.json()).username !== "QA Athlete") throw new Error("Profile Worker failed private session read");
 
-const updatedProfile = { ...login.profile, nextProgramDay: 3 };
+const updatedProfile = {
+  ...login.profile,
+  nextProgramDay: 3,
+  preferences: {
+    ...login.profile.preferences,
+    startingAssessment: {
+      version: 1, status: "in-progress", answers: { "hollow:0": "clean" },
+      placements: {}, appliedPlacements: {}, updatedAt: "2026-08-13T08:00:00.000Z",
+    },
+  },
+};
 const updated = await worker.fetch(request("/profiles/me", {
   method: "PUT",
   headers: { authorization: `Bearer ${login.token}`, "content-type": "application/json", "if-match": "1" },
   body: JSON.stringify(updatedProfile),
 }), env);
 const updatedBody = await updated.json();
-if (updated.status !== 200 || updatedBody.revision !== 2 || updatedBody.nextProgramDay !== 3) throw new Error("Profile Worker failed revision update");
+if (updated.status !== 200 || updatedBody.revision !== 2 || updatedBody.nextProgramDay !== 3 ||
+  updatedBody.preferences?.startingAssessment?.answers?.["hollow:0"] !== "clean") {
+  throw new Error("Profile Worker failed revision update or resumable assessment sync");
+}
 
 const conflict = await worker.fetch(request("/profiles/me", {
   method: "PUT",
