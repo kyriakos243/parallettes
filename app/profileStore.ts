@@ -14,6 +14,8 @@ export type ProfileSessionRecord = {
   level?: string;
   title?: string;
   lab?: boolean;
+  /** False when a shortened/skip-heavy session must not consume a Programme day. */
+  advancesProgram?: boolean;
   exerciseReviews?: Record<string, { feedback: "easy" | "right" | "hard"; achieved: boolean }>;
 };
 
@@ -25,6 +27,13 @@ export type ProfileRecord = {
   revision: number;
   createdAt: string;
   updatedAt: string;
+  /** True after this local cache has been authenticated against a cloud account. */
+  accountSecured?: boolean;
+  /**
+   * Training data at or before this instant is intentionally discarded.
+   * Keeping the tombstone allows an offline reset to win a later cloud merge.
+   */
+  progressResetAt?: string;
   nextProgramDay: number;
   history: ProfileSessionRecord[];
   readiness: Record<string, boolean>;
@@ -47,6 +56,7 @@ const DB_VERSION = 2;
 const PROFILE_STORE = "profiles";
 const INDEX_KEY = "parallette25-profile-index-v1";
 const TOKEN_KEY = "parallette25-account-sessions-v1";
+export const profileSessionStorageKey = TOKEN_KEY;
 const FACTORY_RESET_KEY = "parallette25-factory-reset";
 const FACTORY_RESET_EPOCH = "2026-08-11-1";
 const REMOTE_API = (import.meta.env.VITE_PROFILE_API_URL as string | undefined)?.replace(/\/$/u, "");
@@ -56,6 +66,35 @@ const now = () => new Date().toISOString();
 const makeId = () => globalThis.crypto?.randomUUID?.() ?? `profile-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const sanitizeName = (name: string) => name.normalize("NFKC").trim().replace(/\s+/gu, " ").slice(0, 32);
 const timestamp = (value?: string) => value ? Date.parse(value) || 0 : 0;
+const afterReset = (completedAt: string | undefined, progressResetAt: string | undefined) =>
+  timestamp(completedAt) > timestamp(progressResetAt);
+
+const stableValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, stableValue(item)]));
+  }
+  return value;
+};
+
+/** Fields that are persisted by the account service, excluding transport metadata. */
+const persistedState = (profile: ProfileRecord) => stableValue({
+  username: profile.username,
+  progressResetAt: profile.progressResetAt,
+  nextProgramDay: profile.nextProgramDay,
+  history: profile.history,
+  readiness: profile.readiness,
+  readinessUpdatedAt: profile.readinessUpdatedAt,
+  progression: profile.progression,
+  equipment: profile.equipment,
+  preferences: profile.preferences,
+});
+
+const samePersistedState = (left: ProfileRecord, right: ProfileRecord) =>
+  JSON.stringify(persistedState(left)) === JSON.stringify(persistedState(right));
 
 export const newProfile = (username: string): ProfileRecord => ({
   profileId: makeId(), username: sanitizeName(username) || "Athlete", schemaVersion: 1, revision: 0,
@@ -63,19 +102,28 @@ export const newProfile = (username: string): ProfileRecord => ({
   equipment: ["parallettes", "floor", "wall"], preferences: { soundOn: true }, pendingSync: Boolean(REMOTE_API),
 });
 
-const normalizeProfile = (profile: ProfileRecord): ProfileRecord => ({
-  ...newProfile(profile.username),
-  ...profile,
-  username: sanitizeName(profile.username) || "Athlete",
-  schemaVersion: 1,
-  revision: Math.max(0, Number(profile.revision) || 0),
-  history: Array.isArray(profile.history) ? profile.history.slice(-500) : [],
-  readiness: profile.readiness && typeof profile.readiness === "object" ? profile.readiness : {},
-  readinessUpdatedAt: profile.readinessUpdatedAt && typeof profile.readinessUpdatedAt === "object" ? profile.readinessUpdatedAt : {},
-  progression: profile.progression && typeof profile.progression === "object" ? profile.progression : {},
-  equipment: Array.isArray(profile.equipment) && profile.equipment.length ? profile.equipment : ["parallettes", "floor", "wall"],
-  preferences: profile.preferences && typeof profile.preferences === "object" ? profile.preferences : {},
-});
+const normalizeProfile = (profile: ProfileRecord): ProfileRecord => {
+  const progressResetAt = typeof profile.progressResetAt === "string" && timestamp(profile.progressResetAt)
+    ? profile.progressResetAt
+    : undefined;
+  return {
+    ...newProfile(profile.username),
+    ...profile,
+    ...(progressResetAt ? { progressResetAt } : {}),
+    accountSecured: profile.accountSecured === true || Boolean(profile.lastSyncedAt),
+    username: sanitizeName(profile.username) || "Athlete",
+    schemaVersion: 1,
+    revision: Math.max(0, Number(profile.revision) || 0),
+    history: Array.isArray(profile.history)
+      ? profile.history.filter((item) => afterReset(item.completedAt, progressResetAt)).slice(-500)
+      : [],
+    readiness: profile.readiness && typeof profile.readiness === "object" ? profile.readiness : {},
+    readinessUpdatedAt: profile.readinessUpdatedAt && typeof profile.readinessUpdatedAt === "object" ? profile.readinessUpdatedAt : {},
+    progression: profile.progression && typeof profile.progression === "object" ? profile.progression : {},
+    equipment: Array.isArray(profile.equipment) && profile.equipment.length ? profile.equipment : ["parallettes", "floor", "wall"],
+    preferences: profile.preferences && typeof profile.preferences === "object" ? profile.preferences : {},
+  };
+};
 
 const localProfiles = (): ProfileRecord[] => {
   try {
@@ -110,6 +158,7 @@ const sessionFor = (profileId: string): StoredSession | null => {
 };
 
 export const hasProfileSession = (profileId: string) => Boolean(sessionFor(profileId));
+export const isSecuredProfile = (profile: ProfileRecord) => profile.accountSecured === true || Boolean(profile.lastSyncedAt);
 
 const openDb = (): Promise<IDBDatabase | null> => new Promise((resolve) => {
   if (typeof indexedDB === "undefined") return resolve(null);
@@ -187,65 +236,206 @@ const removeLocalProfile = async (profileId: string) => {
   });
 };
 
-const newest = (a: ProfileRecord, b: ProfileRecord) => timestamp(a.updatedAt) >= timestamp(b.updatedAt) ? a : b;
+const orderedSessions = (sessions: Iterable<ProfileSessionRecord>): ProfileSessionRecord[] =>
+  [...sessions].sort((a, b) => timestamp(a.completedAt) - timestamp(b.completedAt) || a.id.localeCompare(b.id));
+
+const normalProgressionSession = (session: ProfileSessionRecord): boolean =>
+  session.mode === undefined || session.mode === "normal";
+
+/**
+ * Rebuild review-backed evidence from immutable session records. This makes two
+ * simultaneous one-clean-session updates add up to two, rather than collapsing
+ * to the larger of two counters that both happen to equal one.
+ */
+const progressionFromSessions = (history: readonly ProfileSessionRecord[]) => {
+  const progression: ProfileRecord["progression"] = {};
+  const reviewedIds = new Set<string>();
+  for (const session of orderedSessions(history)) {
+    if (!normalProgressionSession(session) || !session.exerciseReviews) continue;
+    const reached = new Set(session.completedExerciseIds ?? session.exerciseIds ?? Object.keys(session.exerciseReviews));
+    for (const [id, review] of Object.entries(session.exerciseReviews)) {
+      if (!reached.has(id) || !review || !["easy", "right", "hard"].includes(review.feedback)) continue;
+      reviewedIds.add(id);
+      const previous = progression[id] ?? { cleanSessions: 0 };
+      progression[id] = {
+        cleanSessions: review.achieved === true && review.feedback === "easy"
+          ? Math.min(2, previous.cleanSessions + 1)
+          : previous.cleanSessions,
+        lastFeedback: review.feedback,
+      };
+    }
+  }
+  return { progression, reviewedIds };
+};
+
+const legacyProgression = (
+  local: ProfileRecord,
+  remote: ProfileRecord,
+  progressResetAt: string | undefined,
+): ProfileRecord["progression"] => {
+  const reset = timestamp(progressResetAt);
+  // Legacy counters have no event timestamp. Once a reset tombstone exists,
+  // only a profile that already carries that tombstone can safely contribute
+  // them; a later unrelated edit on an older device must not resurrect
+  // pre-reset achievements.
+  const sources = [local, remote].filter((profile) => !reset || timestamp(profile.progressResetAt) >= reset);
+  const result: ProfileRecord["progression"] = {};
+  const ids = new Set(sources.flatMap((profile) => Object.keys(profile.progression)));
+  for (const id of ids) {
+    const available = sources
+      .filter((profile) => profile.progression[id])
+      .sort((a, b) => timestamp(a.updatedAt) - timestamp(b.updatedAt));
+    if (!available.length) continue;
+    const latest = available[available.length - 1].progression[id];
+    result[id] = {
+      cleanSessions: Math.max(...available.map((profile) => profile.progression[id]?.cleanSessions ?? 0)),
+      ...(latest.lastFeedback ? { lastFeedback: latest.lastFeedback } : {}),
+    };
+  }
+  return result;
+};
+
+const nextDayFromSessions = (
+  history: readonly ProfileSessionRecord[],
+  fallback: number,
+): number => {
+  const latest = orderedSessions(history).filter((session) => normalProgressionSession(session) &&
+    session.status !== "partial" && session.advancesProgram !== false &&
+    Number.isInteger(session.day) && Number(session.day) >= 1 && Number(session.day) <= 5).at(-1);
+  return latest?.day ? (latest.day % 5) + 1 : fallback;
+};
+
+const preferenceTimestamp = (profile: ProfileRecord, key: "appStateUpdatedAt") =>
+  timestamp(typeof profile.preferences[key] === "string" ? profile.preferences[key] as string : undefined);
+
+const chooseChangedProfile = (local: ProfileRecord, remote: ProfileRecord): ProfileRecord => {
+  const localChanged = timestamp(local.updatedAt);
+  const remoteChanged = timestamp(remote.updatedAt);
+  if (localChanged === remoteChanged) return local.revision >= remote.revision ? local : remote;
+  return localChanged > remoteChanged ? local : remote;
+};
 
 /** Merge append-only training evidence so a second device cannot silently erase a completed session. */
 export function mergeProfiles(local: ProfileRecord, remote: ProfileRecord): ProfileRecord {
   const localProfile = normalizeProfile(local);
   const remoteProfile = normalizeProfile(remote);
-  const preferred = newest(localProfile, remoteProfile);
+  const preferred = chooseChangedProfile(localProfile, remoteProfile);
   const older = preferred === localProfile ? remoteProfile : localProfile;
-  const sessions = new Map(remoteProfile.history.map((item) => [item.id, item]));
-  for (const item of localProfile.history) sessions.set(item.id, { ...sessions.get(item.id), ...item });
-  const progression = { ...older.progression };
-  for (const [id, value] of Object.entries(preferred.progression)) {
-    const previous = progression[id];
+  const progressResetAt = timestamp(localProfile.progressResetAt) >= timestamp(remoteProfile.progressResetAt)
+    ? localProfile.progressResetAt
+    : remoteProfile.progressResetAt;
+  const resetTimestamp = timestamp(progressResetAt);
+  const carriesCurrentReset = (profile: ProfileRecord) => !resetTimestamp ||
+    timestamp(profile.progressResetAt) >= resetTimestamp;
+  const componentSurvivesReset = (profile: ProfileRecord, changedAt: string | undefined) =>
+    carriesCurrentReset(profile) && (!resetTimestamp || timestamp(changedAt) >= resetTimestamp);
+  const sessions = new Map(remoteProfile.history
+    .filter((item) => afterReset(item.completedAt, progressResetAt))
+    .map((item) => [item.id, item]));
+  for (const item of localProfile.history) {
+    if (afterReset(item.completedAt, progressResetAt)) sessions.set(item.id, { ...sessions.get(item.id), ...item });
+  }
+  const history = orderedSessions(sessions.values());
+  const derived = progressionFromSessions(history);
+  const progression = legacyProgression(localProfile, remoteProfile, progressResetAt);
+  for (const id of derived.reviewedIds) {
+    const eventEvidence = derived.progression[id];
     progression[id] = {
-      cleanSessions: Math.max(previous?.cleanSessions ?? 0, value.cleanSessions ?? 0),
-      ...(value.lastFeedback ? { lastFeedback: value.lastFeedback } : previous?.lastFeedback ? { lastFeedback: previous.lastFeedback } : {}),
+      cleanSessions: Math.max(progression[id]?.cleanSessions ?? 0, eventEvidence.cleanSessions),
+      ...(eventEvidence.lastFeedback ? { lastFeedback: eventEvidence.lastFeedback } : {}),
     };
   }
   const readinessKeys = new Set([...Object.keys(localProfile.readiness), ...Object.keys(remoteProfile.readiness)]);
   const mergedReadiness: Record<string, boolean> = {};
   const readinessUpdatedAt: Record<string, string> = {};
   for (const id of readinessKeys) {
-    const localChanged = timestamp(localProfile.readinessUpdatedAt[id]);
-    const remoteChanged = timestamp(remoteProfile.readinessUpdatedAt[id]);
+    if (!carriesCurrentReset(localProfile) && !carriesCurrentReset(remoteProfile)) continue;
+    const localChangedAt = Object.hasOwn(localProfile.readiness, id)
+      && carriesCurrentReset(localProfile) ? localProfile.readinessUpdatedAt[id] ?? localProfile.updatedAt
+      : undefined;
+    const remoteChangedAt = Object.hasOwn(remoteProfile.readiness, id)
+      && carriesCurrentReset(remoteProfile) ? remoteProfile.readinessUpdatedAt[id] ?? remoteProfile.updatedAt
+      : undefined;
+    const localChanged = timestamp(localChangedAt);
+    const remoteChanged = timestamp(remoteChangedAt);
+    if (Math.max(localChanged, remoteChanged) <= timestamp(progressResetAt)) continue;
     const useLocal = localChanged === remoteChanged
       ? preferred === localProfile
       : localChanged > remoteChanged;
     mergedReadiness[id] = useLocal ? localProfile.readiness[id] === true : remoteProfile.readiness[id] === true;
-    const changedAt = useLocal ? localProfile.readinessUpdatedAt[id] : remoteProfile.readinessUpdatedAt[id];
+    const changedAt = useLocal ? localChangedAt : remoteChangedAt;
     if (changedAt) readinessUpdatedAt[id] = changedAt;
   }
-  const remoteSessions = new Set(remoteProfile.history.map((item) => item.id));
-  const localAssessment = localProfile.preferences.startingAssessment as { updatedAt?: string } | undefined;
-  const remoteAssessment = remoteProfile.preferences.startingAssessment as { updatedAt?: string } | undefined;
-  const startingAssessment = timestamp(localAssessment?.updatedAt) >= timestamp(remoteAssessment?.updatedAt)
-    ? localProfile.preferences.startingAssessment
-    : remoteProfile.preferences.startingAssessment;
+  const localAssessmentCandidate = localProfile.preferences.startingAssessment as { updatedAt?: string } | undefined;
+  const remoteAssessmentCandidate = remoteProfile.preferences.startingAssessment as { updatedAt?: string } | undefined;
+  const localAssessment = componentSurvivesReset(localProfile, localAssessmentCandidate?.updatedAt)
+    ? localAssessmentCandidate
+    : undefined;
+  const remoteAssessment = componentSurvivesReset(remoteProfile, remoteAssessmentCandidate?.updatedAt)
+    ? remoteAssessmentCandidate
+    : undefined;
+  const localAssessmentTime = timestamp(localAssessment?.updatedAt);
+  const remoteAssessmentTime = timestamp(remoteAssessment?.updatedAt);
+  const assessmentSource = localAssessmentTime === remoteAssessmentTime
+    ? preferred
+    : localAssessmentTime > remoteAssessmentTime ? localProfile : remoteProfile;
+  const startingAssessment = assessmentSource === localProfile ? localAssessment : remoteAssessment;
+  const localAppStateChangedAt = typeof localProfile.preferences.appStateUpdatedAt === "string"
+    ? localProfile.preferences.appStateUpdatedAt
+    : undefined;
+  const remoteAppStateChangedAt = typeof remoteProfile.preferences.appStateUpdatedAt === "string"
+    ? remoteProfile.preferences.appStateUpdatedAt
+    : undefined;
+  const localAppStateTime = componentSurvivesReset(localProfile, localAppStateChangedAt)
+    ? preferenceTimestamp(localProfile, "appStateUpdatedAt")
+    : -1;
+  const remoteAppStateTime = componentSurvivesReset(remoteProfile, remoteAppStateChangedAt)
+    ? preferenceTimestamp(remoteProfile, "appStateUpdatedAt")
+    : -1;
+  const appStateSource = localAppStateTime === remoteAppStateTime
+    ? preferred
+    : localAppStateTime > remoteAppStateTime ? localProfile : remoteProfile;
+  const appStateSourceTime = appStateSource === localProfile ? localAppStateTime : remoteAppStateTime;
   const preferences = {
     ...older.preferences,
     ...preferred.preferences,
-    ...(startingAssessment ? { startingAssessment } : {}),
   };
-  const remoteMissingEvidence = localProfile.history.some((item) => !remoteSessions.has(item.id)) ||
-    Object.entries(progression).some(([id, value]) => value.cleanSessions > (remoteProfile.progression[id]?.cleanSessions ?? 0)) ||
-    Object.keys(readinessUpdatedAt).some((id) => timestamp(readinessUpdatedAt[id]) > timestamp(remoteProfile.readinessUpdatedAt[id])) ||
-    timestamp(localAssessment?.updatedAt) > timestamp(remoteAssessment?.updatedAt);
-  return normalizeProfile({
+  delete preferences.startingAssessment;
+  delete preferences.appState;
+  delete preferences.appStateUpdatedAt;
+  if (startingAssessment !== undefined) preferences.startingAssessment = startingAssessment;
+  if (appStateSourceTime >= 0 && appStateSource.preferences.appState !== undefined) {
+    preferences.appState = appStateSource.preferences.appState;
+  }
+  if (appStateSourceTime >= 0 && appStateSource.preferences.appStateUpdatedAt !== undefined) {
+    preferences.appStateUpdatedAt = appStateSource.preferences.appStateUpdatedAt;
+  }
+  const fallbackDaySource = [localProfile, remoteProfile]
+    .filter(carriesCurrentReset)
+    .sort((a, b) => timestamp(a.updatedAt) - timestamp(b.updatedAt)).at(-1);
+  const nextProgramDay = nextDayFromSessions(history, fallbackDaySource?.nextProgramDay ?? 1);
+  const merged = normalizeProfile({
     ...older,
     ...preferred,
     profileId: localProfile.profileId,
-    history: [...sessions.values()].sort((a, b) => timestamp(a.completedAt) - timestamp(b.completedAt)),
+    ...(progressResetAt ? { progressResetAt } : {}),
+    nextProgramDay,
+    history,
     readiness: mergedReadiness,
     readinessUpdatedAt,
     progression,
     preferences,
     revision: Math.max(localProfile.revision, remoteProfile.revision),
-    pendingSync: localProfile.pendingSync === true || remoteMissingEvidence,
+    pendingSync: false,
     lastSyncedAt: remoteProfile.lastSyncedAt ?? localProfile.lastSyncedAt,
   });
+  // Do not infer sync safety from history length alone. A reset, readiness
+  // revocation, app-state edit, assessment, progression update, username or
+  // equipment change can all require a write while history remains unchanged.
+  return {
+    ...merged,
+    pendingSync: localProfile.pendingSync === true || !samePersistedState(merged, remoteProfile),
+  };
 }
 
 type ApiPayload = {
@@ -289,7 +479,7 @@ const api = async (path: string, init: RequestInit = {}, profileId?: string): Pr
 
 const acceptAccount = async (payload: ApiPayload): Promise<AccountResult> => {
   if (!payload.profile || !payload.token) throw new Error("The account service returned an incomplete response.");
-  const remote = normalizeProfile({ ...payload.profile, pendingSync: false, syncError: undefined, lastSyncedAt: now() });
+  const remote = normalizeProfile({ ...payload.profile, accountSecured: true, pendingSync: false, syncError: undefined, lastSyncedAt: now() });
   setSession(remote.profileId, payload.token, payload.expiresAt);
   const local = await getProfile(remote.profileId);
   const merged = local ? mergeProfiles(local, remote) : remote;
@@ -346,6 +536,9 @@ export async function signOutProfile(profileId: string): Promise<void> {
     catch { /* The local token must still be removed when offline. */ }
   }
   clearSession(profileId);
+  // A shared device must not retain an unlocked copy of a signed-out account.
+  // The cloud account remains intact and can be restored through Sign in.
+  await removeLocalProfile(profileId);
 }
 
 type RemoteResult = { profile?: ProfileRecord; conflict?: ProfileRecord; error?: string };
@@ -402,16 +595,42 @@ export async function listProfiles(): Promise<ProfileRecord[]> {
 export async function saveProfile(profile: ProfileRecord): Promise<ProfileRecord> {
   const current = await getProfile(profile.profileId);
   const canSync = Boolean(REMOTE_API && sessionFor(profile.profileId));
+  // Callers may finish concurrently (for example a workout save and the
+  // debounced settings save). Merge against the latest cached snapshot so a
+  // stale whole-object write cannot delete append-only evidence.
+  const composed = current ? mergeProfiles(profile, current) : profile;
   const localDraft = normalizeProfile({
-    ...current,
-    ...profile,
-    revision: Math.max(profile.revision, current?.revision ?? 0),
+    ...composed,
+    revision: Math.max(composed.revision, current?.revision ?? 0),
     updatedAt: now(),
     pendingSync: Boolean(REMOTE_API),
     syncError: canSync ? undefined : REMOTE_API ? "Sign in to sync this profile." : undefined,
   });
   await cacheProfile(localDraft);
   return canSync ? pushWithConflictMerge(localDraft) : localDraft;
+}
+
+/** Create the durable local half of a user-requested training reset. */
+export function resetProfileTraining(profile: ProfileRecord, progressResetAt = now()): ProfileRecord {
+  const preferences = { ...profile.preferences };
+  // These components belong to training progress. Dropping them here, in
+  // addition to keeping the reset tombstone, makes a reset self-contained and
+  // prevents an old assessment or app-state snapshot from surviving locally.
+  delete preferences.startingAssessment;
+  delete preferences.appState;
+  delete preferences.appStateUpdatedAt;
+  return normalizeProfile({
+    ...profile,
+    progressResetAt,
+    updatedAt: progressResetAt,
+    nextProgramDay: 1,
+    history: [],
+    readiness: {},
+    readinessUpdatedAt: {},
+    progression: {},
+    preferences,
+    pendingSync: Boolean(REMOTE_API),
+  });
 }
 
 export async function getProfile(profileId: string): Promise<ProfileRecord | null> {
@@ -428,10 +647,12 @@ export async function syncProfile(profile: ProfileRecord): Promise<ProfileRecord
   try {
     const remote = normalizeProfile(await api("/profiles/me", { method: "GET" }, profile.profileId) as ProfileRecord);
     const merged = mergeProfiles(profile, remote);
-    if (profile.pendingSync || timestamp(profile.updatedAt) > timestamp(remote.updatedAt) || merged.history.length > remote.history.length) {
+    if (merged.pendingSync) {
       return pushWithConflictMerge({ ...merged, revision: remote.revision, pendingSync: true, updatedAt: now() });
     }
-    const saved = { ...remote, pendingSync: false, syncError: undefined, lastSyncedAt: now() };
+    // Cache the component-wise merge even when no upload is needed. Returning
+    // the raw remote object here previously discarded locally merged state.
+    const saved = { ...merged, pendingSync: false, syncError: undefined, lastSyncedAt: now() };
     await cacheProfile(saved);
     return saved;
   } catch (error) {

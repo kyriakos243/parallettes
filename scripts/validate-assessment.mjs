@@ -26,7 +26,10 @@ const {
   emptyStartingAssessment,
   evidenceWithProvisionalPlacement,
   parseStartingAssessment,
+  reopenAssessmentTrack,
   restartStartingAssessment,
+  suggestedWorkoutLevel,
+  undoLastAssessmentAnswer,
   validateAssessmentTracks,
   visibleProvisionalIndex,
 } = assessment;
@@ -54,6 +57,20 @@ const afterSecondAlmost = answerAssessmentQuestion(afterFirstClean, assessmentQu
 assert(afterSecondAlmost.placements[firstQuestion.track.pathLabel] === firstQuestion.track.anchors[1],
   "Almost on the harder anchor did not place the athlete at that exercise");
 
+// Back removes only the latest adaptive answer, recomputes that family's
+// placement and survives the same JSON round-trip used by profile sync.
+const serializedAdaptiveBranch = parseStartingAssessment(JSON.parse(JSON.stringify(afterSecondAlmost)));
+const backToHarderCard = undoLastAssessmentAnswer(serializedAdaptiveBranch, skillProgressionPaths);
+assert(backToHarderCard.answers[`${firstQuestion.track.id}:0`] === "clean" &&
+  !backToHarderCard.answers[`${firstQuestion.track.id}:1`] &&
+  !backToHarderCard.placements[firstQuestion.track.pathLabel] &&
+  assessmentQuestions(backToHarderCard)[0]?.anchorIndex === 1,
+"Back did not reopen the harder adaptive card without losing the first answer");
+const backToFirstCard = undoLastAssessmentAnswer(backToHarderCard, skillProgressionPaths);
+assert(!Object.keys(backToFirstCard.answers).length && !backToFirstCard.answerOrder.length &&
+  assessmentQuestions(backToFirstCard)[0]?.anchorIndex === 0,
+"A second Back did not return to the original first card cleanly");
+
 // All three routes must be safe and resumable through JSON profile storage.
 for (const answer of ["clean", "almost", "not-yet"]) {
   let state = emptyStartingAssessment("in-progress");
@@ -68,6 +85,69 @@ for (const answer of ["clean", "almost", "not-yet"]) {
   assert(JSON.stringify(restored.answers) === JSON.stringify(state.answers) && JSON.stringify(restored.placements) === JSON.stringify(state.placements),
     `${answer}: assessment did not resume faithfully after profile serialization`);
 }
+
+const completeAssessment = (answerFor) => {
+  let state = emptyStartingAssessment("in-progress");
+  let guard = 0;
+  while (assessmentQuestions(state).length) {
+    const question = assessmentQuestions(state)[0];
+    state = answerAssessmentQuestion(state, question, answerFor(question), skillProgressionPaths);
+    if (++guard > assessmentTracks.length * 2) throw new Error("Suggested-level assessment did not terminate");
+  }
+  return state;
+};
+
+const l1Assessment = completeAssessment(() => "not-yet");
+const l2Assessment = completeAssessment(() => "almost");
+const l3Assessment = completeAssessment(() => "clean");
+assert(suggestedWorkoutLevel(l1Assessment) === "L1", "Not-yet answers did not produce the conservative L1 start");
+assert(suggestedWorkoutLevel(l2Assessment) === "L2", "Broad first-anchor ability did not produce an L2 start");
+assert(suggestedWorkoutLevel(l3Assessment) === "L3", "Clean harder anchors did not produce an L3 start");
+
+// Advanced totals alone cannot bypass the support prerequisite for L3.
+const l3WithoutSupport = completeAssessment((question) =>
+  question.track.section === "Support" && question.anchorIndex === 1 ? "not-yet" : "clean");
+assert(suggestedWorkoutLevel(l3WithoutSupport) === "L2",
+  "L3 was suggested despite an incomplete support prerequisite");
+
+// Change one family from the result screen without erasing the other thirteen
+// answers, their placements or a previously applied assessment.
+const editable = { ...l3Assessment, appliedPlacements: { ...l3Assessment.placements } };
+const trackToEdit = assessmentTracks.find((track) => track.id === "compression");
+const reopened = reopenAssessmentTrack(editable, trackToEdit.id);
+assert(reopened.status === "in-progress" &&
+  !reopened.placements[trackToEdit.pathLabel] &&
+  !Object.keys(reopened.answers).some((key) => key.startsWith(`${trackToEdit.id}:`)) &&
+  assessmentProgress(reopened).completedTracks === assessmentTracks.length - 1 &&
+  Object.keys(reopened.appliedPlacements).length === assessmentTracks.length,
+"Changing one assessment family erased unrelated or already-applied results");
+assert(assessmentQuestions(reopened).length === 1 && assessmentQuestions(reopened)[0].track.id === trackToEdit.id,
+  "Changing one assessment family reopened more than that family");
+const editedFamily = answerAssessmentQuestion(reopened, assessmentQuestions(reopened)[0], "not-yet", skillProgressionPaths);
+const untouchedTrack = assessmentTracks.find((track) => track.id === "hollow");
+assert(editedFamily.status === "review" &&
+  editedFamily.placements[trackToEdit.pathLabel] !== l3Assessment.placements[trackToEdit.pathLabel] &&
+  editedFamily.placements[untouchedTrack.pathLabel] === l3Assessment.placements[untouchedTrack.pathLabel],
+"A changed family did not return to review with its new result and unrelated placements intact");
+
+// V1 profiles created before answerOrder existed remain resumable, and a
+// completed legacy placement becomes the last applied result.
+const legacyAssessment = parseStartingAssessment({
+  version: 1,
+  status: "completed",
+  answers: { "hollow:0": "clean", "hollow:1": "almost" },
+  placements: { "Hollow / Anti-Extension": "long-lever-hollow-hold" },
+  updatedAt: "2026-01-01T00:00:00.000Z",
+});
+assert(legacyAssessment.answerOrder.join("|") === "hollow:0|hollow:1" &&
+  legacyAssessment.appliedPlacements["Hollow / Anti-Extension"] === "long-lever-hollow-hold",
+"Assessment migration lost legacy answer order or applied placement");
+const normalizedOrder = parseStartingAssessment({
+  ...legacyAssessment,
+  answerOrder: ["hollow:1", "missing:0", "hollow:1"],
+});
+assert(normalizedOrder.answerOrder.join("|") === "hollow:1|hollow:0",
+  "Assessment migration retained unknown/duplicate order keys or dropped a real answer");
 
 const previouslyApplied = { ...emptyStartingAssessment("completed"), appliedPlacements: { "Straight-Arm Support": "tuck-support" } };
 const reassessing = restartStartingAssessment(previouslyApplied);

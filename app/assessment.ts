@@ -16,6 +16,8 @@ export type StartingAssessment = {
   version: 1;
   status: "offered" | "dismissed" | "in-progress" | "review" | "completed";
   answers: Record<string, AssessmentAnswer>;
+  /** Stable response order makes Back reliable after sync/reload. */
+  answerOrder: string[];
   placements: Record<string, string>;
   /** Last explicitly applied result; retained while a reassessment is underway. */
   appliedPlacements: Record<string, string>;
@@ -36,7 +38,7 @@ export const assessmentSections: readonly AssessmentSection[] = [
 ];
 
 /**
- * Thirteen representative skill families keep the assessment useful without
+ * Fourteen representative skill families keep the assessment useful without
  * asking a new athlete to audit the complete exercise library. Each family
  * starts at its first anchor and only shows the second when the first target
  * is already clean.
@@ -62,6 +64,7 @@ export const emptyStartingAssessment = (status: StartingAssessment["status"] = "
   version: 1,
   status,
   answers: {},
+  answerOrder: [],
   placements: {},
   appliedPlacements: {},
   updatedAt: new Date().toISOString(),
@@ -73,6 +76,9 @@ export const parseStartingAssessment = (value: unknown): StartingAssessment => {
   const validStatus = ["offered", "dismissed", "in-progress", "review", "completed"].includes(parsed.status ?? "");
   const answers = Object.fromEntries(Object.entries(parsed.answers ?? {}).filter((entry): entry is [string, AssessmentAnswer] =>
     ["clean", "almost", "not-yet"].includes(String(entry[1]))));
+  const answerOrder = Array.isArray(parsed.answerOrder)
+    ? parsed.answerOrder.filter((key): key is string => typeof key === "string" && Object.hasOwn(answers, key))
+    : Object.keys(answers);
   const placements = Object.fromEntries(Object.entries(parsed.placements ?? {}).filter((entry): entry is [string, string] =>
     typeof entry[1] === "string"));
   const appliedPlacements = Object.fromEntries(Object.entries(parsed.appliedPlacements ?? (parsed.status === "completed" ? placements : {})).filter((entry): entry is [string, string] =>
@@ -81,6 +87,7 @@ export const parseStartingAssessment = (value: unknown): StartingAssessment => {
     version: 1,
     status: validStatus ? parsed.status as StartingAssessment["status"] : "offered",
     answers,
+    answerOrder: [...new Set([...answerOrder, ...Object.keys(answers)])],
     placements,
     appliedPlacements,
     updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
@@ -134,13 +141,66 @@ export const answerAssessmentQuestion = (
   answer: AssessmentAnswer,
   paths: readonly ProgressionPathDefinition[],
 ): StartingAssessment => {
-  const answers = { ...assessment.answers, [answerKey(question.track.id, question.anchorIndex)]: answer };
+  const key = answerKey(question.track.id, question.anchorIndex);
+  const answers = { ...assessment.answers, [key]: answer };
+  const answerOrder = [...assessment.answerOrder.filter((item) => item !== key), key];
   const first = answers[answerKey(question.track.id, 0)];
   const second = answers[answerKey(question.track.id, 1)];
   const placement = first !== "clean" || Boolean(second) ? placementFor(question.track, answers, paths) : undefined;
   const placements = { ...assessment.placements, ...(placement ? { [question.track.pathLabel]: placement } : {}) };
-  const provisional = { ...assessment, status: "in-progress" as const, answers, placements, updatedAt: new Date().toISOString() };
+  const provisional = { ...assessment, status: "in-progress" as const, answers, answerOrder, placements, updatedAt: new Date().toISOString() };
   return assessmentQuestions(provisional).length ? provisional : { ...provisional, status: "review" };
+};
+
+/** Remove the most recent response without losing earlier assessment work. */
+export const undoLastAssessmentAnswer = (
+  assessment: StartingAssessment,
+  paths: readonly ProgressionPathDefinition[],
+): StartingAssessment => {
+  const order = assessment.answerOrder.length ? assessment.answerOrder : Object.keys(assessment.answers);
+  const key = order.at(-1);
+  if (!key) return assessment;
+  const [trackId] = key.split(":");
+  const track = assessmentTracks.find((item) => item.id === trackId);
+  const answers = { ...assessment.answers };
+  delete answers[key];
+  const placements = { ...assessment.placements };
+  if (track) {
+    const first = answers[answerKey(track.id, 0)];
+    const second = answers[answerKey(track.id, 1)];
+    const placement = first !== "clean" || Boolean(second) ? placementFor(track, answers, paths) : undefined;
+    if (placement) placements[track.pathLabel] = placement;
+    else delete placements[track.pathLabel];
+  }
+  return {
+    ...assessment,
+    status: "in-progress",
+    answers,
+    answerOrder: order.slice(0, -1),
+    placements,
+    updatedAt: new Date().toISOString(),
+  };
+};
+
+/** Reopen one family from the summary instead of restarting all fourteen. */
+export const reopenAssessmentTrack = (
+  assessment: StartingAssessment,
+  trackId: string,
+): StartingAssessment => {
+  const track = assessmentTracks.find((item) => item.id === trackId);
+  if (!track) return assessment;
+  const prefix = `${track.id}:`;
+  const answers = Object.fromEntries(Object.entries(assessment.answers).filter(([key]) => !key.startsWith(prefix)));
+  const placements = { ...assessment.placements };
+  delete placements[track.pathLabel];
+  return {
+    ...assessment,
+    status: "in-progress",
+    answers,
+    answerOrder: assessment.answerOrder.filter((key) => !key.startsWith(prefix)),
+    placements,
+    updatedAt: new Date().toISOString(),
+  };
 };
 
 export const restartStartingAssessment = (current?: StartingAssessment): StartingAssessment => ({
@@ -152,6 +212,31 @@ export const assessmentProgress = (assessment: StartingAssessment) => ({
   completedTracks: assessmentTracks.filter((track) => Boolean(assessment.placements[track.pathLabel])).length,
   totalTracks: assessmentTracks.length,
 });
+
+/**
+ * Convert the broad placement check into a conservative whole-workout default.
+ * Readiness gates still override individual handstand/calisthenics drills.
+ */
+export const suggestedWorkoutLevel = (assessment: StartingAssessment): "L1" | "L2" | "L3" => {
+  const scoreFor = (track: AssessmentTrack) => {
+    const first = assessment.answers[answerKey(track.id, 0)];
+    const second = assessment.answers[answerKey(track.id, 1)];
+    if (first === "not-yet" || !first) return 0;
+    if (first === "almost") return 1;
+    if (second === "clean") return 3;
+    if (second === "almost") return 2;
+    return 1;
+  };
+  const scores = assessmentTracks.map((track) => ({ track, score: scoreFor(track) }));
+  const capable = scores.filter(({ score }) => score >= 1).length;
+  const advanced = scores.filter(({ score }) => score >= 2).length;
+  const supportReady = scores.filter(({ track }) => track.section === "Support").every(({ score }) => score >= 2);
+  const handstandReady = scores.filter(({ track }) => track.section === "Handstand" && track.id !== "handstand-exit")
+    .filter(({ score }) => score >= 2).length >= 2;
+  if (advanced >= 10 && supportReady && handstandReady) return "L3";
+  if (capable >= 7 || advanced >= 4) return "L2";
+  return "L1";
+};
 
 /**
  * Make earlier stages behave as demonstrated for recommendation purposes only.
