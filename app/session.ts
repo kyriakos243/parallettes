@@ -147,6 +147,59 @@ export type ExerciseFeedback = "easy" | "right" | "hard";
 export type ExerciseReview = Readonly<{ feedback: ExerciseFeedback; achieved: boolean }>;
 export type ProgressionEvidence = Record<string, { cleanSessions: number; lastFeedback?: ExerciseFeedback }>;
 
+/** Seconds actually spent in each work interval. Timer jumps never add evidence. */
+export type IntervalExecution = Readonly<Record<string, number>>;
+
+/**
+ * Credit a naturally elapsed timer range to the work intervals it crossed.
+ * Manual next/previous controls reset the range cursor, so skipped time is not
+ * accidentally treated as training. Repeated/backtracked work is capped at the
+ * authored interval duration.
+ */
+export const addExecutionRange = (
+  plan: SessionPlan,
+  current: IntervalExecution,
+  fromElapsed: number,
+  toElapsed: number,
+): Record<string, number> => {
+  const from = Math.max(0, Math.min(plan.totalSeconds, Math.min(fromElapsed, toElapsed)));
+  const to = Math.max(0, Math.min(plan.totalSeconds, Math.max(fromElapsed, toElapsed)));
+  if (to <= from) return { ...current };
+  const next = { ...current };
+  let cursor = 0;
+  for (const interval of plan.intervals) {
+    const end = cursor + interval.duration;
+    if (interval.kind === "work") {
+      const overlap = Math.max(0, Math.min(to, end) - Math.max(from, cursor));
+      if (overlap > 0) next[interval.id] = Math.min(interval.duration, (next[interval.id] ?? 0) + overlap);
+    }
+    cursor = end;
+    if (cursor >= to) break;
+  }
+  return next;
+};
+
+const exerciseIdsFromExecution = (
+  plan: SessionPlan,
+  execution: IntervalExecution,
+  qualifies: (interval: PlanInterval, seconds: number) => boolean,
+): string[] => {
+  const ids: string[] = [];
+  for (const interval of plan.intervals) {
+    const seconds = Math.max(0, Math.min(interval.duration, execution[interval.id] ?? 0));
+    if (interval.kind === "work" && interval.exerciseId && qualifies(interval, seconds) && !ids.includes(interval.exerciseId)) {
+      ids.push(interval.exerciseId);
+    }
+  }
+  return ids;
+};
+
+/** Unique exercises with any real work recorded in the execution ledger. */
+export const performedExerciseIdsFromExecution = (
+  plan: SessionPlan,
+  execution: IntervalExecution,
+): string[] => exerciseIdsFromExecution(plan, execution, (_interval, seconds) => seconds > 0);
+
 /** Unique work exercises whose interval actually started before the timer stopped. */
 export const performedExerciseIdsFor = (plan: SessionPlan, elapsedSeconds: number): string[] => {
   const limit = Math.max(0, Math.min(plan.totalSeconds, elapsedSeconds));
@@ -161,6 +214,34 @@ export const performedExerciseIdsFor = (plan: SessionPlan, elapsedSeconds: numbe
 };
 
 const REVIEWABLE_BLOCKS = new Set<TrainingBlock>(["pre", "handstand", "lab", "core"]);
+
+/**
+ * Only exercises with meaningful participation are eligible for a progression
+ * rating. Half an interval prevents a one-second start or a timer skip from
+ * becoming mastery evidence, while the athlete may still finish the target
+ * early and rest inside the remaining work window as prescribed.
+ */
+export const reviewableExerciseIdsFromExecution = (
+  plan: SessionPlan,
+  execution: IntervalExecution,
+): string[] => exerciseIdsFromExecution(plan, execution, (interval, seconds) =>
+  REVIEWABLE_BLOCKS.has(interval.block) && seconds >= interval.duration * 0.5);
+
+/** A shortened Recommended day still needs more than one token drill. */
+export const hasMeaningfulProgrammeWork = (
+  plan: SessionPlan,
+  execution: IntervalExecution,
+): boolean => {
+  const exerciseIds = reviewableExerciseIdsFromExecution(plan, execution);
+  const scheduledMainSeconds = plan.intervals.reduce((sum, interval) => interval.kind === "work" &&
+    REVIEWABLE_BLOCKS.has(interval.block) ? sum + interval.duration : sum, 0);
+  const mainSeconds = plan.intervals.reduce((sum, interval) => interval.kind === "work" &&
+    REVIEWABLE_BLOCKS.has(interval.block)
+    ? sum + Math.max(0, Math.min(interval.duration, execution[interval.id] ?? 0))
+    : sum, 0);
+  return exerciseIds.length >= 2 && mainSeconds >= 60 &&
+    (scheduledMainSeconds === 0 || mainSeconds >= scheduledMainSeconds * 0.6);
+};
 
 /** Progression exercises reached before the timer stopped; warm-up and cooldown never require ratings. */
 export const reviewableExerciseIdsFor = (plan: SessionPlan, elapsedSeconds: number): string[] => {
@@ -213,7 +294,8 @@ export const nextProgramDayAfterSession = (
   performedDay: number,
   status: "complete" | "modified" | "partial",
   saveMode: "normal" | "practice" | "guest",
-): number => saveMode === "normal" && status !== "partial" && performedDay > 0
+  meaningfulMainWork = true,
+): number => saveMode === "normal" && status !== "partial" && performedDay > 0 && meaningfulMainWork
   ? (performedDay % 5) + 1
   : currentDay;
 

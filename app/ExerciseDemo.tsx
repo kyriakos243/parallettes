@@ -1,5 +1,5 @@
 import { RefreshCw } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { MotionPreset } from "./MotionGuide";
 import type { Exercise } from "./program";
 
@@ -7,24 +7,72 @@ type Props = {
   exercise: Exercise;
   compact?: boolean;
   dimmed?: boolean;
+  /**
+   * Unmount motion/video/image content while it is well outside the viewport.
+   * Compact lists opt in by default; active, non-compact player demos never wait.
+   */
+  deferOffscreen?: boolean;
 };
 
 const MotionGuide = lazy(async () => ({ default: (await import("./MotionGuide")).MotionGuide }));
 
 const extension = (source: string) => source.split("?")[0].split(".").pop()?.toLowerCase();
 
-export function ExerciseDemo({ exercise, compact = false, dimmed = false }: Props) {
+export function ExerciseDemo({ exercise, compact = false, dimmed = false, deferOffscreen }: Props) {
   const [sourceFailed, setSourceFailed] = useState(false);
+  const shouldDefer = deferOffscreen ?? compact;
+  const [nearViewport, setNearViewport] = useState(!shouldDefer);
+  const containerRef = useRef<HTMLDivElement>(null);
   const { media } = exercise;
 
   useEffect(() => setSourceFailed(false), [exercise.id, media.src]);
 
+  useEffect(() => {
+    if (!shouldDefer) {
+      setNearViewport(true);
+      return;
+    }
+
+    const container = containerRef.current;
+    if (!container || typeof IntersectionObserver === "undefined") {
+      setNearViewport(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setNearViewport(entry?.isIntersecting === true),
+      { rootMargin: "240px 0px" },
+    );
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [exercise.id, shouldDefer]);
+
   const visualClass = `exercise-demo ${dimmed ? "demo-dimmed" : ""}`;
   const fileType = media.src ? extension(media.src) : undefined;
+  const mediaClass = media.motion
+    ? "exercise-demo-motion"
+    : media.src && (fileType === "mp4" || fileType === "webm")
+      ? "exercise-demo-video"
+      : media.src
+        ? "exercise-demo-gif"
+        : "demo-unavailable";
+
+  if (!nearViewport) {
+    return (
+      <div
+        ref={containerRef}
+        className={`${visualClass} ${mediaClass}`}
+        role="img"
+        aria-label={`${exercise.name} technique demonstration loads when near the viewport`}
+      >
+        <div className="motion-loading" aria-hidden="true" />
+      </div>
+    );
+  }
 
   if (media.motion) {
     return (
-      <div className={`${visualClass} exercise-demo-motion`}>
+      <div ref={containerRef} className={`${visualClass} exercise-demo-motion`}>
         <Suspense fallback={<div className="motion-loading" aria-label="Loading exercise guide" />}>
           <MotionGuide preset={media.motion as MotionPreset} compact={compact} />
         </Suspense>
@@ -34,7 +82,7 @@ export function ExerciseDemo({ exercise, compact = false, dimmed = false }: Prop
 
   if (media.src && !sourceFailed && (fileType === "mp4" || fileType === "webm")) {
     return (
-      <div className={`${visualClass} exercise-demo-video`}>
+      <div ref={containerRef} className={`${visualClass} exercise-demo-video`}>
         <video
           autoPlay
           loop
@@ -53,7 +101,7 @@ export function ExerciseDemo({ exercise, compact = false, dimmed = false }: Prop
 
   if (media.src && !sourceFailed) {
     return (
-      <div className={`${visualClass} exercise-demo-gif`}>
+      <div ref={containerRef} className={`${visualClass} exercise-demo-gif`}>
         <img
           src={media.src}
           alt={`${exercise.name} technique demonstration`}
@@ -70,7 +118,7 @@ export function ExerciseDemo({ exercise, compact = false, dimmed = false }: Prop
   }
 
   return (
-    <div className={`${visualClass} demo-unavailable`} role="img" aria-label={`${exercise.name} visual unavailable`}>
+    <div ref={containerRef} className={`${visualClass} demo-unavailable`} role="img" aria-label={`${exercise.name} visual unavailable`}>
       <RefreshCw />
       <strong>Technique guide unavailable</strong>
       <span>Use the written cues and choose a swap if needed.</span>

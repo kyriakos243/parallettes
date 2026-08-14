@@ -5,6 +5,7 @@ import ts from "typescript";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const motionGuideSource = readFileSync(join(projectRoot, "app/MotionGuide.tsx"), "utf8");
+const pageSource = readFileSync(join(projectRoot, "app/page.tsx"), "utf8");
 
 const loadTypeScriptModule = (relativePath, replacements = []) => {
   let source = readFileSync(join(projectRoot, relativePath), "utf8");
@@ -41,20 +42,25 @@ const {
 const {
   APP_STORAGE_VERSION,
   STABLE_SLOT_IDS,
+  addExecutionRange,
   adaptSwapsForEquipment,
   applyExerciseReviews,
   buildSessionPlan,
   compatibleSwaps,
   createPlanSnapshot,
   defaultStoredAppState,
+  hasMeaningfulProgrammeWork,
   isExerciseCompatible,
   isExerciseStructurallyCompatible,
   levelRank,
   locateTimerPosition,
   parsePlanSnapshot,
   parseStoredAppState,
+  performedExerciseIdsFromExecution,
   performedExerciseIdsFor,
+  reviewableExerciseIdsFromExecution,
   reviewableExerciseIdsFor,
+  nextProgramDayAfterSession,
   slotsForVariant,
   variantKey,
 } = session;
@@ -468,6 +474,112 @@ if (l2Variant) {
     fail(`Stable-slot custom timing plan failed: ${error.message}`);
   }
 }
+
+// The execution ledger is the source of post-workout evidence. It credits
+// natural clock ranges, never a timer destination, caps repeated/backtracked
+// work and requires half of an authored work interval before review.
+const ledgerVariant = workoutVariants.find((variant) => variant.day === 1 && variant.level === "L1");
+if (ledgerVariant) {
+  try {
+    const ledgerPlan = buildSessionPlan({ variant: ledgerVariant, exercises, readiness: allReady });
+    let cursor = 0;
+    const spans = ledgerPlan.intervals.map((interval) => {
+      const span = { interval, start: cursor, end: cursor + interval.duration };
+      cursor = span.end;
+      return span;
+    });
+    const workSpans = (block) => spans.filter(({ interval }) => interval.kind === "work" && interval.block === block);
+    const firstWarmup = workSpans("warmup")[0];
+    const [firstPre, secondPre] = workSpans("pre");
+    const firstHandstand = workSpans("handstand")[0];
+    assert(Boolean(firstWarmup && firstPre && secondPre && firstHandstand),
+      "Execution-ledger fixture is missing required authored work intervals");
+
+    const oneSecond = addExecutionRange(ledgerPlan, {}, firstPre.start, firstPre.start + 1);
+    assert(performedExerciseIdsFromExecution(ledgerPlan, oneSecond).includes(firstPre.interval.exerciseId) &&
+      !reviewableExerciseIdsFromExecution(ledgerPlan, oneSecond).includes(firstPre.interval.exerciseId),
+    "A one-second start was not recorded as participation or was incorrectly made reviewable");
+
+    const belowHalf = addExecutionRange(ledgerPlan, {}, firstPre.start, firstPre.start + firstPre.interval.duration / 2 - 0.01);
+    const atHalf = addExecutionRange(ledgerPlan, {}, firstPre.start, firstPre.start + firstPre.interval.duration / 2);
+    assert(!reviewableExerciseIdsFromExecution(ledgerPlan, belowHalf).includes(firstPre.interval.exerciseId) &&
+      reviewableExerciseIdsFromExecution(ledgerPlan, atHalf).includes(firstPre.interval.exerciseId),
+    "The execution ledger does not enforce the exact 50% review threshold");
+
+    const fullOnce = addExecutionRange(ledgerPlan, {}, firstPre.start, firstPre.end);
+    const repeatedRange = addExecutionRange(ledgerPlan, fullOnce, firstPre.start, firstPre.end);
+    assert(repeatedRange[firstPre.interval.id] === firstPre.interval.duration,
+      "Repeating/backtracking through an interval exceeded its authored duration");
+
+    const chunkedNatural = addExecutionRange(
+      ledgerPlan,
+      addExecutionRange(ledgerPlan, {}, firstPre.start, firstPre.start + 17),
+      firstPre.start + 17,
+      secondPre.end,
+    );
+    const singleNatural = addExecutionRange(ledgerPlan, {}, firstPre.start, secondPre.end);
+    assert(JSON.stringify(chunkedNatural) === JSON.stringify(singleNatural) &&
+      reviewableExerciseIdsFromExecution(ledgerPlan, chunkedNatural).includes(firstPre.interval.exerciseId) &&
+      reviewableExerciseIdsFromExecution(ledgerPlan, chunkedNatural).includes(secondPre.interval.exerciseId),
+    "Naturally elapsed ranges were not accumulated consistently across timer ticks");
+
+    // A manual jump is represented by starting the next natural range at the
+    // destination. The skipped handstand work therefore receives no seconds.
+    let jumpLedger = addExecutionRange(ledgerPlan, {}, firstPre.start, firstPre.start + 1);
+    const firstCore = workSpans("core")[0];
+    jumpLedger = addExecutionRange(ledgerPlan, jumpLedger, firstCore.start, firstCore.start + firstCore.interval.duration / 2);
+    assert(!performedExerciseIdsFromExecution(ledgerPlan, jumpLedger).includes(firstHandstand.interval.exerciseId),
+      "A skipped timer region was incorrectly credited as performed work");
+
+    const resetOnly = addExecutionRange(ledgerPlan, {}, firstWarmup.start, firstWarmup.end);
+    assert(performedExerciseIdsFromExecution(ledgerPlan, resetOnly).includes(firstWarmup.interval.exerciseId) &&
+      reviewableExerciseIdsFromExecution(ledgerPlan, resetOnly).length === 0,
+    "Warm-up participation was incorrectly offered for progression review");
+
+    const oneRepeatedDrill = workSpans("handstand").slice(0, 2).reduce((execution, span) =>
+      addExecutionRange(ledgerPlan, execution, span.start, span.end), {});
+    assert(!hasMeaningfulProgrammeWork(ledgerPlan, oneRepeatedDrill),
+      "Sixty seconds of one repeated drill incorrectly counted as a meaningful Programme day");
+
+    const scheduledMain = spans.filter(({ interval }) => interval.kind === "work" &&
+      ["pre", "handstand", "lab", "core"].includes(interval.block));
+    const scheduledMainSeconds = scheduledMain.reduce((sum, span) => sum + span.interval.duration, 0);
+    const meaningfulThreshold = scheduledMainSeconds * 0.6;
+    const executionForMainSeconds = (requestedSeconds) => {
+      let remaining = requestedSeconds;
+      let execution = {};
+      for (const span of scheduledMain) {
+        if (remaining <= 0) break;
+        const seconds = Math.min(span.interval.duration, remaining);
+        execution = addExecutionRange(ledgerPlan, execution, span.start, span.start + seconds);
+        remaining -= seconds;
+      }
+      return execution;
+    };
+    const onlySixtySeconds = executionForMainSeconds(60);
+    const belowPlanRatio = executionForMainSeconds(meaningfulThreshold - 0.01);
+    const atPlanRatio = executionForMainSeconds(meaningfulThreshold);
+    assert(!hasMeaningfulProgrammeWork(ledgerPlan, onlySixtySeconds) &&
+      !hasMeaningfulProgrammeWork(ledgerPlan, belowPlanRatio) &&
+      hasMeaningfulProgrammeWork(ledgerPlan, atPlanRatio),
+    "Meaningful Programme work does not require 60% of the customized main work plus multiple exercises");
+
+    assert(nextProgramDayAfterSession(3, 3, "modified", "normal", false) === 3 &&
+      nextProgramDayAfterSession(3, 3, "modified", "normal", true) === 4 &&
+      nextProgramDayAfterSession(3, 3, "partial", "normal", true) === 3,
+    "A non-meaningful modified/partial session consumed a Programme day, or meaningful work failed to advance it");
+  } catch (error) {
+    fail(`Execution-ledger validation failed: ${error.message}`);
+  }
+}
+
+const jumpHandlerSource = pageSource.match(/const jump = \(direction:[\s\S]*?\n  \};\n\n  const current =/u)?.[0] ?? "";
+assert(jumpHandlerSource.includes("creditExecutionTo(elapsedFromClock())") &&
+  jumpHandlerSource.includes("executionCursorRef.current = elapsed") &&
+  jumpHandlerSource.indexOf("creditExecutionTo(elapsedFromClock())") < jumpHandlerSource.indexOf("executionCursorRef.current = elapsed"),
+  "Player jumps do not credit only elapsed work before resetting the execution cursor at the destination");
+assert(pageSource.includes("reviewableExerciseIdsFromExecution(plan, executionRef.current)"),
+  "Post-workout review is not sourced from actual interval execution");
 
 const firstReview = applyExerciseReviews({}, ["review-drill", "review-drill"], {
   "review-drill": { feedback: "easy", achieved: true },

@@ -41,7 +41,10 @@ import {
   emptyStartingAssessment,
   evidenceWithProvisionalPlacement,
   parseStartingAssessment,
+  reopenAssessmentTrack,
   restartStartingAssessment,
+  suggestedWorkoutLevel,
+  undoLastAssessmentAnswer,
   visibleProvisionalIndex,
   type AssessmentAnswer,
   type StartingAssessment,
@@ -55,13 +58,16 @@ import {
   exportProfile,
   hasProfileSession,
   importProfile,
+  isSecuredProfile,
   listProfiles,
   recoverAccount,
   registerProfile,
   remoteSyncAvailable,
+  resetProfileTraining,
   saveProfile,
   signInProfile,
   signOutProfile,
+  profileSessionStorageKey,
   syncProfile,
   validateProfileSession,
   type ProfileRecord,
@@ -85,20 +91,23 @@ import {
 } from "./program";
 import {
   DEFAULT_BLOCK_TIMING,
+  addExecutionRange,
   applySessionProgression,
   adaptSwapsForEquipment,
   buildSessionPlan,
   sessionBlockOrder,
   compatibleSwaps,
   defaultStoredAppState,
+  hasMeaningfulProgrammeWork,
   locateTimerPosition,
   nextProgramDayAfterSession,
   parseStoredAppState,
-  performedExerciseIdsFor,
-  reviewableExerciseIdsFor,
+  performedExerciseIdsFromExecution,
+  reviewableExerciseIdsFromExecution,
   slotsForVariant,
   variantKey,
   type IntervalTiming,
+  type IntervalExecution,
   type ExerciseFeedback,
   type ExerciseReview,
   type PlanInterval,
@@ -129,7 +138,7 @@ type HistoryEntry = {
   lab: boolean;
   mode?: SaveMode;
   status?: "complete" | "modified" | "partial";
-  exerciseReviews?: Record<string, ExerciseReview>;
+  exerciseReviews?: Partial<Record<string, ExerciseReview>>;
 };
 
 type PendingReview = {
@@ -138,7 +147,7 @@ type PendingReview = {
   exerciseIds: string[];
 };
 type ActiveSessionSnapshot = {
-  version: 1;
+  version: 2;
   ownerId: string;
   plan: SessionPlan;
   elapsed: number;
@@ -147,24 +156,44 @@ type ActiveSessionSnapshot = {
   modified: boolean;
   saveMode: SaveMode;
   pendingReview: PendingReview | null;
-  reviews: Record<string, ExerciseReview>;
+  reviews: Partial<Record<string, ExerciseReview>>;
+  execution: Record<string, number>;
+  /** Actual time spent with the timer running; navigation jumps never add time. */
+  trainedSeconds: number;
 };
 
 const parseActiveSession = (value: string | null): ActiveSessionSnapshot | null => {
   if (!value) return null;
   try {
-    const parsed = JSON.parse(value) as Partial<ActiveSessionSnapshot>;
-    if (parsed.version !== 1 || typeof parsed.ownerId !== "string" || !parsed.plan ||
+    const parsed = JSON.parse(value) as Partial<Omit<ActiveSessionSnapshot, "version">> & { version?: number };
+    if ((parsed.version !== 1 && parsed.version !== 2) || typeof parsed.ownerId !== "string" || !parsed.plan ||
       !Array.isArray(parsed.plan.intervals) || !Number.isFinite(parsed.plan.totalSeconds) ||
       !Number.isFinite(parsed.elapsed) || !Number.isFinite(parsed.savedAt) ||
       Date.now() - Number(parsed.savedAt) > 24 * 60 * 60 * 1000) return null;
-    return parsed as ActiveSessionSnapshot;
+    return {
+      ...(parsed as Omit<ActiveSessionSnapshot, "version" | "execution">),
+      version: 2,
+      execution: parsed.execution && typeof parsed.execution === "object" ? parsed.execution : {},
+      reviews: parsed.reviews && typeof parsed.reviews === "object" ? parsed.reviews : {},
+      trainedSeconds: Number.isFinite(parsed.trainedSeconds)
+        ? Math.max(0, Number(parsed.trainedSeconds))
+        : Math.max(0, Number(parsed.elapsed)),
+    };
   } catch { return null; }
 };
 
 type TimelineItem = readonly [string, string, string, WorkoutBlock];
 type TodayTimingMode = "shorter" | "reallocate";
 type LabTrack = "lsit" | "planche" | "pushing" | "support";
+
+const reviewableCategories = new Set<Category>([
+  "Pre-Handstand",
+  "Handstand",
+  "Abs",
+  "Core",
+  "Calisthenics",
+  "Conditioning",
+]);
 
 const labTrackLabels: Record<LabTrack, string> = {
   lsit: "L-Sit / Compression",
@@ -438,7 +467,7 @@ function ExerciseCard({
   const substituted = requested.id !== exercise.id;
   return (
     <motion.article layout className="exercise-card" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-      <div className="exercise-visual"><ExerciseDemo exercise={exercise} /></div>
+      <div className="exercise-visual"><ExerciseDemo exercise={exercise} deferOffscreen /></div>
       <div className="exercise-copy">
         <div className="exercise-heading">
           <span className={`category-tag ${categoryClass[exercise.category]}`}>{exercise.category}</span>
@@ -558,17 +587,27 @@ export default function Home() {
   const [running, setRunning] = useState(false);
   const [complete, setComplete] = useState(false);
   const [activeSessionModified, setActiveSessionModified] = useState(false);
-  const [sessionReviews, setSessionReviews] = useState<Record<string, ExerciseReview>>({});
+  const [sessionReviews, setSessionReviews] = useState<Partial<Record<string, ExerciseReview>>>({});
   const [pendingReview, setPendingReview] = useState<PendingReview | null>(null);
+  const [reviewSaving, setReviewSaving] = useState(false);
   const [recoverySnapshot, setRecoverySnapshot] = useState<ActiveSessionSnapshot | null>(null);
+  const [activeSessionIdentity, setActiveSessionIdentity] = useState<{ ownerId: string; saveMode: SaveMode } | null>(null);
   const anchorRef = useRef(0);
   const elapsedBaseRef = useRef(0);
+  const trainedAnchorRef = useRef(0);
+  const trainedSecondsRef = useRef(0);
+  const executionCursorRef = useRef(0);
+  const executionRef = useRef<Record<string, number>>({});
   const lastIntervalRef = useRef(-1);
   const completionRecordedRef = useRef(false);
   const customGenerationRef = useRef(0);
   const audioRef = useRef<AudioContext | null>(null);
   const wakeLockRef = useRef<{ release: () => Promise<void>; released: boolean } | null>(null);
   const profileRef = useRef<ProfileRecord | null>(null);
+  const profileContextGenerationRef = useRef(0);
+  const playerRef = useRef<HTMLElement>(null);
+  const endWorkoutEarlyRef = useRef<() => void>(() => undefined);
+  const playerTitleId = useId();
   profileRef.current = profile;
 
   const day = workouts.find((item) => item.day === settings.selectedDay) ?? workouts[0];
@@ -589,6 +628,7 @@ export default function Home() {
   const currentAssessmentQuestions = useMemo(() => assessmentQuestions(assessmentDraft), [assessmentDraft]);
   const currentAssessmentQuestion = currentAssessmentQuestions[0];
   const currentAssessmentProgress = useMemo(() => assessmentProgress(assessmentDraft), [assessmentDraft]);
+  const assessmentSuggestedLevel = useMemo(() => suggestedWorkoutLevel(assessmentDraft), [assessmentDraft]);
 
   const slots = useMemo(
     () => slotsForVariant(variant, exercises, includeLab),
@@ -660,10 +700,17 @@ export default function Home() {
       setProfiles(items);
       const lastId = localStorage.getItem("parallette25-last-profile");
       const last = items.find((item) => item.profileId === lastId) ?? null;
-      if (last) {
+      if (last && (!isSecuredProfile(last) || hasProfileSession(last.profileId))) {
         let verified = last;
         if (remoteSyncAvailable && hasProfileSession(last.profileId)) {
-          try { verified = await validateProfileSession(last.profileId) ?? last; }
+          try {
+            const validated = await validateProfileSession(last.profileId);
+            if (!validated) {
+              if (active) { openGuest(); setProfileOpen(true); }
+              return;
+            }
+            verified = validated;
+          }
           catch { /* Keep the local profile available while offline. */ }
         }
         if (active) void openProfile(verified);
@@ -710,18 +757,54 @@ export default function Home() {
     status: item.status,
   })).slice(-12).reverse();
 
-  const openProfile = async (next: ProfileRecord) => {
+  const clearAccountSecrets = () => {
+    setAccountPassword("");
+    setAccountPasswordConfirm("");
+    setAccountRecoveryInput("");
+    setAccountError("");
+  };
+  const clearAccountForm = () => {
+    clearAccountSecrets();
+    setAccountRecoveryCode("");
+  };
+  const resetEphemeralTrainingChoices = () => {
+    setTodayLevelByDay({});
+    setTodaySkippedByVariant({});
+    setTodayTimingMode("shorter");
+    setCustomFocuses(["core"]);
+    setCustomDifficulty("recommended");
+    setCustomSeconds(900);
+    setCustomPlan(null);
+    setCustomAdvanced(false);
+    setCustomPreferProgression(true);
+    setCustomPreferVariety(true);
+    setCustomBlocks({ warmup: true, preparation: true, skill: true, strength: true, cooldown: true, lab: false });
+    setUndoSwaps(null);
+    setSwapSlotId(null);
+    setEditSlotId(null);
+    setCustomizeTodayOpen(false);
+    setCustomOpen(false);
+  };
+
+  const openProfile = async (next: ProfileRecord, preserveRecoveryCode = false) => {
+    profileContextGenerationRef.current += 1;
+    resetEphemeralTrainingChoices();
+    if (!preserveRecoveryCode) clearAccountForm();
+    setNewProfileName("");
     const savedState = localStorage.getItem(scopedKey(STORAGE_KEY, next.profileId));
     const preferenceState = (next.preferences as { appState?: unknown }).appState;
-    const nextSettings = parseStoredAppState(savedState ?? preferenceState ?? defaultStoredAppState(), exercises);
+    // A signed account's merged profile is authoritative across devices. The
+    // scoped mirror is only a legacy/offline fallback, never a stale override.
+    const nextSettings = parseStoredAppState(
+      isSecuredProfile(next)
+        ? preferenceState ?? savedState ?? defaultStoredAppState()
+        : savedState ?? preferenceState ?? defaultStoredAppState(),
+      exercises,
+    );
     nextSettings.selectedDay = next.nextProgramDay >= 1 && next.nextProgramDay <= 5 ? next.nextProgramDay : nextSettings.selectedDay;
     nextSettings.readiness = { ...nextSettings.readiness, ...next.readiness };
     setSettings(nextSettings);
-    const savedHistory = localStorage.getItem(scopedKey(HISTORY_KEY, next.profileId));
-    if (savedHistory) {
-      try { setHistory(JSON.parse(savedHistory) as HistoryEntry[]); }
-      catch { setHistory(historyForProfile(next)); }
-    } else setHistory(historyForProfile(next));
+    setHistory(historyForProfile(next));
     setCustomEquipment(next.equipment.length ? next.equipment : ["parallettes", "floor", "wall"]);
     setTodayEquipment(next.equipment.length ? next.equipment : ["parallettes", "floor", "wall"]);
     const preferredSaveMode = (next.preferences as { saveMode?: SaveMode }).saveMode;
@@ -734,6 +817,10 @@ export default function Home() {
     setProfileOpen(false);
   };
   const openGuest = () => {
+    profileContextGenerationRef.current += 1;
+    resetEphemeralTrainingChoices();
+    clearAccountForm();
+    setNewProfileName("");
     const guestState = parseStoredAppState(localStorage.getItem(scopedKey(STORAGE_KEY)), exercises);
     setSettings(guestState);
     try { setHistory(JSON.parse(localStorage.getItem(scopedKey(HISTORY_KEY)) ?? "[]") as HistoryEntry[]); }
@@ -748,14 +835,16 @@ export default function Home() {
     setProfileOpen(false);
   };
   const selectExistingProfile = (next: ProfileRecord) => {
+    clearAccountForm();
+    if (isSecuredProfile(next) && !hasProfileSession(next.profileId)) {
+      setNewProfileName(next.username);
+      setAccountMode("signin");
+      setAccountError("Sign in to unlock this account on this device.");
+      setProfileOpen(true);
+      return;
+    }
     if (profile?.profileId !== next.profileId && !window.confirm(`Use “${next.username}” on this device?`)) return;
     void openProfile(next);
-  };
-  const clearAccountForm = () => {
-    setAccountPassword("");
-    setAccountPasswordConfirm("");
-    setAccountRecoveryInput("");
-    setAccountError("");
   };
   const showRecoveryCode = (code?: string) => {
     if (!code) return;
@@ -772,9 +861,9 @@ export default function Home() {
       const result = await registerProfile(name, accountPassword);
       showRecoveryCode(result.recoveryCode);
       setNewProfileName("");
-      clearAccountForm();
+      clearAccountSecrets();
       setProfiles(await listProfiles());
-      await openProfile(result.profile);
+      await openProfile(result.profile, true);
       setProfileOpen(true);
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "The account could not be created.");
@@ -803,9 +892,9 @@ export default function Home() {
     try {
       const result = await claimLegacyProfile(profile, accountPassword);
       showRecoveryCode(result.recoveryCode);
-      clearAccountForm();
+      clearAccountSecrets();
       setProfiles(await listProfiles());
-      await openProfile(result.profile);
+      await openProfile(result.profile, true);
       setProfileOpen(true);
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "This profile could not be secured.");
@@ -820,10 +909,10 @@ export default function Home() {
     try {
       const result = await recoverAccount(name, accountRecoveryInput, accountPassword);
       showRecoveryCode(result.recoveryCode);
-      clearAccountForm();
+      clearAccountSecrets();
       setNewProfileName("");
       setProfiles(await listProfiles());
-      await openProfile(result.profile);
+      await openProfile(result.profile, true);
       setProfileOpen(true);
     } catch (error) {
       setAccountError(error instanceof Error ? error.message : "Recovery failed.");
@@ -868,6 +957,14 @@ export default function Home() {
       const next = await syncProfile(profile);
       profileRef.current = next;
       setProfile(next);
+      setHistory(historyForProfile(next));
+      const syncedState = (next.preferences as { appState?: unknown }).appState;
+      if (syncedState) {
+        const nextSettings = parseStoredAppState(syncedState, exercises);
+        nextSettings.selectedDay = next.nextProgramDay;
+        nextSettings.readiness = { ...nextSettings.readiness, ...next.readiness };
+        setSettings(nextSettings);
+      }
       await refreshProfiles(next.profileId);
       setSyncStatus(next.pendingSync ? "error" : "saved");
     } catch { setSyncStatus("error"); }
@@ -875,32 +972,109 @@ export default function Home() {
   const importProfileFile = async (file: File) => {
     const imported = importProfile(await file.text());
     if (!imported) { window.alert("That file is not a valid Parallette25 backup."); return; }
-    if (profile && !window.confirm(`Replace ${profile.username} with the imported backup? A safety copy will download first.`)) return;
-    if (profile) downloadText(`parallette25-${profile.username}-safety.json`, exportProfile(profile));
-    const replacement = profile ? { ...imported, profileId: profile.profileId } : imported;
-    await saveProfile(replacement);
-    await refreshProfiles(replacement.profileId);
+    const replaceAuthenticated = Boolean(profile && hasProfileSession(profile.profileId) && window.confirm(
+      `Replace the training data inside signed-in account “${profile.username}”? A safety copy downloads first.\n\nChoose Cancel to import this backup as a separate local profile instead.`,
+    ));
+    let replacement: ProfileRecord;
+    if (replaceAuthenticated && profile) {
+      downloadText(`parallette25-${profile.username}-safety.json`, exportProfile(profile));
+      replacement = {
+        ...imported,
+        profileId: profile.profileId,
+        username: profile.username,
+        accountSecured: profile.accountSecured,
+        revision: profile.revision,
+        createdAt: profile.createdAt,
+        lastSyncedAt: profile.lastSyncedAt,
+      };
+    } else {
+      const baseName = imported.username.trim() || "Imported athlete";
+      const usedNames = new Set(profiles.map((item) => item.username.toLocaleLowerCase()));
+      let username = baseName;
+      for (let suffix = 2; usedNames.has(username.toLocaleLowerCase()); suffix += 1) username = `${baseName} ${suffix}`.slice(0, 32);
+      const { accountSecured: _accountSecured, lastSyncedAt: _lastSyncedAt, syncError: _syncError, ...localBackup } = imported;
+      replacement = {
+        ...localBackup,
+        profileId: globalThis.crypto?.randomUUID?.() ?? `profile-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        username,
+        revision: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        pendingSync: false,
+      };
+    }
+    const updated = await saveProfile(replacement);
+    setProfiles(await listProfiles());
+    await openProfile(updated);
   };
   const resetCurrentProfile = async () => {
     if (!profile || !window.confirm(`Reset all training progress for ${profile.username}? This keeps the profile name and preferences.`)) return;
+    const profileId = profile.profileId;
+    const storedSession = parseActiveSession(localStorage.getItem(ACTIVE_SESSION_KEY));
+    if (storedSession?.ownerId === profileId) localStorage.removeItem(ACTIVE_SESSION_KEY);
+    if (recoverySnapshot?.ownerId === profileId) setRecoverySnapshot(null);
+    if (activeSessionIdentity?.ownerId === profileId) {
+      setRunning(false);
+      setPlayerOpen(false);
+      setComplete(false);
+      setActivePlan(null);
+      setTimerPosition(null);
+      setPendingReview(null);
+      setSessionReviews({});
+      setActiveSessionIdentity(null);
+      executionRef.current = {};
+      executionCursorRef.current = 0;
+      trainedSecondsRef.current = 0;
+    }
+    const resetAt = new Date().toISOString();
     const startingAssessment = emptyStartingAssessment();
-    await saveProfile({ ...profile, history: [], readiness: {}, readinessUpdatedAt: {}, progression: {}, nextProgramDay: 1, preferences: { ...profile.preferences, startingAssessment } });
+    const resetSettings: StoredAppState = {
+      ...settings,
+      selectedDay: 1,
+      readiness: {},
+      recentExerciseIds: [],
+      cleanTargetSessions: {},
+      feedbackByExercise: {},
+    };
+    setSettings(resetSettings);
     setAssessmentDraft(startingAssessment);
     setHistory([]);
-    await refreshProfiles(profile.profileId);
+    setTodayLevelByDay({});
+    setTodaySkippedByVariant({});
+    localStorage.setItem(scopedKey(STORAGE_KEY, profile.profileId), JSON.stringify(resetSettings));
+    localStorage.setItem(scopedKey(HISTORY_KEY, profile.profileId), "[]");
+    const resetProfile = {
+      ...resetProfileTraining(profile, resetAt),
+      preferences: {
+        ...profile.preferences,
+        startingAssessment,
+        appState: resetSettings,
+        appStateUpdatedAt: resetAt,
+      },
+    };
+    profileRef.current = resetProfile;
+    setProfile(resetProfile);
+    const updated = await saveProfile(resetProfile);
+    profileRef.current = updated;
+    setProfile(updated);
+    await refreshProfiles(updated.profileId);
   };
   const removeCurrentProfile = async () => {
     if (!profile) return;
+    if (isSecuredProfile(profile) && !hasProfileSession(profile.profileId)) {
+      setNewProfileName(profile.username);
+      setAccountMode("signin");
+      setAccountError("Sign in first to permanently delete this cloud account.");
+      setProfileOpen(true);
+      return;
+    }
     const phrase = window.prompt(`Type ${profile.username} to permanently delete this profile.`);
     if (phrase !== profile.username) return;
     try {
       const password = hasProfileSession(profile.profileId) ? window.prompt("Enter your password to delete this account permanently.") ?? undefined : undefined;
       if (hasProfileSession(profile.profileId) && !password) return;
       await deleteProfile(profile.profileId, password);
-      profileRef.current = null;
-      setProfile(null);
-      setHistory([]);
-      localStorage.removeItem("parallette25-last-profile");
+      openGuest();
       await refreshProfiles();
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "The profile could not be deleted. Please reconnect and try again.");
@@ -908,7 +1082,11 @@ export default function Home() {
   };
   const signOutCurrentProfile = async () => {
     if (!profile) return;
+    const profileId = profile.profileId;
+    clearAccountForm();
     await signOutProfile(profile.profileId);
+    localStorage.removeItem(scopedKey(STORAGE_KEY, profileId));
+    localStorage.removeItem(scopedKey(HISTORY_KEY, profileId));
     openGuest();
     setProfiles(await listProfiles());
   };
@@ -944,6 +1122,8 @@ export default function Home() {
   const startStartingAssessment = (restart = false) => {
     if (!profile) {
       setAccountError("Create an account or sign in before setting a permanent starting level.");
+      setReadinessOpen(false);
+      setAssessmentOpen(false);
       setProfileOpen(true);
       return;
     }
@@ -965,10 +1145,57 @@ export default function Home() {
     if (!question || assessmentBusy) return;
     void persistStartingAssessment(answerAssessmentQuestion(assessmentDraft, question, answer, skillProgressionPaths));
   };
-  const applyStartingAssessment = () => {
-    if (assessmentBusy || assessmentDraft.status !== "review") return;
-    const next = { ...assessmentDraft, status: "completed" as const, appliedPlacements: { ...assessmentDraft.placements }, updatedAt: new Date().toISOString() };
-    void persistStartingAssessment(next).then(() => setAssessmentOpen(false));
+  const undoAssessmentAnswer = () => {
+    if (assessmentBusy || assessmentDraft.answerOrder.length === 0) return;
+    void persistStartingAssessment(undoLastAssessmentAnswer(assessmentDraft, skillProgressionPaths));
+  };
+  const editAssessmentTrack = (trackId: string) => {
+    if (assessmentBusy) return;
+    void persistStartingAssessment(reopenAssessmentTrack(assessmentDraft, trackId));
+  };
+  const restartAssessmentFromScratch = () => {
+    if (assessmentBusy || !window.confirm("Restart all assessment answers? Your previously applied starting points remain active until you apply the new result.")) return;
+    void persistStartingAssessment(restartStartingAssessment(assessmentDraft));
+  };
+  const applyStartingAssessment = async () => {
+    const current = profileRef.current;
+    if (!current || assessmentBusy || assessmentDraft.status !== "review") return;
+    const changedAt = new Date().toISOString();
+    const next = { ...assessmentDraft, status: "completed" as const, appliedPlacements: { ...assessmentDraft.placements }, updatedAt: changedAt };
+    const nextSettings: StoredAppState = {
+      ...settings,
+      levelsByDay: Object.fromEntries([1, 2, 3, 4, 5].map((dayNumber) => [String(dayNumber), assessmentSuggestedLevel])) as StoredAppState["levelsByDay"],
+      ...(assessmentSuggestedLevel === "L1" ? { labByDay: { "1": false, "2": false, "3": false, "4": false, "5": false } } : {}),
+    };
+    profileContextGenerationRef.current += 1;
+    setTodayLevelByDay({});
+    setSettings(nextSettings);
+    setAssessmentDraft(next);
+    localStorage.setItem(scopedKey(STORAGE_KEY, current.profileId), JSON.stringify(nextSettings));
+    const optimistic = {
+      ...current,
+      preferences: {
+        ...current.preferences,
+        startingAssessment: next,
+        appState: nextSettings,
+        appStateUpdatedAt: changedAt,
+      },
+    };
+    profileRef.current = optimistic;
+    setProfile(optimistic);
+    setAssessmentBusy(true);
+    try {
+      const updated = await saveProfile(optimistic);
+      profileRef.current = updated;
+      setProfile(updated);
+      setProfiles((items) => items.map((item) => item.profileId === updated.profileId ? updated : item));
+      setSyncStatus(updated.pendingSync ? "offline" : "saved");
+      setAssessmentOpen(false);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The starting point could not be saved. Please try again.");
+    } finally {
+      setAssessmentBusy(false);
+    }
   };
   const generateCustom = () => {
     customGenerationRef.current += 1;
@@ -1017,7 +1244,9 @@ export default function Home() {
   useEffect(() => {
     if (!hydrated || !profile) return;
     const profileId = profile.profileId;
+    const contextGeneration = profileContextGenerationRef.current;
     const timer = window.setTimeout(() => {
+      if (profileContextGenerationRef.current !== contextGeneration) return;
       const activeProfile = profileRef.current;
       if (!activeProfile || activeProfile.profileId !== profileId) return;
       const readinessUpdatedAt = { ...activeProfile.readinessUpdatedAt };
@@ -1030,8 +1259,9 @@ export default function Home() {
         readiness: settings.readiness,
         readinessUpdatedAt,
         equipment: activeProfile.equipment,
-        preferences: { ...activeProfile.preferences, appState: settings, saveMode },
+        preferences: { ...activeProfile.preferences, appState: settings, appStateUpdatedAt: changedAt, saveMode },
       }).then((updated) => {
+        if (profileContextGenerationRef.current !== contextGeneration) return;
         profileRef.current = updated;
         setProfiles((current) => current.map((item) => item.profileId === profileId ? updated : item));
         setProfile((current) => current?.profileId === profileId ? updated : current);
@@ -1065,6 +1295,34 @@ export default function Home() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [profile?.pendingSync, profile?.profileId, profile?.updatedAt]);
+
+  // Returning to the app is a deliberate sync point even when this device has
+  // no pending edits; otherwise sessions completed on another phone can remain
+  // invisible until a full reload.
+  useEffect(() => {
+    if (!profile?.profileId || !remoteSyncAvailable || !hasProfileSession(profile.profileId)) return;
+    let cancelled = false;
+    const pullLatest = () => {
+      if (document.visibilityState !== "visible" || !navigator.onLine || !profileRef.current) return;
+      void syncProfile(profileRef.current).then((updated) => {
+        if (cancelled) return;
+        profileRef.current = updated;
+        setProfile(updated);
+        setProfiles((current) => current.map((item) => item.profileId === updated.profileId ? updated : item));
+        setHistory(historyForProfile(updated));
+        const syncedState = (updated.preferences as { appState?: unknown }).appState;
+        if (syncedState) {
+          const nextSettings = parseStoredAppState(syncedState, exercises);
+          nextSettings.selectedDay = updated.nextProgramDay;
+          nextSettings.readiness = { ...nextSettings.readiness, ...updated.readiness };
+          setSettings(nextSettings);
+        }
+        setSyncStatus(updated.pendingSync ? "error" : "saved");
+      });
+    };
+    document.addEventListener("visibilitychange", pullLatest);
+    return () => { cancelled = true; document.removeEventListener("visibilitychange", pullLatest); };
+  }, [profile?.profileId]);
 
   const beep = useCallback((high = false) => {
     if (!settings.soundOn) return;
@@ -1119,16 +1377,42 @@ export default function Home() {
   const elapsedFromClock = useCallback(() => elapsedBaseRef.current +
     (running ? (Date.now() - anchorRef.current) / 1000 : 0), [running]);
 
+  const trainedSecondsFromClock = useCallback(() => trainedSecondsRef.current +
+    (running ? Math.max(0, (Date.now() - trainedAnchorRef.current) / 1000) : 0), [running]);
+
+  const commitTrainedTime = useCallback(() => {
+    trainedSecondsRef.current = trainedSecondsFromClock();
+    trainedAnchorRef.current = Date.now();
+    return trainedSecondsRef.current;
+  }, [trainedSecondsFromClock]);
+
+  const creditExecutionTo = useCallback((elapsed: number) => {
+    if (!activePlan) return;
+    const bounded = Math.max(0, Math.min(activePlan.totalSeconds, elapsed));
+    if (bounded > executionCursorRef.current) {
+      executionRef.current = addExecutionRange(
+        activePlan,
+        executionRef.current,
+        executionCursorRef.current,
+        bounded,
+      );
+    }
+    executionCursorRef.current = bounded;
+  }, [activePlan]);
+
   useEffect(() => {
     if (!running || !activePlan || complete) return;
     const update = () => {
-      const position = locateTimerPosition(activePlan, elapsedBaseRef.current + (Date.now() - anchorRef.current) / 1000);
+      const elapsed = elapsedBaseRef.current + (Date.now() - anchorRef.current) / 1000;
+      creditExecutionTo(elapsed);
+      const position = locateTimerPosition(activePlan, elapsed);
       setTimerPosition(position);
       if (position.intervalIndex !== lastIntervalRef.current) {
         lastIntervalRef.current = position.intervalIndex;
         if (position.interval) beep(position.interval.kind === "work");
       }
       if (position.complete) {
+        commitTrainedTime();
         elapsedBaseRef.current = activePlan.totalSeconds;
         setRunning(false);
         setComplete(true);
@@ -1138,47 +1422,101 @@ export default function Home() {
     update();
     const timer = window.setInterval(update, 200);
     return () => window.clearInterval(timer);
-  }, [activePlan, beep, complete, running]);
+  }, [activePlan, beep, commitTrainedTime, complete, creditExecutionTo, running]);
 
-  const persistActiveSession = useCallback(() => {
-    if (!playerOpen || !activePlan) return;
+  const persistActiveSession = useCallback((runningOverride = running): ActiveSessionSnapshot | null => {
+    if (!playerOpen || !activePlan) return null;
+    const elapsed = Math.max(0, Math.min(activePlan.totalSeconds, elapsedFromClock()));
+    creditExecutionTo(elapsed);
+    const identity = activeSessionIdentity ?? { ownerId: profile?.profileId ?? "guest", saveMode };
     const snapshot: ActiveSessionSnapshot = {
-      version: 1,
-      ownerId: profile?.profileId ?? "guest",
+      version: 2,
+      ownerId: identity.ownerId,
       plan: activePlan,
-      elapsed: Math.max(0, Math.min(activePlan.totalSeconds, elapsedFromClock())),
-      running,
+      elapsed,
+      running: runningOverride,
       savedAt: Date.now(),
       modified: activeSessionModified,
-      saveMode,
+      saveMode: identity.saveMode,
       pendingReview,
       reviews: sessionReviews,
+      execution: executionRef.current,
+      trainedSeconds: trainedSecondsFromClock(),
     };
     localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(snapshot));
-  }, [activePlan, activeSessionModified, elapsedFromClock, pendingReview, playerOpen, profile?.profileId, running, saveMode, sessionReviews]);
+    return snapshot;
+  }, [activePlan, activeSessionIdentity, activeSessionModified, creditExecutionTo, elapsedFromClock, pendingReview, playerOpen, profile?.profileId, running, saveMode, sessionReviews, trainedSecondsFromClock]);
 
   useEffect(() => {
     if (!playerOpen || !activePlan) return;
     persistActiveSession();
     const timer = window.setInterval(persistActiveSession, 1000);
-    window.addEventListener("pagehide", persistActiveSession);
+    const onPageHide = () => { persistActiveSession(); };
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener("pagehide", persistActiveSession);
+      window.removeEventListener("pagehide", onPageHide);
     };
   }, [activePlan, persistActiveSession, playerOpen]);
 
-  const recordSessionOutcome = useCallback((
+  useEffect(() => {
+    const onAccountSessionChange = (event: StorageEvent) => {
+      if (event.key !== profileSessionStorageKey) return;
+      const currentProfile = profileRef.current;
+      if (!currentProfile || !isSecuredProfile(currentProfile) || hasProfileSession(currentProfile.profileId)) return;
+
+      if (playerOpen && activeSessionIdentity?.ownerId === currentProfile.profileId) {
+        const lockedSnapshot = persistActiveSession(false);
+        if (lockedSnapshot) setRecoverySnapshot({ ...lockedSnapshot, running: false });
+        setRunning(false);
+        setPlayerOpen(false);
+        setComplete(false);
+        setActivePlan(null);
+        setTimerPosition(null);
+        setPendingReview(null);
+        setSessionReviews({});
+        setActiveSessionIdentity(null);
+        executionRef.current = {};
+        executionCursorRef.current = 0;
+        trainedSecondsRef.current = 0;
+      }
+
+      // The preserved snapshot remains locked to its original owner. Guest
+      // state is loaded only after it has been parked, so no history or review
+      // can leak into the disposable profile.
+      openGuest();
+      setProfileOpen(true);
+      void listProfiles().then(setProfiles);
+    };
+    window.addEventListener("storage", onAccountSessionChange);
+    return () => window.removeEventListener("storage", onAccountSessionChange);
+  }, [activeSessionIdentity?.ownerId, persistActiveSession, playerOpen]);
+
+  const recordSessionOutcome = useCallback(async (
     plan: SessionPlan,
     status: "complete" | "modified" | "partial",
     performedSeconds: number,
     performedExerciseIds: string[],
-    reviews: Record<string, ExerciseReview>,
-  ) => {
-    if (completionRecordedRef.current) return;
-    completionRecordedRef.current = true;
+    reviews: Partial<Record<string, ExerciseReview>>,
+  ): Promise<boolean> => {
+    if (completionRecordedRef.current) return false;
     const activeDay = workouts.find((item) => item.day === plan.day) ?? day;
     const exerciseIds = Array.from(new Set(performedExerciseIds));
+    const participatedExerciseIds = performedExerciseIdsFromExecution(plan, executionRef.current);
+    const skippedExerciseIds = Array.from(new Set(plan.intervals.flatMap((interval) =>
+      interval.kind === "work" && interval.exerciseId && !participatedExerciseIds.includes(interval.exerciseId)
+        ? [interval.exerciseId]
+        : [])));
+    const ratedReviews = Object.fromEntries(Object.entries(reviews).filter((entry): entry is [string, ExerciseReview] => Boolean(entry[1])));
+    const identity = activeSessionIdentity ?? { ownerId: profile?.profileId ?? "guest", saveMode };
+    const sessionMode = identity.saveMode;
+    const currentProfile = profileRef.current;
+    const ownerProfile = currentProfile?.profileId === identity.ownerId ? currentProfile : null;
+    if (sessionMode !== "guest" && !ownerProfile) {
+      window.alert("This workout belongs to another signed-in profile. Switch back to that athlete before saving the review.");
+      return false;
+    }
+    completionRecordedRef.current = true;
     const entry: HistoryEntry = {
       id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${plan.day}`,
       completedAt: new Date().toISOString(),
@@ -1187,41 +1525,69 @@ export default function Home() {
       title: plan.day === 0 ? "Custom Session" : activeDay.title,
       seconds: performedSeconds,
       lab: plan.includeLab,
-      mode: saveMode,
+      mode: sessionMode,
       status,
-      exerciseReviews: reviews,
+      exerciseReviews: ratedReviews,
     };
-    if (saveMode !== "guest") {
+    if (ownerProfile && sessionMode !== "guest") {
       setHistory((previous) => [entry, ...previous].slice(0, 12));
       setSettings((previous) => ({
         ...previous,
         recentExerciseIds: [...previous.recentExerciseIds, ...exerciseIds].slice(-50),
         feedbackByExercise: {
           ...previous.feedbackByExercise,
-          ...Object.fromEntries(Object.entries(reviews).map(([id, review]) => [id, review.feedback])),
+          ...Object.fromEntries(Object.entries(ratedReviews).map(([id, review]) => [id, review.feedback])),
         },
       }));
     }
-    if (profile && saveMode !== "guest") {
-      const progression = applySessionProgression(profile.progression, exerciseIds, reviews, saveMode);
-      const nextProgramDay = nextProgramDayAfterSession(profile.nextProgramDay, plan.day, status, saveMode);
-      const nextProfile = { ...profile, nextProgramDay, history: [...profile.history, { ...entry, mode: saveMode, status, exerciseIds, completedExerciseIds: exerciseIds, exerciseReviews: reviews }], progression };
+    if (ownerProfile && sessionMode !== "guest") {
+      const progression = applySessionProgression(ownerProfile.progression, exerciseIds, ratedReviews, sessionMode);
+      const meaningfulProgrammeWork = hasMeaningfulProgrammeWork(plan, executionRef.current);
+      const nextProgramDay = nextProgramDayAfterSession(ownerProfile.nextProgramDay, plan.day, status, sessionMode, meaningfulProgrammeWork);
+      const nextProfile = {
+        ...ownerProfile,
+        nextProgramDay,
+        history: [...ownerProfile.history, {
+          ...entry,
+          mode: sessionMode,
+          status,
+          exerciseIds: participatedExerciseIds,
+          completedExerciseIds: exerciseIds,
+          skippedExerciseIds,
+          advancesProgram: sessionMode === "normal" && status !== "partial" && plan.day > 0 && meaningfulProgrammeWork,
+          exerciseReviews: ratedReviews,
+        }],
+        progression,
+      };
       profileRef.current = nextProfile;
       setProfile(nextProfile);
-      if (saveMode === "normal" && status !== "partial" && plan.day > 0) {
+      if (sessionMode === "normal" && status !== "partial" && plan.day > 0 && meaningfulProgrammeWork) {
         setSettings((previous) => ({ ...previous, selectedDay: nextProgramDay }));
       }
-      void saveProfile(nextProfile).then((updated) => { profileRef.current = updated; setProfile(updated); });
+      try {
+        const updated = await saveProfile(nextProfile);
+        profileRef.current = updated;
+        setProfile(updated);
+        setProfiles((items) => items.map((item) => item.profileId === updated.profileId ? updated : item));
+        setHistory(historyForProfile(updated));
+        setSyncStatus(updated.pendingSync ? "offline" : "saved");
+      } catch (error) {
+        completionRecordedRef.current = false;
+        window.alert(error instanceof Error ? error.message : "The workout could not be saved. Your review is still open; please try again.");
+        return false;
+      }
     }
-  }, [day, profile, saveMode]);
+    return true;
+  }, [activeSessionIdentity, day, profile?.profileId, saveMode]);
 
   const openSessionReview = useCallback((
     plan: SessionPlan,
     status: PendingReview["status"],
     performedSeconds: number,
   ) => {
-    const exerciseIds = reviewableExerciseIdsFor(plan, performedSeconds);
-    setSessionReviews(Object.fromEntries(exerciseIds.map((id) => [id, { feedback: "right", achieved: false }] as const)));
+    const exerciseIds = reviewableExerciseIdsFromExecution(plan, executionRef.current)
+      .filter((exerciseId) => reviewableCategories.has(exercises[exerciseId]?.category));
+    setSessionReviews({});
     setPendingReview({ status, performedSeconds: Math.floor(performedSeconds), exerciseIds });
     setRunning(false);
     setComplete(true);
@@ -1229,12 +1595,12 @@ export default function Home() {
 
   useEffect(() => {
     if (!complete || !activePlan || pendingReview || completionRecordedRef.current) return;
-    openSessionReview(activePlan, activeSessionModified ? "modified" : "complete", activePlan.totalSeconds);
-  }, [activePlan, activeSessionModified, complete, openSessionReview, pendingReview]);
+    openSessionReview(activePlan, activeSessionModified ? "modified" : "complete", trainedSecondsFromClock());
+  }, [activePlan, activeSessionModified, complete, openSessionReview, pendingReview, trainedSecondsFromClock]);
 
   const setDay = (nextDay: DayNumber) => setSettings((previous) => ({ ...previous, selectedDay: nextDay }));
 
-  const setLevel = (nextLevel: DifficultyLevel) => {
+  const saveDefaultLevel = (nextLevel: DifficultyLevel) => {
     setTodayLevelByDay((previous) => {
       const next = { ...previous };
       delete next[day.day];
@@ -1376,15 +1742,24 @@ export default function Home() {
   };
 
   const startWorkout = () => {
+    if (previewPlan.totalSeconds <= 0 || previewPlan.intervals.length === 0) {
+      window.alert("Add at least one exercise before starting this workout.");
+      return;
+    }
     localStorage.removeItem(ACTIVE_SESSION_KEY);
     setRecoverySnapshot(null);
     setActivePlan(previewPlan);
     setTimerPosition(locateTimerPosition(previewPlan, 0));
     elapsedBaseRef.current = 0;
+    trainedSecondsRef.current = 0;
+    trainedAnchorRef.current = Date.now();
+    executionCursorRef.current = 0;
+    executionRef.current = {};
     anchorRef.current = Date.now();
     lastIntervalRef.current = -1;
     completionRecordedRef.current = false;
     setSessionReviews({});
+    setActiveSessionIdentity({ ownerId: profile?.profileId ?? "guest", saveMode });
     setPendingReview(null);
     setActiveSessionModified(previewModified || previewPlan.totalSeconds !== basePreviewPlan.totalSeconds);
     setComplete(false);
@@ -1404,25 +1779,32 @@ export default function Home() {
       const slotId = (block === "warmup" ? `warmup-${Math.min(3, station)}`
         : block === "pre" ? `pre-${Math.min(2, station)}`
         : block === "handstand" ? "handstand-1"
-        : block === "lab" ? "lab-1"
+        : block === "lab" ? "lab-a"
         : block === "cooldown" ? `cooldown-${Math.min(2, station)}`
         : `core-${Math.min(4, station)}`) as StableSlotId;
       intervals.push({ id: `custom-${index}-work`, kind: "work", duration: item.work, block, slotId, exerciseId: item.exerciseId, label: exercises[item.exerciseId]?.name ?? item.exerciseId, round: item.round, rounds: item.rounds });
       if (item.rest > 0) intervals.push({ id: `custom-${index}-rest`, kind: "rest", duration: item.rest, block, slotId, label: "Rest", round: item.round, rounds: item.rounds });
     });
     const plan: SessionPlan = { schemaVersion: 1, day: 0, level: customDifficulty === "easy" ? "L1" : customDifficulty === "hard" ? "L3" : "L2", includeLab: customPlan.items.some((item) => item.block === "lab"), intervals, totalSeconds: intervals.reduce((sum, interval) => sum + interval.duration, 0) };
-    setActivePlan(plan); setTimerPosition(locateTimerPosition(plan, 0)); elapsedBaseRef.current = 0; anchorRef.current = Date.now(); lastIntervalRef.current = -1; completionRecordedRef.current = false; setSessionReviews({}); setPendingReview(null); setActiveSessionModified(false); setComplete(false); setCustomOpen(false); setPlayerOpen(true); setRunning(true); beep(true);
+    if (plan.totalSeconds <= 0 || plan.intervals.length === 0) {
+      window.alert("The selected options did not produce a trainable interval. Add a training block or exercise and generate again.");
+      return;
+    }
+    setActivePlan(plan); setTimerPosition(locateTimerPosition(plan, 0)); elapsedBaseRef.current = 0; trainedSecondsRef.current = 0; trainedAnchorRef.current = Date.now(); executionCursorRef.current = 0; executionRef.current = {}; anchorRef.current = Date.now(); lastIntervalRef.current = -1; completionRecordedRef.current = false; setSessionReviews({}); setActiveSessionIdentity({ ownerId: profile?.profileId ?? "guest", saveMode }); setPendingReview(null); setActiveSessionModified(false); setComplete(false); setCustomOpen(false); setPlayerOpen(true); setRunning(true); beep(true);
   };
 
   const toggleTimer = () => {
     if (!activePlan) return;
     if (running) {
       const elapsed = elapsedFromClock();
+      creditExecutionTo(elapsed);
+      commitTrainedTime();
       elapsedBaseRef.current = elapsed;
       setTimerPosition(locateTimerPosition(activePlan, elapsed));
       setRunning(false);
     } else {
       anchorRef.current = Date.now();
+      trainedAnchorRef.current = Date.now();
       setRunning(true);
       beep(true);
     }
@@ -1430,13 +1812,17 @@ export default function Home() {
 
   const jump = (direction: -1 | 1) => {
     if (!activePlan || !timerPosition) return;
+    creditExecutionTo(elapsedFromClock());
+    commitTrainedTime();
     const currentIndex = Math.min(timerPosition.intervalIndex, activePlan.intervals.length - 1);
     const nextIndex = Math.max(0, Math.min(activePlan.intervals.length - 1, currentIndex + direction));
     const elapsed = activePlan.intervals.slice(0, nextIndex).reduce((sum, interval) => sum + interval.duration, 0);
     elapsedBaseRef.current = elapsed;
+    executionCursorRef.current = elapsed;
     anchorRef.current = Date.now();
     lastIntervalRef.current = nextIndex;
     setTimerPosition(locateTimerPosition(activePlan, elapsed));
+    setActiveSessionModified(true);
   };
 
   const current = timerPosition?.interval;
@@ -1450,25 +1836,42 @@ export default function Home() {
     : 0;
   const elapsedTotal = elapsedBefore + (timerPosition?.elapsedInInterval ?? 0);
   const progress = activePlan ? Math.min(100, (elapsedTotal / activePlan.totalSeconds) * 100) : 0;
+  const announcedSecond = Math.ceil(timerPosition?.remaining ?? 0);
+  const playerAnnouncement = current
+    ? `${current.kind === "work" ? "Work" : "Rest"}: ${current.label}.${[10, 5, 3, 2, 1].includes(announcedSecond) ? ` ${announcedSecond} seconds remaining.` : ""}`
+    : "";
 
   const endWorkoutEarly = () => {
     if (!activePlan || complete) {
       setRunning(false);
       setPlayerOpen(false);
+      setActiveSessionIdentity(null);
+      executionRef.current = {};
+      executionCursorRef.current = 0;
+      trainedSecondsRef.current = 0;
+      trainedAnchorRef.current = Date.now();
       localStorage.removeItem(ACTIVE_SESSION_KEY);
       return;
     }
-    const performedSeconds = Math.max(0, Math.min(activePlan.totalSeconds, Math.floor(elapsedFromClock())));
-    if (performedSeconds < 1 || performedExerciseIdsFor(activePlan, performedSeconds).length === 0) {
+    const timerElapsed = Math.max(0, Math.min(activePlan.totalSeconds, elapsedFromClock()));
+    creditExecutionTo(timerElapsed);
+    const performedSeconds = Math.max(0, Math.floor(commitTrainedTime()));
+    if (performedSeconds < 1 || performedExerciseIdsFromExecution(activePlan, executionRef.current).length === 0) {
       if (!window.confirm("End this workout before recording any exercise?")) return;
       setRunning(false);
       setPlayerOpen(false);
+      setActiveSessionIdentity(null);
+      executionRef.current = {};
+      executionCursorRef.current = 0;
+      trainedSecondsRef.current = 0;
+      trainedAnchorRef.current = Date.now();
       localStorage.removeItem(ACTIVE_SESSION_KEY);
       return;
     }
     if (!window.confirm("End this workout now? You can quickly review only the exercises completed so far. The partial session will not advance the five-day programme.")) return;
     openSessionReview(activePlan, "partial", performedSeconds);
   };
+  endWorkoutEarlyRef.current = endWorkoutEarly;
 
   const resumeRecoveredWorkout = (reviewNow = false) => {
     if (!recoverySnapshot) return;
@@ -1477,11 +1880,19 @@ export default function Home() {
       recoverySnapshot.plan.totalSeconds,
       recoverySnapshot.elapsed + (recoverySnapshot.running && recoveryGap <= 2 * 60 * 60 ? recoveryGap : 0),
     ));
+    const recoveredModified = recoverySnapshot.modified || elapsed > recoverySnapshot.elapsed + 1;
     setSaveMode(recoverySnapshot.saveMode);
+    setActiveSessionIdentity({ ownerId: recoverySnapshot.ownerId, saveMode: recoverySnapshot.saveMode });
     setActivePlan(recoverySnapshot.plan);
-    setActiveSessionModified(recoverySnapshot.modified);
+    setActiveSessionModified(recoveredModified);
     setSessionReviews(recoverySnapshot.reviews ?? {});
+    // A reload gap can advance the visible timer, but it is not proof that the
+    // athlete performed those intervals. Keep only evidence saved before exit.
+    executionRef.current = { ...(recoverySnapshot.execution ?? {}) };
+    executionCursorRef.current = elapsed;
     elapsedBaseRef.current = elapsed;
+    trainedSecondsRef.current = Math.max(0, recoverySnapshot.trainedSeconds);
+    trainedAnchorRef.current = Date.now();
     anchorRef.current = Date.now();
     lastIntervalRef.current = -1;
     completionRecordedRef.current = false;
@@ -1495,8 +1906,8 @@ export default function Home() {
     } else if (reviewNow || elapsed >= recoverySnapshot.plan.totalSeconds) {
       openSessionReview(
         recoverySnapshot.plan,
-        elapsed >= recoverySnapshot.plan.totalSeconds ? (recoverySnapshot.modified ? "modified" : "complete") : "partial",
-        elapsed,
+        elapsed >= recoverySnapshot.plan.totalSeconds ? (recoveredModified ? "modified" : "complete") : "partial",
+        recoverySnapshot.trainedSeconds,
       );
     } else {
       setPendingReview(null);
@@ -1509,7 +1920,53 @@ export default function Home() {
     if (!window.confirm("Discard this interrupted workout without saving it?")) return;
     localStorage.removeItem(ACTIVE_SESSION_KEY);
     setRecoverySnapshot(null);
+    setActiveSessionIdentity(null);
+    executionRef.current = {};
+    executionCursorRef.current = 0;
+    trainedSecondsRef.current = 0;
+    trainedAnchorRef.current = Date.now();
   };
+
+  useEffect(() => {
+    if (!playerOpen) return;
+    const panel = playerRef.current;
+    if (!panel) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const siblings = Array.from(panel.parentElement?.children ?? []).filter((item) => item !== panel) as HTMLElement[];
+    const siblingState = siblings.map((item) => ({
+      item,
+      inert: item.hasAttribute("inert"),
+      ariaHidden: item.getAttribute("aria-hidden"),
+    }));
+    siblings.forEach((item) => { item.setAttribute("inert", ""); item.setAttribute("aria-hidden", "true"); });
+    const focusable = () => Array.from(panel.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )).filter((item) => item.offsetParent !== null);
+    window.requestAnimationFrame(() => focusable()[0]?.focus());
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); endWorkoutEarlyRef.current(); return; }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) { event.preventDefault(); panel.focus(); return; }
+      const first = items[0];
+      const last = items.at(-1) as HTMLElement;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      siblingState.forEach(({ item, inert, ariaHidden }) => {
+        if (!inert) item.removeAttribute("inert");
+        if (ariaHidden === null) item.removeAttribute("aria-hidden");
+        else item.setAttribute("aria-hidden", ariaHidden);
+      });
+      previousFocus?.focus();
+    };
+  }, [playerOpen]);
 
   const sectionBlocks = sessionBlockOrder(includeLab) as readonly WorkoutBlock[];
 
@@ -1611,11 +2068,12 @@ export default function Home() {
             <p className="control-kicker">Today’s comfort level</p>
             <div className="level-options">
               {(["L1", "L2", "L3"] as DifficultyLevel[]).map((item) => (
-                <button type="button" className={`level-option ${level === item ? "active" : ""}`} aria-pressed={level === item} key={item} onClick={() => setLevel(item)}>
+                <button type="button" className={`level-option ${level === item ? "active" : ""}`} aria-pressed={level === item} key={item} onClick={() => setTodayLevel(item)}>
                   <span>{item}</span><strong>{levelLabels[item].name}</strong><small>{levelLabels[item].description}</small>
                 </button>
               ))}
             </div>
+            <div className="comfort-level-note"><span>{level === preferredLevel ? `${level} is your saved Day ${day.day} default.` : `${level} applies to this session only.`}</span>{level !== preferredLevel && <button type="button" onClick={() => saveDefaultLevel(level)}>Save {level} as Day {day.day} default</button>}</div>
           </div>
           <div className="session-options">
             <div className={`lab-panel ${level === "L1" ? "disabled" : ""}`}>
@@ -1736,6 +2194,18 @@ export default function Home() {
             </div>
           </Drawer>
         )}
+        {recoverySnapshot && !playerOpen && !profileOpen && recoverySnapshot.ownerId !== (profile?.profileId ?? "guest") && (
+          <Drawer title="Workout belongs to another profile" subtitle="The saved timer stays attached to the athlete who started it." onClose={discardRecoveredWorkout}>
+            <div className="recovery-panel">
+              <LockKeyhole />
+              <div><strong>{profiles.find((item) => item.profileId === recoverySnapshot.ownerId)?.username ?? "Another local profile"}</strong><span>Switch or sign in to that profile to resume. You can also discard this device-only timer.</span></div>
+            </div>
+            <div className="drawer-actions recovery-actions">
+              <button type="button" className="primary-button" onClick={() => setProfileOpen(true)}>Switch or sign in</button>
+              <button type="button" className="text-button danger-text" onClick={discardRecoveredWorkout}>Discard saved timer</button>
+            </div>
+          </Drawer>
+        )}
         {swapSlotId && (() => {
           const slot = slots.find((item) => item.id === swapSlotId);
           if (!slot) return null;
@@ -1799,7 +2269,19 @@ export default function Home() {
                 const checked = settings.readiness[item.id] === true;
                 const effective = ready[item.id] === true;
                 return (
-                  <button type="button" className={`readiness-check ${checked ? "checked" : ""}`} key={item.id} onClick={() => setSettings((previous) => ({ ...previous, readiness: { ...previous.readiness, [item.id]: !checked } }))}>
+                  <button
+                    type="button"
+                    className={`readiness-check ${checked ? "checked" : ""}`}
+                    key={item.id}
+                    aria-pressed={checked}
+                    onClick={() => {
+                      const needsSafetyConfirmation = ["G2_INVERSION", "G3_ENTRY", "G4_FREE_BAR", "G6_PLANCHE", "G7_PIKE_PUSH"].includes(item.id);
+                      if (!checked && needsSafetyConfirmation && !window.confirm(
+                        `Confirm ${item.label}\n\nOnly mark this ready if you can demonstrate every standard safely and with clean form:\n\n• ${item.standards.join("\n• ")}\n\nYou can turn it off at any time.`,
+                      )) return;
+                      setSettings((previous) => ({ ...previous, readiness: { ...previous.readiness, [item.id]: !checked } }));
+                    }}
+                  >
                     <i>{checked && <Check />}</i><span><strong>{item.label}{checked && !effective ? " • prerequisites still needed" : ""}</strong>{item.standards.join(" • ")}</span>
                   </button>
                 );
@@ -1841,7 +2323,7 @@ export default function Home() {
                   const tracks = assessmentTracks.filter((track) => track.section === section);
                   const completed = tracks.filter((track) => assessmentDraft.placements[track.pathLabel]).length;
                   const active = currentAssessmentQuestion?.track.section === section;
-                  return <div className={`${active ? "active" : ""} ${completed === tracks.length ? "complete" : ""}`} key={section}><i>{completed === tracks.length ? <Check /> : completed + 1}</i><span>{section}</span></div>;
+                  return <div className={`${active ? "active" : ""} ${completed === tracks.length ? "complete" : ""}`} key={section}><i>{completed === tracks.length ? <Check /> : `${completed}/${tracks.length}`}</i><span>{section}</span></div>;
                 })}
               </div>
 
@@ -1854,27 +2336,30 @@ export default function Home() {
                   <p className="assessment-target"><strong>Target:</strong> {exercise.target}</p>
                   <ul><li>{exercise.cues[0]}</li><li>{exercise.cues[1]}</li></ul>
                   <p className="assessment-honesty">Choose “Yes” only if you can meet the full target now with the form shown—not because you have tried it before.</p>
+                  <p className="assessment-safety"><ShieldCheck /> Assess fresh after a short dynamic warm-up, with a clear mat and wall area. Stop for pain, instability or any uncontrolled exit.</p>
                   <div className="assessment-answers">
                     <button type="button" disabled={assessmentBusy} onClick={() => recordAssessmentAnswer("clean")}><Check /><span><strong>Yes — clean at target</strong><small>Check the next harder anchor.</small></span></button>
                     <button type="button" disabled={assessmentBusy} onClick={() => recordAssessmentAnswer("almost")}><Gauge /><span><strong>Almost — inconsistent</strong><small>Start at this exercise.</small></span></button>
-                    <button type="button" disabled={assessmentBusy} onClick={() => recordAssessmentAnswer("not-yet")}><ArrowLeft /><span><strong>Not yet / not sure</strong><small>Start one step easier.</small></span></button>
+                    <button type="button" disabled={assessmentBusy} onClick={() => recordAssessmentAnswer("not-yet")}><ArrowLeft /><span><strong>Not yet / not sure</strong><small>Use a safer starting point.</small></span></button>
                   </div>
                   {currentAssessmentQuestion.track.section === "Handstand" && <p className="assessment-safety"><ShieldCheck /> Handstand answers never unlock readiness gates. Support, wall control and safe exits must still be demonstrated separately.</p>}
                 </article>;
               })() : (
                 <div className="assessment-results">
                   <div className="assessment-result-intro"><Sparkles /><div><strong>Proposed provisional placements</strong><span>These choose where recommendations begin. No exercise receives an achieved checkmark until verified in tracked workouts.</span></div></div>
+                  <p className="assessment-level-suggestion"><Gauge /><span><strong>Suggested default: {assessmentSuggestedLevel} • {levelLabels[assessmentSuggestedLevel].name}</strong>Your five workout-day defaults will start here. You can still choose an easier or harder level for any session, and readiness gates remain authoritative.</span></p>
                   {assessmentSections.map((section) => <section key={section}><h3>{section}</h3>{assessmentTracks.filter((track) => track.section === section).map((track) => {
                     const placementId = assessmentDraft.placements[track.pathLabel];
-                    return <div key={track.id}><span>{track.label}</span><strong>{placementId ? exercises[placementId]?.name : "Foundation"}</strong></div>;
+                    return <div key={track.id}><span>{track.label}</span><strong>{placementId ? exercises[placementId]?.name : "Foundation"}</strong><button type="button" disabled={assessmentBusy} onClick={() => editAssessmentTrack(track.id)}>Change</button></div>;
                   })}</section>)}
-                  {assessmentDraft.status === "review" && <button type="button" className="primary-button assessment-apply" disabled={assessmentBusy} onClick={applyStartingAssessment}><Check /> Apply my starting points</button>}
+                  {assessmentDraft.status === "review" && <button type="button" className="primary-button assessment-apply" disabled={assessmentBusy} onClick={applyStartingAssessment}><Check /> Apply starting points & {assessmentSuggestedLevel}</button>}
                   {assessmentDraft.status === "completed" && <p className="assessment-applied"><Check /> Applied. Recommended normal and custom workouts can now meet you closer to your current ability.</p>}
                 </div>
               )}
               <div className="assessment-footer-actions">
+                <button type="button" disabled={assessmentBusy || assessmentDraft.answerOrder.length === 0} onClick={undoAssessmentAnswer}>Back one answer</button>
                 <button type="button" onClick={() => setAssessmentOpen(false)}>Save & continue later</button>
-                <button type="button" onClick={() => void persistStartingAssessment(restartStartingAssessment(assessmentDraft))}>Start assessment again</button>
+                <button type="button" disabled={assessmentBusy} onClick={restartAssessmentFromScratch}>Start assessment again</button>
               </div>
             </div>
           </Drawer>
@@ -1904,11 +2389,18 @@ export default function Home() {
         )}
 
         {profileOpen && (
-          <Drawer title="Who's training?" subtitle="Only accounts used on this device appear here. Sign in to use your profile elsewhere." onClose={() => setProfileOpen(false)}>
+          <Drawer
+            title="Who's training?"
+            subtitle="Only accounts used on this device appear here. Sign in to use your profile elsewhere."
+            onClose={() => { clearAccountForm(); setNewProfileName(""); setProfileOpen(false); }}
+          >
             <div className="profile-list">
-              {profiles.map((item) => <button type="button" className={profile?.profileId === item.profileId ? "selected" : ""} key={item.profileId} onClick={() => selectExistingProfile(item)}><span className="profile-dot">{item.username.slice(0, 1).toUpperCase()}</span><strong>{item.username}<small>{hasProfileSession(item.profileId) ? "Signed in" : "Local profile"}</small></strong>{profile?.profileId === item.profileId && <Check />}</button>)}
+              {profiles.map((item) => {
+                const locked = isSecuredProfile(item) && !hasProfileSession(item.profileId);
+                return <button type="button" className={profile?.profileId === item.profileId ? "selected" : ""} aria-label={`${item.username}, ${locked ? "locked, sign in required" : hasProfileSession(item.profileId) ? "signed in" : "local profile"}`} key={item.profileId} onClick={() => selectExistingProfile(item)}><span className="profile-dot">{item.username.slice(0, 1).toUpperCase()}</span><strong>{item.username}<small>{hasProfileSession(item.profileId) ? "Signed in" : locked ? "Locked • sign in" : "Local profile"}</small></strong>{locked ? <LockKeyhole /> : profile?.profileId === item.profileId && <Check />}</button>;
+              })}
             </div>
-            {remoteSyncAvailable && profile && !hasProfileSession(profile.profileId) && <div className="account-security-card">
+            {remoteSyncAvailable && profile && !isSecuredProfile(profile) && !hasProfileSession(profile.profileId) && <div className="account-security-card">
               <LockKeyhole /><div><strong>Secure {profile.username}</strong><span>Choose a password once to protect this existing profile and sync it across your devices.</span></div>
               <label>Password<input type="password" value={accountPassword} minLength={10} maxLength={128} autoComplete="new-password" onChange={(event) => setAccountPassword(event.target.value)} /></label>
               <label>Confirm password<input type="password" value={accountPasswordConfirm} minLength={10} maxLength={128} autoComplete="new-password" onChange={(event) => setAccountPasswordConfirm(event.target.value)} /></label>
@@ -1983,13 +2475,13 @@ export default function Home() {
 
       <AnimatePresence>
         {playerOpen && activePlan && timerPosition && (
-          <motion.section className={`player player-${current?.kind ?? "work"}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <motion.section ref={playerRef} className={`player player-${current?.kind ?? "work"}`} role="dialog" aria-modal="true" aria-labelledby={playerTitleId} tabIndex={-1} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             {!complete && current ? (
               <>
                 <div className="player-topbar">
                   <button type="button" className="icon-button player-close" onClick={endWorkoutEarly} aria-label="End workout"><X /></button>
                   <div><span>{activePlan.day === 0 ? "CUSTOM SESSION" : `DAY ${activePlan.day}`} • {activePlan.level} • {displayBlockLabel(current.block, activePlan.day === 0)}</span><div className="player-progress"><i style={{ width: `${progress}%` }} /></div></div>
-                  <button type="button" className="icon-button" onClick={() => setSettings((previous) => ({ ...previous, soundOn: !previous.soundOn }))} aria-label="Toggle timer sound">{settings.soundOn ? <Volume2 /> : <VolumeX />}</button>
+                  <button type="button" className="icon-button" onClick={() => setSettings((previous) => ({ ...previous, soundOn: !previous.soundOn }))} aria-label={settings.soundOn ? "Turn timer sound off" : "Turn timer sound on"}>{settings.soundOn ? <Volume2 /> : <VolumeX />}</button>
                 </div>
                 <div className="player-layout">
                   <div className="player-demo">
@@ -1998,9 +2490,10 @@ export default function Home() {
                   <div className="player-info">
                     <span className={`phase-pill phase-${current.kind}`}>{current.kind === "work" ? "WORK" : current.label.toUpperCase()}</span>
                     <p className="round-label">Round {current.round} of {current.rounds}</p>
-                    <h1>{current.kind === "work" ? current.label : "Recover completely"}</h1>
+                    <h1 id={playerTitleId}>{current.kind === "work" ? current.label : "Recover completely"}</h1>
                     {currentExercise && current.kind === "work" && <p className="player-target">Target: {currentExercise.target}. Once it is clean, rest for the remaining time.</p>}
-                    <div className="countdown" aria-live="polite">{formatTime(timerPosition.remaining)}</div>
+                    <div className="countdown" aria-hidden="true">{formatTime(timerPosition.remaining)}</div>
+                    <span className="sr-only" aria-live="polite" aria-atomic="true">{playerAnnouncement}</span>
                     <div className="countdown-track"><i style={{ width: `${current.duration ? (timerPosition.remaining / current.duration) * 100 : 0}%` }} /></div>
                     {currentExercise && current.kind === "work" && <div className="cue-box"><strong>FOCUS</strong><span>{currentExercise.cues[0]}</span><span>{currentExercise.cues[1]}</span></div>}
                     {current.kind === "rest" && nextExercise && <p className="rest-copy">Relax the grip, shake out tension, and set both bars before the next interval.</p>}
@@ -2016,31 +2509,39 @@ export default function Home() {
             ) : (
               <div className="complete-screen">
                 <div className="complete-check"><Check /></div><p>{activePlan.day === 0 ? "CUSTOM SESSION" : `DAY ${activePlan.day}`} • {activePlan.level} {pendingReview?.status === "partial" ? "ENDED EARLY" : "COMPLETE"}</p>
-                <h1>{formatTime(pendingReview?.performedSeconds ?? activePlan.totalSeconds)}.<br /><em>{pendingReview?.status === "partial" ? "Work completed." : "Quality earned."}</em></h1>
+                <h1 id={playerTitleId}>{formatTime(pendingReview?.performedSeconds ?? activePlan.totalSeconds)}.<br /><em>{pendingReview?.status === "partial" ? "Work completed." : "Quality earned."}</em></h1>
                 {pendingReview && <>
-                  <span className="review-intro">Quick review — only progression exercises appear, once each. Warm-up and cooldown never need a rating.</span>
+                  <span className="review-intro">Quick review — tap only exercises you want to rate. Unrated exercises leave your progression unchanged. Warm-up and cooldown never need a rating.</span>
                   <div className="post-workout-review">
                     {pendingReview.exerciseIds.map((exerciseId) => {
                       const exercise = exercises[exerciseId];
-                      const review = sessionReviews[exerciseId] ?? { feedback: "right" as const, achieved: false };
+                      const review = sessionReviews[exerciseId];
                       const cleanCount = profile?.progression[exerciseId]?.cleanSessions ?? 0;
                       const nextExercise = exercise?.harderId ? exercises[exercise.harderId] : undefined;
                       return <article key={exerciseId}>
                         {exercise && <div className="review-demo"><ExerciseDemo exercise={exercise} compact /></div>}
                         <div className="review-exercise-info"><strong>{exercise?.name ?? exerciseId}</strong><small>{cleanCount}/2 clean sessions{nextExercise ? ` • Next: ${nextExercise.name}` : ""}</small></div>
                         <div className="review-rating" aria-label={`Difficulty for ${exercise?.name ?? exerciseId}`}>
-                          {(["easy", "right", "hard"] as const).map((value) => <button type="button" className={review.feedback === value ? "active" : ""} key={value} onClick={() => setSessionReviews((previous) => ({ ...previous, [exerciseId]: { feedback: value, achieved: value === "easy" } }))}>{value === "easy" ? "Ready to progress" : value === "right" ? "Right level" : "Too hard"}</button>)}
+                          {(["easy", "right", "hard"] as const).map((value) => <button type="button" aria-pressed={review?.feedback === value} className={review?.feedback === value ? "active" : ""} key={value} onClick={() => setSessionReviews((previous) => ({ ...previous, [exerciseId]: { feedback: value, achieved: value === "easy" } }))}>{value === "easy" ? "Ready to progress" : value === "right" ? "Right level" : "Too hard"}</button>)}
                         </div>
                       </article>;
                     })}
                   </div>
                   {pendingReview.exerciseIds.length === 0 && <span>No progression exercise was reached yet, so there is nothing to rate.</span>}
-                  <span>{saveMode === "guest" ? "Guest mode: this review will not be saved." : saveMode === "practice" ? "Practice mode saves history, but does not change progression or advance the programme." : pendingReview.status === "partial" ? "This partial session saves your work but does not advance the programme day." : "Two clean sessions unlock the recommendation for the next progression."}</span>
-                  <button type="button" className="primary-button" onClick={() => {
-                    recordSessionOutcome(activePlan, pendingReview.status, pendingReview.performedSeconds, pendingReview.exerciseIds, sessionReviews);
-                    localStorage.removeItem(ACTIVE_SESSION_KEY);
-                    setPendingReview(null); setPlayerOpen(false); setComplete(false); setActivePlan(null);
-                  }}><Check /> Save review & finish</button>
+                  {pendingReview.exerciseIds.length > 0 && <span>{Object.values(sessionReviews).filter(Boolean).length} of {pendingReview.exerciseIds.length} rated • unrated cards are safely ignored.</span>}
+                  <span>{(activeSessionIdentity?.saveMode ?? saveMode) === "guest" ? "Guest mode: this review will not be saved." : (activeSessionIdentity?.saveMode ?? saveMode) === "practice" ? "Practice mode saves history, but does not change progression or advance the programme." : pendingReview.status === "partial" ? "This partial session saves your work but does not advance the programme day." : "Two clean sessions unlock the recommendation for the next progression."}</span>
+                  <button type="button" className="primary-button" disabled={reviewSaving} onClick={async () => {
+                    if (reviewSaving) return;
+                    setReviewSaving(true);
+                    try {
+                      const saved = await recordSessionOutcome(activePlan, pendingReview.status, pendingReview.performedSeconds, pendingReview.exerciseIds, sessionReviews);
+                      if (!saved) return;
+                      localStorage.removeItem(ACTIVE_SESSION_KEY);
+                      setPendingReview(null); setPlayerOpen(false); setComplete(false); setActivePlan(null); setActiveSessionIdentity(null); executionRef.current = {}; executionCursorRef.current = 0; trainedSecondsRef.current = 0;
+                    } finally {
+                      setReviewSaving(false);
+                    }
+                  }}><Check /> {reviewSaving ? "Saving safely…" : "Save review & finish"}</button>
                 </>}
               </div>
             )}

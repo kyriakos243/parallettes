@@ -118,8 +118,11 @@ if (session.status !== 200 || (await session.json()).username !== "QA Athlete") 
 const updatedProfile = {
   ...login.profile,
   nextProgramDay: 3,
+  progressResetAt: "2026-08-13T07:00:00.000Z",
   preferences: {
     ...login.profile.preferences,
+    appState: { selectedDay: 3 },
+    appStateUpdatedAt: "2026-08-13T07:30:00.000Z",
     startingAssessment: {
       version: 1, status: "in-progress", answers: { "hollow:0": "clean" },
       placements: {}, appliedPlacements: {}, updatedAt: "2026-08-13T08:00:00.000Z",
@@ -133,8 +136,10 @@ const updated = await worker.fetch(request("/profiles/me", {
 }), env);
 const updatedBody = await updated.json();
 if (updated.status !== 200 || updatedBody.revision !== 2 || updatedBody.nextProgramDay !== 3 ||
+  updatedBody.progressResetAt !== "2026-08-13T07:00:00.000Z" ||
+  updatedBody.preferences?.appStateUpdatedAt !== "2026-08-13T07:30:00.000Z" ||
   updatedBody.preferences?.startingAssessment?.answers?.["hollow:0"] !== "clean") {
-  throw new Error("Profile Worker failed revision update or resumable assessment sync");
+  throw new Error("Profile Worker failed revision update, reset tombstone or independently clocked preference sync");
 }
 
 const conflict = await worker.fetch(request("/profiles/me", {
