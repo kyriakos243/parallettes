@@ -868,12 +868,16 @@ assert(!deploymentWorkflow.includes("build:vnext-rc")
   && deploymentWorkflow.includes("pnpm build:vnext-production")
   && deploymentWorkflow.includes("pnpm validate:dist:vnext-production"),
 "Production deployment workflow can enable the isolated RC or legacy lane");
-assert(!productionWorkerConfig.includes("VNEXT_SHADOW_MODE")
+assert(productionWorkerConfig.includes('VNEXT_SHADOW_MODE = "true"')
+  && productionWorkerConfig.includes('VNEXT_PRODUCTION_AUTHORITY_MODE = "true"')
+  && productionWorkerConfig.includes('database_id = "4dfe10d8-e66e-4115-ac7d-6be01eacd75e"')
+  && !productionWorkerConfig.includes("replace-with-isolated-vnext-rc")
   && rcWorkerConfig.includes('VNEXT_SHADOW_MODE = "true"')
+  && !rcWorkerConfig.includes("VNEXT_PRODUCTION_AUTHORITY_MODE")
   && rcWorkerConfig.includes("replace-with-isolated-vnext-rc-origin.example")
   && rcWorkerConfig.includes("replace-with-isolated-vnext-rc-kv-namespace-id")
   && rcWorkerConfig.includes("replace-with-isolated-vnext-rc-d1-database-id"),
-"Staging shadow Worker bindings are not isolated placeholders or production bindings were altered");
+"RC shadow bindings are not isolated placeholders or the accepted Phase 11 production authority pair is incoherent");
 
 // 9. The build-time branch must eliminate the opposite application graph. An
 // invalid RC identity is inert rather than running legacy startup. The selected

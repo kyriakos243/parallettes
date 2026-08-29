@@ -803,12 +803,16 @@ assert(packageSource.includes('"build": "VITE_VNEXT_PRODUCTION_ENABLED=false VIT
   && deploymentWorkflow.includes("pnpm build:vnext-production")
   && deploymentWorkflow.includes("pnpm validate:dist:vnext-production"),
 "Build/deployment configuration can mix the RC and ordinary production lanes");
-assert(!productionWorkerConfig.includes("VNEXT_SHADOW_MODE")
+assert(productionWorkerConfig.includes('VNEXT_SHADOW_MODE = "true"')
+  && productionWorkerConfig.includes('VNEXT_PRODUCTION_AUTHORITY_MODE = "true"')
+  && productionWorkerConfig.includes('database_id = "4dfe10d8-e66e-4115-ac7d-6be01eacd75e"')
+  && !productionWorkerConfig.includes("replace-with-isolated-vnext-rc")
   && rcWorkerConfig.includes('VNEXT_SHADOW_MODE = "true"')
+  && !rcWorkerConfig.includes("VNEXT_PRODUCTION_AUTHORITY_MODE")
   && rcWorkerConfig.includes("replace-with-isolated-vnext-rc-origin.example")
   && rcWorkerConfig.includes("replace-with-isolated-vnext-rc-kv-namespace-id")
   && rcWorkerConfig.includes("replace-with-isolated-vnext-rc-d1-database-id"),
-"Staging API bindings are not isolated placeholders or production shadow authority was enabled");
+"RC API bindings are not isolated placeholders or the accepted Phase 11 production authority pair is incoherent");
 
 for (const { store } of [
   recordAuthority,
