@@ -3,7 +3,9 @@ import { defineConfig } from "vite";
 import packageJson from "./package.json";
 
 export default defineConfig({
-  base: "/parallettes/",
+  // The Phase 9 release candidate is built beneath `/vnext-rc/` so its
+  // service worker cannot claim the ordinary v1.2 application scope.
+  base: process.env.P25_BUILD_BASE ?? "/parallettes/",
   define: {
     "import.meta.env.VITE_APP_VERSION": JSON.stringify(packageJson.version),
   },

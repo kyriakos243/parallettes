@@ -18,7 +18,8 @@ assert(source.includes("...legacyGuides") && source.includes("...newGuides") &&
 
 assert(!source.includes("Move slowly through the demonstrated range"),
   "Generic quadruped fallback remains in the motion registry");
-assert(source.includes("gaze: Point[]"), "Per-pose gaze support is missing");
+assert(source.includes("gaze: readonly Point[]") || source.includes("gaze: Point[]"),
+  "Per-pose gaze support is missing");
 assert(source.includes("hairPath(pose, gazes[index])"),
   "Hair does not follow the per-pose face direction");
 assert(program.includes('{ id: "shoulder-sweep", name: "Standing Shoulder Sweep"') &&
@@ -35,8 +36,8 @@ assert(source.includes("auditFrame?: AuditFrame"),
   "Deterministic audit-frame support is missing");
 assert(source.includes('get("media-audit-frame")'),
   "The media-audit page cannot select deterministic start/middle/end frames");
-assert(source.includes('M390 ${guide.floor - 20} L478 ${guide.floor - 20}') &&
-  source.includes('M414 ${guide.floor - 20} L502 ${guide.floor - 20}'),
+assert(source.includes('M390 ${guide.barTop ?? guide.floor - 20} L478 ${guide.barTop ?? guide.floor - 20}') &&
+  source.includes('M414 ${guide.barTop ?? guide.floor - 20} L502 ${guide.barTop ?? guide.floor - 20}'),
 "Both equal-height parallette handles must share the rendered wrist-contact plane");
 assert(source.includes('"supine-90-90-breathing-reset"') &&
   source.includes('}), 426, "wall", gazeCeiling)'),

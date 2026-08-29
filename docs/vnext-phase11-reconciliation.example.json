@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "release": {
+    "id": "parallette25-vnext.1",
+    "sourceCandidateId": "parallette25-vnext-rc.3",
+    "sourceFingerprint": "1aba25c526ddbc1280489e464aa48b7aace8e1e5f365944652bb4bc676c38d47"
+  },
+  "capturedAt": "REPLACE_WITH_EXACT_UTC_TIMESTAMP",
+  "releaseBinding": {
+    "releaseAttemptId": "REPLACE_WITH_PREFLIGHT_ATTEMPT_UUID",
+    "pagesOrigin": "https://kyriakos243.github.io/parallettes/",
+    "profileApiOrigin": "https://parallette25-profile-api.kyriakos243.workers.dev",
+    "databaseId": "4dfe10d8-e66e-4115-ac7d-6be01eacd75e",
+    "distSetSha256": "REPLACE_WITH_PREFLIGHT_DIST_SET_SHA256",
+    "profileApiVersionId": "REPLACE_WITH_PREFLIGHT_WORKER_VERSION_ID"
+  },
+  "preexistingLegacyAuthorityBeforeSha256": "REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS",
+  "preexistingLegacyAuthorityAfterSha256": "REPLACE_WITH_SAME_64_LOWERCASE_HEX_CHARACTERS",
+  "expectedMigratedProfiles": 1,
+  "beforeMetrics": {
+    "accounts": 0,
+    "syncHeads": 0,
+    "legacySnapshots": 0,
+    "migrationRunsActive": 0,
+    "migrationRunsRolledBack": 0,
+    "sessionPlans": 0,
+    "evidenceEvents": 0,
+    "sessionRecords": 0
+  },
+  "metrics": {
+    "accounts": 0,
+    "syncHeads": 0,
+    "legacySnapshots": 0,
+    "migrationRunsActive": 0,
+    "migrationRunsRolledBack": 0,
+    "sessionPlans": 0,
+    "evidenceEvents": 0,
+    "sessionRecords": 0
+  },
+  "violations": {
+    "athleteIdentityMismatch": 0,
+    "changeCursorBehind": 0,
+    "eventAtOrBeforeReset": 0,
+    "recordAtOrBeforeReset": 0,
+    "recordWithoutPlan": 0,
+    "correctionWithoutTarget": 0,
+    "recordCorrectionUnreachable": 0,
+    "branchedRecordCorrection": 0,
+    "multipleRootSessionRecords": 0,
+    "eventTargetMissing": 0,
+    "resetHeadWithoutTombstone": 0,
+    "activeMigrationWithoutSnapshot": 0,
+    "rollbackRefWithoutTerminalRun": 0,
+    "immutableChangeWithoutTypedRow": 0
+  },
+  "smokeChecks": {
+    "fresh": false,
+    "migrated": false,
+    "offlineReplay": false,
+    "multiDevice": false,
+    "sessionLoop": false,
+    "resetStaleDevice": false,
+    "staleCache": false,
+    "rollbackReady": false
+  },
+  "apiHealth": {
+    "ok": true,
+    "auth": "password",
+    "storage": "d1",
+    "release": {
+      "id": "parallette25-vnext.1",
+      "sourceCandidateId": "parallette25-vnext-rc.3",
+      "sourceFingerprint": "1aba25c526ddbc1280489e464aa48b7aace8e1e5f365944652bb4bc676c38d47",
+      "identityReady": true
+    },
+    "schema": {
+      "legacyReady": true,
+      "observationsReady": true,
+      "immutabilityReady": true,
+      "requiredMigration": "0002_vnext_shadow_observations.sql"
+    },
+    "vnext": {
+      "syncRoute": "/vnext/shadow/sync",
+      "syncEnabled": true,
+      "productionAuthorityEnabled": true,
+      "ready": true
+    }
+  }
+}

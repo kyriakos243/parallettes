@@ -16,20 +16,46 @@ type Joint =
   | "rh"
   | "rk"
   | "ra";
-type Pose = Record<Joint, Point>;
-type Equipment = "wall" | "parallettes" | "rope";
-type Guide = {
-  poses: Pose[];
+type Pose = Readonly<Record<Joint, Point>>;
+type Equipment = "wall" | "left-wall" | "parallettes" | "rope";
+type GuideVisual =
+  | Readonly<{ kind: "pad"; x: number; y: number; width: number; height: number; label: string }>
+  | Readonly<{ kind: "landmark"; x1: number; y1: number; x2: number; y2: number; label: string }>
+  | Readonly<{
+    kind: "assistance";
+    joint: "la" | "ra" | "lh" | "rh";
+    anchor: Point;
+    label: string;
+    /** Contact markers avoid drawing a false tether to an assistance point. */
+    contactOnly?: boolean;
+    /** Assistance is visible only in the keyframes where contact actually exists. */
+    activePoseIndexes?: readonly number[];
+  }>
+  | Readonly<{ kind: "landing"; x: number; y: number; width: number; label: string }>
+  | Readonly<{ kind: "direction"; points: readonly Point[]; label: string }>;
+export type MotionGuideDefinition = {
+  poses: readonly Pose[];
   floor: number;
-  equipment?: Equipment | Equipment[];
+  barTop?: number;
+  equipment?: Equipment | readonly Equipment[];
+  /** Side is the standard coaching view; front-oblique keeps wide straddles readable. */
+  paralletteView?: "side" | "front-oblique";
   duration?: number;
+  /** Optional normalized timing for non-uniform holds and continuous eccentrics. */
+  keyframeTimes?: readonly number[];
+  /** Named target used when the athlete requests reduced motion. */
+  posterFrame?: number;
   label: string;
   /** One gaze vector per pose keeps the face readable when body orientation changes. */
-  gaze: Point[];
+  gaze: readonly Point[];
   static?: boolean;
   /** A short mobility rope/band held taut between the animated wrists. */
   handLink?: boolean;
+  playback?: "loop" | "one-way-reset";
+  auditFrames?: Readonly<{ start: number; middle: number; end: number }>;
+  visuals?: readonly GuideVisual[];
 };
+type Guide = MotionGuideDefinition;
 
 const p = (x: number, y: number): Point => ({ x, y });
 const change = (base: Pose, updates: Partial<Record<Joint, Point>>): Pose => ({
@@ -1203,8 +1229,18 @@ export const guides = {
 export type MotionPreset = keyof typeof guides;
 export const motionPresetIds = Object.keys(guides) as MotionPreset[];
 export const isMotionPreset = (value: string): value is MotionPreset => value in guides;
+/**
+ * Adds an isolated owned registry to this renderer. The ordinary v1.2 build
+ * never imports or calls this; the RC-only wrapper registers Phase 10 guides
+ * before rendering them.
+ */
+export const registerMotionGuides = (
+  additions: Readonly<Record<string, MotionGuideDefinition>>,
+): void => {
+  Object.assign(guides, additions);
+};
 
-const joints = (poses: Pose[], joint: Joint, axis: "x" | "y") =>
+const joints = (poses: readonly Pose[], joint: Joint, axis: "x" | "y") =>
   poses.map((pose) => pose[joint][axis]);
 
 function AnimatedLine({
@@ -1216,7 +1252,7 @@ function AnimatedLine({
   transition,
   muted = false,
 }: {
-  poses: Pose[];
+  poses: readonly Pose[];
   from: Joint;
   to: Joint;
   stroke: string;
@@ -1287,7 +1323,31 @@ function EquipmentLayer({ guide, preset }: { guide: Guide; preset: string }) {
         </g>
       )}
 
-      {hasEquipment(guide, "parallettes") && (
+      {hasEquipment(guide, "left-wall") && (
+        <g aria-label="marked assistance wall">
+          <rect x="64" y="28" width="18" height={guide.floor - 20} rx="7" fill="#e3e9e6" stroke="#bbc9c4" strokeWidth="3" />
+          {[94, 164, 234, 304, 374].filter((y) => y < guide.floor).map((y) => (
+            <line key={y} x1="66" x2="80" y1={y} y2={y} stroke="#c5d1cd" strokeWidth="2" />
+          ))}
+        </g>
+      )}
+
+      {hasEquipment(guide, "parallettes") && guide.paralletteView === "front-oblique" && (
+        <g
+          aria-label="two equal-height medium wooden parallettes in front-oblique view"
+          fill="none"
+          stroke="#9b633d"
+          strokeWidth="13"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          filter={`url(#motion-shadow-${preset})`}
+        >
+          <path d={`M225 ${(guide.barTop ?? guide.floor - 20) - 6} L315 ${(guide.barTop ?? guide.floor - 20) + 6} M240 ${guide.barTop ?? guide.floor - 20} L238 ${guide.floor + 4} M300 ${(guide.barTop ?? guide.floor - 20) + 4} L302 ${guide.floor + 4}`} />
+          <path d={`M325 ${(guide.barTop ?? guide.floor - 20) + 6} L415 ${(guide.barTop ?? guide.floor - 20) - 6} M340 ${(guide.barTop ?? guide.floor - 20) + 4} L338 ${guide.floor + 4} M400 ${guide.barTop ?? guide.floor - 20} L402 ${guide.floor + 4}`} opacity=".82" />
+        </g>
+      )}
+
+      {hasEquipment(guide, "parallettes") && guide.paralletteView !== "front-oblique" && (
         <g
           aria-label="two equal-height medium wooden parallettes"
           fill="none"
@@ -1297,8 +1357,8 @@ function EquipmentLayer({ guide, preset }: { guide: Guide; preset: string }) {
           strokeLinejoin="round"
           filter={`url(#motion-shadow-${preset})`}
         >
-          <path d={`M390 ${guide.floor - 20} L478 ${guide.floor - 20} M404 ${guide.floor - 20} L398 ${guide.floor + 4} M464 ${guide.floor - 20} L470 ${guide.floor + 4}`} />
-          <path d={`M414 ${guide.floor - 20} L502 ${guide.floor - 20} M428 ${guide.floor - 20} L422 ${guide.floor + 4} M488 ${guide.floor - 20} L494 ${guide.floor + 4}`} opacity=".72" />
+          <path d={`M390 ${guide.barTop ?? guide.floor - 20} L478 ${guide.barTop ?? guide.floor - 20} M404 ${guide.barTop ?? guide.floor - 20} L398 ${guide.floor + 4} M464 ${guide.barTop ?? guide.floor - 20} L470 ${guide.floor + 4}`} />
+          <path d={`M414 ${guide.barTop ?? guide.floor - 20} L502 ${guide.barTop ?? guide.floor - 20} M428 ${guide.barTop ?? guide.floor - 20} L422 ${guide.floor + 4} M488 ${guide.barTop ?? guide.floor - 20} L494 ${guide.floor + 4}`} opacity=".72" />
         </g>
       )}
 
@@ -1312,6 +1372,102 @@ function EquipmentLayer({ guide, preset }: { guide: Guide; preset: string }) {
   );
 }
 
+function VisualLayer({
+  guide,
+  poses,
+  poseIndexes,
+  transition,
+  preset,
+}: {
+  guide: Guide;
+  poses: readonly Pose[];
+  poseIndexes: readonly number[];
+  transition: Record<string, unknown>;
+  preset: string;
+}) {
+  return (
+    <g className="motion-guide-technical-overlays">
+      {(guide.visuals ?? []).map((item, index) => {
+        const key = `${item.kind}-${index}`;
+        if (item.kind === "pad") {
+          return (
+            <g key={key} aria-label={`${item.label} padded target`}>
+              <rect x={item.x} y={item.y} width={item.width} height={item.height} rx="5" fill="#f5c98b" stroke="#b97945" strokeWidth="2" />
+              <text x={item.x + item.width / 2} y={item.y + item.height + 15} textAnchor="middle" fill="#6f4a30" fontSize="10" fontWeight="800">{item.label}</text>
+            </g>
+          );
+        }
+        if (item.kind === "landmark") {
+          return (
+            <g key={key} aria-label={`${item.label} landmark`}>
+              <line x1={item.x1} y1={item.y1} x2={item.x2} y2={item.y2} stroke="#e36d51" strokeWidth="3" strokeDasharray="8 7" />
+              <text x={(item.x1 + item.x2) / 2} y={Math.min(item.y1, item.y2) - 8} textAnchor="middle" fill="#934938" fontSize="10" fontWeight="800">{item.label}</text>
+            </g>
+          );
+        }
+        if (item.kind === "assistance") {
+          const visibility = poseIndexes.map((poseIndex) =>
+            !item.activePoseIndexes || item.activePoseIndexes.includes(poseIndex) ? 1 : 0);
+          return (
+            <motion.g
+              key={key}
+              aria-label={`${item.label} contact`}
+              opacity={visibility[0]}
+              animate={{ opacity: visibility }}
+              transition={transition}
+            >
+              {item.contactOnly ? (
+                <motion.circle
+                  cx={poses[0][item.joint].x}
+                  cy={poses[0][item.joint].y}
+                  r="9"
+                  fill="#fff"
+                  fillOpacity=".35"
+                  stroke="#ec765c"
+                  strokeWidth="4"
+                  animate={{ cx: joints(poses, item.joint, "x"), cy: joints(poses, item.joint, "y") }}
+                  transition={transition}
+                />
+              ) : (
+                <>
+                  <motion.line
+                    x1={poses[0][item.joint].x}
+                    y1={poses[0][item.joint].y}
+                    x2={item.anchor.x}
+                    y2={item.anchor.y}
+                    animate={{ x1: joints(poses, item.joint, "x"), y1: joints(poses, item.joint, "y") }}
+                    transition={transition}
+                    stroke="#ec765c"
+                    strokeWidth="5"
+                    strokeDasharray="7 6"
+                  />
+                  <circle cx={item.anchor.x} cy={item.anchor.y} r="7" fill="#fff" stroke="#ec765c" strokeWidth="4" />
+                </>
+              )}
+              <text x={item.anchor.x + 10} y={item.anchor.y - 10} fill="#934938" fontSize="10" fontWeight="800">{item.label}</text>
+            </motion.g>
+          );
+        }
+        if (item.kind === "landing") {
+          return (
+            <g key={key} aria-label={item.label}>
+              <rect x={item.x} y={item.y} width={item.width} height="18" rx="9" fill="#b7dfd6" opacity=".75" />
+              <text x={item.x + item.width / 2} y={item.y + 14} textAnchor="middle" fill="#315b52" fontSize="10" fontWeight="800">{item.label}</text>
+            </g>
+          );
+        }
+        const path = item.points.map((point) => `${point.x},${point.y}`).join(" ");
+        return (
+          <g key={key} aria-label={item.label}>
+            <polyline points={path} fill="none" stroke="#e36d51" strokeWidth="4" strokeDasharray="7 6" markerEnd={`url(#motion-arrow-${preset})`} />
+            <text x={item.points[0]?.x ?? 0} y={(item.points[0]?.y ?? 0) - 10} fill="#934938" fontSize="10" fontWeight="800">{item.label}</text>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
 type AuditFrame = "start" | "middle" | "end";
 
 export function MotionGuide({
@@ -1322,33 +1478,47 @@ export function MotionGuide({
   preset: MotionPreset;
   compact?: boolean;
   /** Freezes a deterministic keyframe for visual QA and screenshot comparison. */
-  auditFrame?: AuditFrame;
+  auditFrame?: AuditFrame | "motion";
 }) {
   const reduceMotion = useReducedMotion();
   const guide = guides[preset];
   const queryFrame = typeof window === "undefined"
     ? null
     : new URLSearchParams(window.location.search).get("media-audit-frame");
-  const selectedAuditFrame = auditFrame ?? (
-    queryFrame === "start" || queryFrame === "middle" || queryFrame === "end"
-      ? queryFrame
-      : undefined
-  );
+  const selectedAuditFrame = auditFrame === "motion"
+    ? undefined
+    : auditFrame ?? (
+      queryFrame === "start" || queryFrame === "middle" || queryFrame === "end"
+        ? queryFrame
+        : undefined
+    );
   const turnaroundIndex = Math.floor(guide.poses.length / 2);
+  const auditIndexes = guide.auditFrames ?? {
+    start: 0,
+    middle: Math.ceil(turnaroundIndex / 2),
+    end: turnaroundIndex,
+  };
   const stillIndex = selectedAuditFrame === "start"
-    ? 0
+    ? auditIndexes.start
     : selectedAuditFrame === "end"
-      ? turnaroundIndex
+      ? auditIndexes.end
       : selectedAuditFrame === "middle"
-        ? Math.ceil(turnaroundIndex / 2)
-        : turnaroundIndex;
+        ? auditIndexes.middle
+        : guide.posterFrame ?? turnaroundIndex;
   const freeze = Boolean(selectedAuditFrame) || reduceMotion;
+  const poseIndexes = freeze
+    ? [stillIndex]
+    : guide.poses.map((_, index) => index);
   const poses = freeze ? [guide.poses[stillIndex]] : guide.poses;
   const gazes = freeze ? [guide.gaze[stillIndex]] : guide.gaze;
-  const times = poses.map((_, index) => index / Math.max(1, poses.length - 1));
+  const times = freeze
+    ? [0]
+    : [...(guide.keyframeTimes ?? poses.map((_, index) => index / Math.max(1, poses.length - 1)))];
   const transition = freeze || guide.static
     ? { duration: 0 }
-    : { duration: guide.duration ?? 4.2, repeat: Infinity, ease: "easeInOut" as const, times };
+    : guide.playback === "one-way-reset"
+      ? { duration: guide.duration ?? 6, repeat: Infinity, repeatDelay: 0.7, ease: "linear" as const, times }
+      : { duration: guide.duration ?? 4.2, repeat: Infinity, ease: "easeInOut" as const, times };
 
   return (
     <div className={`motion-guide ${compact ? "motion-guide-compact" : ""}`}>
@@ -1361,12 +1531,16 @@ export function MotionGuide({
           <filter id={`motion-shadow-${preset}`} x="-30%" y="-30%" width="160%" height="160%">
             <feDropShadow dx="0" dy="8" stdDeviation="8" floodColor="#18332d" floodOpacity=".13" />
           </filter>
+          <marker id={`motion-arrow-${preset}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#e36d51" />
+          </marker>
         </defs>
 
         <rect width="640" height="520" fill={`url(#motion-bg-${preset})`} />
         <ellipse cx="320" cy={guide.floor + 8} rx="250" ry="18" fill="#163a33" opacity=".07" />
         <rect x="62" y={guide.floor - 5} width="516" height="13" rx="7" fill="#8fcfc1" opacity=".65" />
         <EquipmentLayer guide={guide} preset={preset} />
+        <VisualLayer guide={guide} poses={poses} poseIndexes={poseIndexes} transition={transition} preset={preset} />
 
         {guide.handLink && (
           <motion.line
@@ -1472,7 +1646,7 @@ export function MotionGuide({
           <g>
             <rect x="28" y="26" width="238" height="35" rx="17.5" fill="#12352e" opacity=".9" />
             <text x="147" y="49" textAnchor="middle" fill="#fff" fontSize="13" fontWeight="800" letterSpacing="1.1">
-              {guide.static ? "POSITION GUIDE" : "SMOOTH MOTION GUIDE"}
+              {guide.static ? "POSITION GUIDE" : guide.playback === "one-way-reset" ? "ONE-WAY TECHNIQUE GUIDE" : "SMOOTH MOTION GUIDE"}
             </text>
             <rect x="28" y="462" width="510" height="36" rx="18" fill="#fff" opacity=".94" />
             <text x="46" y="485" fill="#31504a" fontSize="14" fontWeight="700">{guide.label}</text>
