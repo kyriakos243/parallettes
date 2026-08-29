@@ -92,24 +92,41 @@ assert(new Set(contract.approvals.media.map((approval) => approval.requirementId
 assert(evaluation.contractValid && evaluation.ownerApproved && evaluation.mediaApproved,
   "The canonical Phase 11 owner/media acceptance contract is invalid");
 
-// Starting Phase 11 is not permission to operate on production before the
-// target-specific preflight is evidenced and a new release artifact is frozen.
-assert(contract.productionGrant.status === "withheld",
-  "The initial Phase 11 contract does not withhold its production grant");
-assert(!evaluation.productionAuthorized,
-  "The initial Phase 11 contract prematurely authorises production");
-assert(evaluation.pendingGateIds.length === 7,
-  `Expected seven remaining target-environment preflight blockers; found ${evaluation.pendingGateIds.length}`);
-assert(evaluation.pendingGateIds.every((id) => hasIssue(evaluation, "production-preflight-incomplete", "production-blocker")),
-  "A pending production preflight does not emit an explicit blocker");
+// The canonical contract may become granted only after the target-specific
+// evidence is bound to the exact frozen artifact.
+assert(contract.productionGrant.status === "granted",
+  "The accepted Phase 11 production grant is not recorded");
+assert(evaluation.productionAuthorized,
+  "The fully evidenced Phase 11 contract does not authorise production");
+assert(evaluation.pendingGateIds.length === 0,
+  `Expected no remaining target-environment preflight blockers; found ${evaluation.pendingGateIds.length}`);
 assert(!hasIssue(evaluation, "release-artifact-unbound", "production-blocker"),
   "The exact frozen Phase 11 artifact is not recognized as bound");
 assert(Object.isFrozen(contract) && Object.isFrozen(contract.approvals.media)
   && Object.isFrozen(contract.preflight) && Object.isFrozen(contract.productionGrant),
 "The canonical Phase 11 release contract is mutable");
 
-// A caller cannot flip only the visible grant booleans.
-const premature = structuredClone(contract);
+// A preflight contract still fails closed before the seven target-specific
+// gates are evidenced, and a caller cannot flip only the visible grant fields.
+const pending = structuredClone(contract);
+for (const gate of pending.preflight) {
+  if (gate.id === "phase11-release-artifact-frozen") continue;
+  gate.status = "pending";
+  delete gate.evidence;
+}
+pending.productionGrant.status = "withheld";
+pending.productionGrant.releaseArtifactFingerprint = null;
+pending.productionGrant.authorizations.deployCompatibleRelease = false;
+pending.productionGrant.authorizations.runIdempotentLiveMigration = false;
+pending.productionGrant.authorizations.switchProductionAuthority = false;
+const pendingEvaluation = production.evaluateVNextPhase11ProductionRelease(pending);
+assert(!pendingEvaluation.productionAuthorized && pendingEvaluation.pendingGateIds.length === 7,
+  `Expected seven fail-closed target gates; found ${pendingEvaluation.pendingGateIds.length}`);
+assert(pendingEvaluation.pendingGateIds.every((id) =>
+  hasIssue(pendingEvaluation, "production-preflight-incomplete", "production-blocker")),
+"A pending production preflight does not emit an explicit blocker");
+
+const premature = structuredClone(pending);
 premature.productionGrant.status = "granted";
 premature.productionGrant.releaseArtifactFingerprint = "2".repeat(64);
 premature.productionGrant.authorizations.deployCompatibleRelease = true;
@@ -194,6 +211,6 @@ if (failures.length > 0) {
 } else {
   console.log(`vNext Phase 11 production release contract validation passed (${assertions} assertions).`);
   console.log("- accepted RC.3 identity and 28 owner-approved motion fingerprints are preserved as historical evidence");
-  console.log("- the distinct corrected release artifact is frozen while seven live-target preflights remain fail-closed");
+  console.log("- the distinct corrected release artifact and all eight live-target preflights are bound to the production grant");
   console.log("- coherent grant, media tamper, split authority, destructive cleanup and historical-fingerprint reuse checks passed");
 }

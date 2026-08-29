@@ -11,8 +11,10 @@ VNEXT_RELEASE_ID = "parallette25-vnext.1"
 VNEXT_RELEASE_SOURCE_CANDIDATE = "parallette25-vnext-rc.3"
 VNEXT_RELEASE_SOURCE_FINGERPRINT = "1aba25c526ddbc1280489e464aa48b7aace8e1e5f365944652bb4bc676c38d47"
 VNEXT_DATABASE_ID = "4dfe10d8-e66e-4115-ac7d-6be01eacd75e"
-# Phase 11 operators enable this only after snapshot, migration 0002, disabled-API
-# health, and rollback-owner gates have passed. Keeping it absent is fail-closed.
+VNEXT_SHADOW_MODE = "true"
+VNEXT_PRODUCTION_AUTHORITY_MODE = "true"
+# Phase 11 production checkpoint passed: snapshot, migration 0002, disabled-API
+# health and rollback-owner gates are bound to the accepted release attempt.
 
 [[kv_namespaces]]
 binding = "PROFILES"
