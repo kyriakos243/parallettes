@@ -1,9 +1,19 @@
-name: Deploy Parallette 25 to GitHub Pages
+name: Deploy Parallette25 controlled release
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      release_lane:
+        description: Exact release lane
+        required: true
+        type: choice
+        options:
+          - vnext-production
+          - rollback-v1
+      expected_source_commit:
+        description: Exact 40-character commit to deploy
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -12,14 +22,18 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout exact requested source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.expected_source_commit }}
+      - name: Verify exact source commit
+        run: test "$(git rev-parse HEAD)" = "${{ inputs.expected_source_commit }}"
       - name: Install pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -32,13 +46,25 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Validate programme and types
+      - name: Validate production release source
+        if: inputs.release_lane == 'vnext-production'
         run: pnpm check
-      - name: Build static site
-        run: pnpm build
+      - name: Build exact frozen vNext site
+        if: inputs.release_lane == 'vnext-production'
+        run: pnpm build:vnext-production
         env:
           VITE_PROFILE_API_URL: ${{ vars.VITE_PROFILE_API_URL }}
-      - name: Validate production PWA
+      - name: Validate vNext authority and PWA isolation
+        if: inputs.release_lane == 'vnext-production'
+        run: pnpm validate:dist:vnext-production
+      - name: Bind exact artifact to release grant
+        if: inputs.release_lane == 'vnext-production'
+        run: pnpm verify:vnext-production-artifact --require-grant
+      - name: Build retained v1 rollback site
+        if: inputs.release_lane == 'rollback-v1'
+        run: pnpm build
+      - name: Validate retained v1 rollback site
+        if: inputs.release_lane == 'rollback-v1'
         run: pnpm validate:dist
       - name: Configure Pages
         uses: actions/configure-pages@v6
@@ -54,6 +80,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy exact selected artifact
         id: deployment
         uses: actions/deploy-pages@v5

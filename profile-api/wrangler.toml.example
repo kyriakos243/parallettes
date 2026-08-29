@@ -4,6 +4,11 @@ compatibility_date = "2026-08-10"
 
 [vars]
 ALLOWED_ORIGINS = "https://kyriakos243.github.io,http://127.0.0.1:4173,http://localhost:4173,http://localhost:3000"
+VNEXT_RELEASE_ID = "parallette25-vnext.1"
+VNEXT_RELEASE_SOURCE_CANDIDATE = "parallette25-vnext-rc.3"
+VNEXT_RELEASE_SOURCE_FINGERPRINT = "1aba25c526ddbc1280489e464aa48b7aace8e1e5f365944652bb4bc676c38d47"
+VNEXT_DATABASE_ID = "replace-with-production-d1-database-id"
+# Add VNEXT_SHADOW_MODE = "true" only at the documented Phase 11 checkpoint.
 
 [[kv_namespaces]]
 binding = "PROFILES"

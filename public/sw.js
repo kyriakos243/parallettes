@@ -1,9 +1,16 @@
-const CACHE_PREFIX = "parallette-25-";
+// `validate:dist` replaces this token with a deployment-lane identity. Preview
+// vNext caches can therefore never delete or reuse ordinary v1.2 caches.
+const CACHE_CHANNEL = "__PWA_CACHE_CHANNEL__";
+const CACHE_PREFIX = `parallette-25-${CACHE_CHANNEL}-`;
 // `validate:dist` replaces this token with a fingerprint of every built JS/CSS
 // asset. That makes the worker update whenever any eager or lazy Vite chunk does.
 const BUILD_ID = "__PWA_BUILD_ID__";
 const CACHE = `${CACHE_PREFIX}${BUILD_ID}`;
 const base = new URL("./", self.registration.scope);
+// The ordinary parent worker must not intercept the nested RC lane before its
+// more-specific worker has installed. Without this exclusion, the first RC
+// navigation could overwrite the v1 offline shell with RC HTML.
+const VNEXT_RC_PATH = "/parallettes/vnext-rc/";
 const assetManifestUrl = new URL("asset-manifest.json", base);
 const shell = [
   base.href,
@@ -26,7 +33,7 @@ const precache = async () => {
   const response = await fetch(assetManifestUrl, { cache: "no-store" });
   if (!response.ok) throw new Error(`Asset manifest request failed: ${response.status}`);
   const manifest = await response.json();
-  if (manifest.buildId !== BUILD_ID || !Array.isArray(manifest.assets)) {
+  if (manifest.buildId !== BUILD_ID || manifest.channel !== CACHE_CHANNEL || !Array.isArray(manifest.assets)) {
     throw new Error("Asset manifest and service worker build do not match");
   }
 
@@ -55,6 +62,7 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const requestUrl = new URL(event.request.url);
   if (requestUrl.origin !== base.origin || !requestUrl.pathname.startsWith(base.pathname)) return;
+  if (CACHE_CHANNEL === "v1" && requestUrl.pathname.startsWith(VNEXT_RC_PATH)) return;
 
   if (event.request.mode === "navigate") {
     event.respondWith((async () => {

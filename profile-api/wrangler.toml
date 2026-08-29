@@ -7,13 +7,18 @@ enabled = true
 
 [vars]
 ALLOWED_ORIGINS = "https://kyriakos243.github.io,http://127.0.0.1:4173,http://localhost:4173,http://localhost:3000"
+VNEXT_RELEASE_ID = "parallette25-vnext.1"
+VNEXT_RELEASE_SOURCE_CANDIDATE = "parallette25-vnext-rc.3"
+VNEXT_RELEASE_SOURCE_FINGERPRINT = "1aba25c526ddbc1280489e464aa48b7aace8e1e5f365944652bb4bc676c38d47"
+VNEXT_DATABASE_ID = "4dfe10d8-e66e-4115-ac7d-6be01eacd75e"
+# Phase 11 operators enable this only after snapshot, migration 0002, disabled-API
+# health, and rollback-owner gates have passed. Keeping it absent is fail-closed.
 
 [[kv_namespaces]]
 binding = "PROFILES"
 id = "f88ca998e55f4e4088fba334e78eb802"
 
-# Wrangler/Workers Builds can provision this free D1 database automatically
-# on the first deployment because no database_id is committed.
 [[d1_databases]]
 binding = "DB"
 database_name = "parallette25-profiles"
+database_id = "4dfe10d8-e66e-4115-ac7d-6be01eacd75e"

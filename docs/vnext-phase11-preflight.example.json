@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "REPLACE_WITH_EXACT_UTC_TIMESTAMP",
+  "releaseAttempt": {
+    "id": "REPLACE_WITH_NEW_UUID_FOR_THIS_ATTEMPT",
+    "startedAt": "REPLACE_WITH_EXACT_UTC_TIMESTAMP",
+    "pagesOrigin": "https://kyriakos243.github.io/parallettes/",
+    "profileApiOrigin": "https://parallette25-profile-api.kyriakos243.workers.dev",
+    "databaseId": "4dfe10d8-e66e-4115-ac7d-6be01eacd75e"
+  },
+  "release": {
+    "id": "parallette25-vnext.1",
+    "sourceCandidateId": "parallette25-vnext-rc.3",
+    "sourceFingerprint": "1aba25c526ddbc1280489e464aa48b7aace8e1e5f365944652bb4bc676c38d47",
+    "phase10OwnerApproved": true,
+    "deployedBaseline": {
+      "requiredCommit": "61b08766250100d502744b4c64a244e3d6f5fd6b",
+      "containsRequiredCommit": true,
+      "artifactRef": "REPLACE_WITH_DEPLOYMENT_EVIDENCE_REFERENCE",
+      "artifactCommit": "REPLACE_WITH_40_LOWERCASE_HEX_COMMIT",
+      "verifiedAt": "REPLACE_WITH_EXACT_UTC_TIMESTAMP"
+    }
+  },
+  "owners": {
+    "release": "REPLACE_WITH_RELEASE_OWNER",
+    "rollback": "REPLACE_WITH_ROLLBACK_OWNER",
+    "rollbackAcknowledged": true
+  },
+  "observationWindow": {
+    "endsAt": "REPLACE_WITH_EXACT_UTC_TIMESTAMP",
+    "decisionChannel": "REPLACE_WITH_ROLLBACK_DECISION_CHANNEL"
+  },
+  "rehearsals": {
+    "stagingMigrationPassed": true,
+    "rollbackPassed": true
+  },
+  "snapshot": {
+    "capturedAt": "REPLACE_WITH_EXACT_UTC_TIMESTAMP",
+    "timeTravelBookmark": "REPLACE_WITH_D1_BOOKMARK",
+    "fullExportSha256": "REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS",
+    "legacyAccountsExportSha256": "REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS",
+    "recoveryVerified": true,
+    "storageRef": "REPLACE_WITH_PRIVATE_EVIDENCE_REFERENCE"
+  },
+  "artifacts": {
+    "appSha256": "REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS",
+    "serviceWorkerSha256": "REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS",
+    "distSetSha256": "REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS",
+    "buildId": "REPLACE_WITH_20_LOWERCASE_HEX_CHARACTERS",
+    "releaseId": "parallette25-vnext.1",
+    "pagesOrigin": "https://kyriakos243.github.io/parallettes/",
+    "profileApiOrigin": "https://parallette25-profile-api.kyriakos243.workers.dev",
+    "databaseId": "4dfe10d8-e66e-4115-ac7d-6be01eacd75e",
+    "capturedAt": "REPLACE_WITH_EXACT_UTC_TIMESTAMP",
+    "profileApiVersionId": "REPLACE_WITH_WORKER_VERSION_ID",
+    "cacheChannel": "REPLACE_WITH_NON_V1_PRODUCTION_CACHE_CHANNEL"
+  },
+  "rollbackArtifact": {
+    "lane": "v1",
+    "sourceCommit": "REPLACE_WITH_SAME_DEPLOYED_BASELINE_COMMIT",
+    "pagesDeploymentId": "REPLACE_WITH_DEPLOYMENT_ID",
+    "buildId": "REPLACE_WITH_20_LOWERCASE_HEX_CHARACTERS",
+    "serviceWorkerSha256": "REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS",
+    "cacheChannel": "v1",
+    "mechanism": "REPLACE_WITH_TESTED_ROLLBACK_MECHANISM",
+    "verifiedAt": "REPLACE_WITH_EXACT_UTC_TIMESTAMP"
+  },
+  "authority": {
+    "before": { "read": "v1.2", "write": "v1.2" },
+    "after": { "read": "vnext-production", "write": "vnext-production" }
+  },
+  "apiHealth": {
+    "ok": true,
+    "auth": "password",
+    "storage": "d1",
+    "capturedAt": "REPLACE_WITH_EXACT_UTC_TIMESTAMP",
+    "release": {
+      "id": "parallette25-vnext.1",
+      "sourceCandidateId": "parallette25-vnext-rc.3",
+      "sourceFingerprint": "1aba25c526ddbc1280489e464aa48b7aace8e1e5f365944652bb4bc676c38d47",
+      "identityReady": true
+      ,"databaseId": "4dfe10d8-e66e-4115-ac7d-6be01eacd75e",
+      "databaseIdentityReady": true
+    },
+    "schema": {
+      "legacyReady": true,
+      "observationsReady": true,
+      "immutabilityReady": true,
+      "requiredMigration": "0002_vnext_shadow_observations.sql",
+      "migrationHistoryReady": true,
+      "fingerprint": "2e5ff8e06af41b2e0aad00671d13c995c938ba5fc0db2db1023f9f5549dddc9d",
+      "expectedFingerprint": "2e5ff8e06af41b2e0aad00671d13c995c938ba5fc0db2db1023f9f5549dddc9d",
+      "fingerprintReady": true
+    },
+    "vnext": {
+      "syncRoute": "/vnext/shadow/sync",
+      "syncEnabled": false,
+      "productionAuthorityEnabled": false,
+      "ready": false
+    }
+  }
+}

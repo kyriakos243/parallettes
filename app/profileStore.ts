@@ -1,3 +1,14 @@
+import type { VNextShadowStore } from "./vnext/persistence/contracts";
+import type { LegacyV12ProfileSource } from "./vnext/legacyV12";
+import type {
+  ShadowSyncSummary,
+  syncObservationDeltas as syncObservationDeltasType,
+} from "./vnext/persistence/sync";
+import {
+  ACCOUNT_SESSION_STORAGE_KEY,
+  announceAccountSessionChange,
+} from "./accountSessionSignals";
+
 export type SaveMode = "normal" | "practice" | "guest";
 
 export type ProfileSessionRecord = {
@@ -51,14 +62,44 @@ export type AccountResult = {
   recoveryCode?: string;
 };
 
+/**
+ * The isolated vNext lane shares only account identity and bearer-session
+ * security with v1.2. It deliberately does not expose the legacy training
+ * profile returned by the account service.
+ */
+export type VNextAccountIdentity = Readonly<{
+  profileId: string;
+  username: string;
+  recoveryCode?: string;
+}>;
+
+const legacyMigrationSource = (profile: ProfileRecord): LegacyV12ProfileSource => ({
+  profileId: profile.profileId,
+  username: profile.username,
+  schemaVersion: 1,
+  revision: profile.revision,
+  createdAt: profile.createdAt,
+  updatedAt: profile.updatedAt,
+  ...(profile.progressResetAt ? { progressResetAt: profile.progressResetAt } : {}),
+  nextProgramDay: profile.nextProgramDay,
+  history: structuredClone(profile.history),
+  readiness: structuredClone(profile.readiness),
+  readinessUpdatedAt: structuredClone(profile.readinessUpdatedAt),
+  progression: structuredClone(profile.progression),
+  equipment: structuredClone(profile.equipment),
+  preferences: structuredClone(profile.preferences),
+});
+
 const DB_NAME = "parallette25-v2";
 const DB_VERSION = 2;
 const PROFILE_STORE = "profiles";
 const INDEX_KEY = "parallette25-profile-index-v1";
-const TOKEN_KEY = "parallette25-account-sessions-v1";
+const TOKEN_KEY = ACCOUNT_SESSION_STORAGE_KEY;
 export const profileSessionStorageKey = TOKEN_KEY;
 const FACTORY_RESET_KEY = "parallette25-factory-reset";
 const FACTORY_RESET_EPOCH = "2026-08-11-1";
+const VNEXT_PRODUCTION_STORAGE_NAMESPACE = "vnext-production1";
+const VNEXT_PRODUCTION_SHADOW_DATABASE = "parallette25-vnext-production1";
 const REMOTE_API = (import.meta.env.VITE_PROFILE_API_URL as string | undefined)?.replace(/\/$/u, "");
 export const remoteSyncAvailable = Boolean(REMOTE_API);
 
@@ -141,11 +182,15 @@ const storedSessions = (): Record<string, StoredSession> => {
   } catch { return {}; }
 };
 const saveSessions = (sessions: Record<string, StoredSession>) => localStorage.setItem(TOKEN_KEY, JSON.stringify(sessions));
-const setSession = (profileId: string, token: string, expiresAt?: string) => saveSessions({ ...storedSessions(), [profileId]: { token, expiresAt } });
+const setSession = (profileId: string, token: string, expiresAt?: string) => {
+  saveSessions({ ...storedSessions(), [profileId]: { token, expiresAt } });
+  announceAccountSessionChange({ profileId, active: true });
+};
 const clearSession = (profileId: string) => {
   const sessions = storedSessions();
   delete sessions[profileId];
   saveSessions(sessions);
+  announceAccountSessionChange({ profileId, active: false });
 };
 const sessionFor = (profileId: string): StoredSession | null => {
   const session = storedSessions()[profileId];
@@ -158,6 +203,7 @@ const sessionFor = (profileId: string): StoredSession | null => {
 };
 
 export const hasProfileSession = (profileId: string) => Boolean(sessionFor(profileId));
+export const hasVNextAccountSession = (profileId: string) => Boolean(sessionFor(profileId));
 export const isSecuredProfile = (profile: ProfileRecord) => profile.accountSecured === true || Boolean(profile.lastSyncedAt);
 
 const openDb = (): Promise<IDBDatabase | null> => new Promise((resolve) => {
@@ -171,6 +217,38 @@ const openDb = (): Promise<IDBDatabase | null> => new Promise((resolve) => {
   request.onsuccess = () => resolve(request.result);
   request.onerror = () => resolve(null);
 });
+
+// Security lifecycle only: vNext remains a shadow feature, but signed-out or
+// factory-reset browsers must not retain its isolated account data.
+const clearVNextShadowAthlete = async (profileId: string, databaseName?: string): Promise<void> => {
+  if (typeof indexedDB === "undefined") return;
+  const { clearVNextShadowAthleteData } = await import("./vnext/persistence/indexedDb");
+  await clearVNextShadowAthleteData(profileId, databaseName ? { databaseName } : {});
+};
+
+const clearVNextShadowDevice = async (): Promise<void> => {
+  if (typeof indexedDB === "undefined") return;
+  const { deleteVNextShadowDatabase } = await import("./vnext/persistence/indexedDb");
+  await deleteVNextShadowDatabase();
+  await deleteVNextShadowDatabase({ databaseName: VNEXT_PRODUCTION_SHADOW_DATABASE });
+};
+
+const clearVNextWorkflowState = (profileId: string, namespace: string): void => {
+  const identityStorageKey = `parallette25-${namespace}-identity-v1`;
+  const legacyAthleteStorageKey = `parallette25-${namespace}-athlete-v1`;
+  for (const kind of ["emphasis", "workout-recovery", "guided-recovery", "active-workout"]) {
+    localStorage.removeItem(`parallette25-${namespace}-${kind}-v1:${profileId}`);
+  }
+  try {
+    const identity = JSON.parse(localStorage.getItem(identityStorageKey) ?? "null") as { athleteId?: unknown } | null;
+    if (identity?.athleteId === profileId) localStorage.removeItem(identityStorageKey);
+  } catch {
+    localStorage.removeItem(identityStorageKey);
+  }
+  if (localStorage.getItem(legacyAthleteStorageKey) === profileId) {
+    localStorage.removeItem(legacyAthleteStorageKey);
+  }
+};
 
 /**
  * One-time owner-requested factory reset. It removes profiles, sessions,
@@ -194,6 +272,7 @@ export async function applyFactoryReset(): Promise<boolean> {
       });
       db.close();
     }
+    await clearVNextShadowDevice();
     localStorage.setItem(FACTORY_RESET_KEY, FACTORY_RESET_EPOCH);
   }
 
@@ -444,6 +523,8 @@ type ApiPayload = {
   expiresAt?: string;
   recoveryCode?: string;
   error?: string;
+  code?: string;
+  authority?: string;
 };
 
 class ApiError extends Error {
@@ -456,7 +537,7 @@ class ApiError extends Error {
   }
 }
 
-const api = async (path: string, init: RequestInit = {}, profileId?: string): Promise<ApiPayload | ProfileRecord> => {
+const apiResponse = async (path: string, init: RequestInit = {}, profileId?: string): Promise<Response> => {
   if (!REMOTE_API) throw new Error("Cloud sync is not configured for this deployment.");
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
@@ -471,10 +552,58 @@ const api = async (path: string, init: RequestInit = {}, profileId?: string): Pr
   } catch {
     throw new Error("Network unavailable. Your changes remain saved on this device.");
   }
-  const payload = await response.json().catch(() => ({})) as ApiPayload | ProfileRecord;
   if (response.status === 401 && profileId) clearSession(profileId);
+  return response;
+};
+
+const api = async (path: string, init: RequestInit = {}, profileId?: string): Promise<ApiPayload | ProfileRecord> => {
+  const response = await apiResponse(path, init, profileId);
+  const payload = await response.json().catch(() => ({})) as ApiPayload | ProfileRecord;
   if (!response.ok) throw new ApiError(response.status, payload as ApiPayload, `Sync failed (${response.status}).`);
   return payload;
+};
+
+export type VNextShadowSyncOptions = NonNullable<
+  Parameters<typeof syncObservationDeltasType>[3]
+>;
+
+/**
+ * Authenticated vNext observation sync for an already signed-in profile.
+ * The bearer session stays inside the existing profile boundary: callers
+ * supply only the isolated store and profile ID, and this wrapper can reach
+ * only the fixed shadow endpoint. It never reads or writes the v1.2 profile.
+ */
+export const syncVNextShadowObservations = async (
+  store: VNextShadowStore,
+  profileId: string,
+  options: VNextShadowSyncOptions = {},
+): Promise<ShadowSyncSummary> => {
+  if (!REMOTE_API) throw new Error("Cloud sync is not configured for this deployment.");
+  if (!sessionFor(profileId)) throw new Error("Sign in to sync this profile.");
+
+  const [{ parseStableId }, { createAuthenticatedShadowTransport, syncObservationDeltas }] = await Promise.all([
+    import("./vnext/contracts"),
+    import("./vnext/persistence/sync"),
+  ]);
+  const athleteId = parseStableId("athlete", profileId);
+  const endpoint = `${REMOTE_API}/vnext/shadow/sync`;
+  const fixedEndpointFetch: typeof fetch = async (input, init) => {
+    const requestedUrl = input instanceof Request ? input.url : String(input);
+    if (requestedUrl !== endpoint) throw new Error("vNext shadow sync refused an unexpected endpoint.");
+    return apiResponse("/vnext/shadow/sync", init, profileId);
+  };
+  const transport = createAuthenticatedShadowTransport(fixedEndpointFetch, endpoint);
+  return syncObservationDeltas(store, athleteId, transport, options);
+};
+
+/** Only transport/temporary service failures may use the offline-first path. */
+export const isTransientVNextSyncError = (reason: unknown): boolean => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  if (message.startsWith("Network unavailable.")) return true;
+  const status = /^shadow-sync-http-(\d{3})$/u.exec(message)?.[1];
+  if (!status) return false;
+  const code = Number(status);
+  return code === 408 || code === 425 || code === 429 || code >= 500;
 };
 
 const acceptAccount = async (payload: ApiPayload): Promise<AccountResult> => {
@@ -487,6 +616,221 @@ const acceptAccount = async (payload: ApiPayload): Promise<AccountResult> => {
   await cacheProfile(profile);
   return { profile, recoveryCode: payload.recoveryCode };
 };
+
+const acceptVNextAccountSession = (payload: ApiPayload): VNextAccountIdentity => {
+  const profileId = payload.profile?.profileId;
+  const username = payload.profile?.username;
+  if (typeof profileId !== "string" || !/^[-\w]{8,80}$/u.test(profileId)
+    || typeof username !== "string" || !payload.token) {
+    throw new Error("The account service returned an incomplete response.");
+  }
+  // Store only the shared authentication session. The returned v1.2 profile
+  // blob is intentionally ignored: it is not vNext evidence or intent and is
+  // never cached, merged or hydrated by this boundary.
+  setSession(profileId, payload.token, payload.expiresAt);
+  return {
+    profileId,
+    username: sanitizeName(username) || "Athlete",
+    ...(payload.recoveryCode ? { recoveryCode: payload.recoveryCode } : {}),
+  };
+};
+
+/** Create a shared cloud account without creating or hydrating v1.2 training state locally. */
+export async function registerVNextAccount(username: string, password: string): Promise<VNextAccountIdentity> {
+  const payload = await api("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  }) as ApiPayload;
+  return acceptVNextAccountSession(payload);
+}
+
+/** Sign in for vNext observation sync without reading the returned legacy training blob. */
+export async function signInVNextAccount(username: string, password: string): Promise<VNextAccountIdentity> {
+  const payload = await api("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  }) as ApiPayload;
+  return acceptVNextAccountSession(payload);
+}
+
+/**
+ * Secure an existing device-only athlete without changing its stable athlete
+ * ID. Existing v1.2 state is sent when present; a vNext-native local athlete
+ * contributes only an empty compatibility shell while its observation truth
+ * remains in the isolated vNext store.
+ */
+export async function secureVNextLocalAthlete(
+  profileId: string,
+  username: string,
+  password: string,
+): Promise<VNextAccountIdentity> {
+  const existing = await getProfile(profileId);
+  const timestamp = now();
+  const source = existing ?? normalizeProfile({
+    ...newProfile(username),
+    profileId,
+    username,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    pendingSync: false,
+  });
+  const payload = await api("/auth/claim", {
+    method: "POST",
+    body: JSON.stringify({ username, profileId, password, profile: source }),
+  }) as ApiPayload;
+  return acceptVNextAccountSession(payload);
+}
+
+/** Recover account access without hydrating its legacy profile authority. */
+export async function recoverVNextAccount(
+  username: string,
+  recoveryCode: string,
+  newPassword: string,
+): Promise<VNextAccountIdentity> {
+  const payload = await api("/auth/recover", {
+    method: "POST",
+    body: JSON.stringify({ username, recoveryCode, newPassword }),
+  }) as ApiPayload;
+  return acceptVNextAccountSession(payload);
+}
+
+/** Permanently delete an authenticated account after password confirmation. */
+export async function deleteVNextAccount(
+  profileId: string,
+  username: string,
+  password: string,
+  databaseName?: string,
+): Promise<void> {
+  await api("/profiles/me", {
+    method: "DELETE",
+    body: JSON.stringify({ confirmation: username, password }),
+  }, profileId);
+  clearSession(profileId);
+  await clearVNextShadowAthlete(profileId, databaseName);
+  clearVNextWorkflowState(profileId, databaseName === VNEXT_PRODUCTION_SHADOW_DATABASE
+    ? VNEXT_PRODUCTION_STORAGE_NAMESPACE
+    : "vnext-rc");
+}
+
+export type VNextAccountSessionStatus = "active" | "offline" | "invalid";
+
+/**
+ * Revalidate a persisted vNext account identity before its observation store is
+ * opened. An unexpired bearer may continue offline; an absent, expired,
+ * rejected or identity-mismatched session never unlocks account-scoped data.
+ * The returned legacy profile body is inspected only for account ownership and
+ * is deliberately not cached, merged or exposed to the vNext application.
+ */
+export async function validateVNextAccountSession(
+  profileId: string,
+): Promise<VNextAccountSessionStatus> {
+  if (!REMOTE_API || !sessionFor(profileId)) return "invalid";
+  try {
+    const remote = await api("/auth/session", { method: "GET" }, profileId) as ProfileRecord;
+    if (remote.profileId !== profileId) {
+      clearSession(profileId);
+      return "invalid";
+    }
+    return "active";
+  } catch (error) {
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+      clearSession(profileId);
+      return "invalid";
+    }
+    // A valid, unexpired local bearer is the offline-first unlock. Transient
+    // network/server failure may postpone sync, but does not expose another
+    // athlete or turn a missing/expired session into access.
+    return sessionFor(profileId) ? "offline" : "invalid";
+  }
+}
+
+/**
+ * Read the exact legacy authority surface once for the Phase 11 converter.
+ * This never caches, merges, edits or saves the v1.2 profile. Account mode
+ * prefers the authenticated server copy and falls back to the existing local
+ * mirror only during a transient outage.
+ */
+export type VNextLegacyMigrationRead = Readonly<{
+  profile: LegacyV12ProfileSource;
+  provenance: "authenticated-remote" | "device-local" | "device-local-pending-vnext-handoff";
+}>;
+
+export async function readLegacyProfileForVNextMigration(
+  profileId: string,
+  mode: "local" | "account",
+): Promise<VNextLegacyMigrationRead | undefined> {
+  const local = await getProfile(profileId);
+  if (mode === "account" && local?.pendingSync === true
+    && local.syncError?.includes("Parallette25 vNext")) {
+    return {
+      profile: legacyMigrationSource(local),
+      provenance: "device-local-pending-vnext-handoff",
+    };
+  }
+  if (mode === "account" && REMOTE_API && sessionFor(profileId)) {
+    try {
+      const remote = normalizeProfile(await api("/auth/session", { method: "GET" }, profileId) as ProfileRecord);
+      if (remote.profileId !== profileId) {
+        clearSession(profileId);
+        throw new ApiError(409, {
+          error: "The account service returned another athlete identity.",
+          code: "VNEXT_ACCOUNT_IDENTITY_MISMATCH",
+        }, "Account identity mismatch.");
+      }
+      return { profile: legacyMigrationSource(remote), provenance: "authenticated-remote" };
+    } catch (error) {
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500) throw error;
+      // A previously verified local mirror is a valid offline migration source;
+      // its immutable source fingerprint keeps a later online retry idempotent.
+    }
+  }
+  return local
+    ? { profile: legacyMigrationSource(local), provenance: "device-local" }
+    : undefined;
+}
+
+/**
+ * End the shared bearer session and clear only this athlete's isolated vNext
+ * device data. The v1.2 local profile mirror is not read or mutated here.
+ */
+export async function signOutVNextAccount(profileId: string, databaseName?: string): Promise<void> {
+  if (typeof indexedDB !== "undefined") {
+    const [{ createVNextShadowStore }, { parseStableId }] = await Promise.all([
+      import("./vnext/persistence/indexedDb"),
+      import("./vnext/contracts"),
+    ]);
+    const store = createVNextShadowStore(databaseName ? { databaseName } : {});
+    const athleteId = parseStableId("athlete", profileId);
+
+    try {
+      if (REMOTE_API && sessionFor(profileId)) {
+        try {
+          await syncVNextShadowObservations(store, profileId);
+        } catch {
+          // The outbox check below decides whether local removal is safe. A
+          // transient pull failure is not data loss when every local change was
+          // previously acknowledged.
+        }
+      }
+      const pending = await store.readSyncUpload(athleteId, 1);
+      if (pending.length > 0) {
+        throw new Error("Connect and sync this athlete before signing out so unsynced progress is not removed from this device.");
+      }
+    } finally {
+      store.close();
+    }
+  }
+
+  if (REMOTE_API && sessionFor(profileId)) {
+    try { await api("/auth/logout", { method: "POST" }, profileId); }
+    catch { /* Local sign-out must still complete while offline. */ }
+  }
+  clearSession(profileId);
+  await clearVNextShadowAthlete(profileId, databaseName);
+  clearVNextWorkflowState(profileId, databaseName === VNEXT_PRODUCTION_SHADOW_DATABASE
+    ? VNEXT_PRODUCTION_STORAGE_NAMESPACE
+    : "vnext-rc");
+}
 
 export async function validateProfileSession(profileId: string): Promise<ProfileRecord | null> {
   if (!REMOTE_API || !sessionFor(profileId)) return null;
@@ -531,6 +875,12 @@ export async function recoverAccount(username: string, recoveryCode: string, new
 }
 
 export async function signOutProfile(profileId: string): Promise<void> {
+  // The rollback/v1.2 lane shares the account session. It must apply the same
+  // pending-outbox protection and remove all account-scoped vNext recovery
+  // state, rather than silently deleting observations from a shared device.
+  if (hasVNextAccountSession(profileId)) {
+    await signOutVNextAccount(profileId, VNEXT_PRODUCTION_SHADOW_DATABASE);
+  }
   if (REMOTE_API && sessionFor(profileId)) {
     try { await api("/auth/logout", { method: "POST" }, profileId); }
     catch { /* The local token must still be removed when offline. */ }
@@ -538,10 +888,16 @@ export async function signOutProfile(profileId: string): Promise<void> {
   clearSession(profileId);
   // A shared device must not retain an unlocked copy of a signed-out account.
   // The cloud account remains intact and can be restored through Sign in.
-  await removeLocalProfile(profileId);
+  await Promise.all([removeLocalProfile(profileId), clearVNextShadowAthlete(profileId)]);
+  clearVNextWorkflowState(profileId, "vnext-rc");
 }
 
-type RemoteResult = { profile?: ProfileRecord; conflict?: ProfileRecord; error?: string };
+type RemoteResult = {
+  profile?: ProfileRecord;
+  conflict?: ProfileRecord;
+  error?: string;
+  authorityActive?: boolean;
+};
 
 async function putRemote(profile: ProfileRecord, revision: number): Promise<RemoteResult> {
   if (!REMOTE_API) return { profile: { ...profile, pendingSync: false } };
@@ -554,6 +910,14 @@ async function putRemote(profile: ProfileRecord, revision: number): Promise<Remo
     }, profile.profileId) as ProfileRecord;
     return { profile: normalizeProfile(response) };
   } catch (error) {
+    if (error instanceof ApiError && error.status === 409
+      && error.payload.code === "VNEXT_AUTHORITY_ACTIVE") {
+      return {
+        authorityActive: true,
+        error: error.message,
+        ...(error.payload.profile ? { conflict: normalizeProfile(error.payload.profile) } : {}),
+      };
+    }
     if (error instanceof ApiError && error.status === 409 && error.payload.profile) {
       return { conflict: normalizeProfile(error.payload.profile) };
     }
@@ -569,6 +933,15 @@ async function pushWithConflictMerge(profile: ProfileRecord): Promise<ProfileRec
     await cacheProfile(saved);
     return saved;
   }
+  if (first.authorityActive) {
+    const pending = {
+      ...profile,
+      pendingSync: true,
+      syncError: first.error ?? "Open Parallette25 vNext to reconcile this locally saved work.",
+    };
+    await cacheProfile(pending);
+    return pending;
+  }
   if (first.conflict) {
     const merged = { ...mergeProfiles(profile, first.conflict), pendingSync: true, revision: first.conflict.revision, updatedAt: now() };
     await cacheProfile(merged);
@@ -577,6 +950,15 @@ async function pushWithConflictMerge(profile: ProfileRecord): Promise<ProfileRec
       const saved = { ...retry.profile, pendingSync: false, syncError: undefined, lastSyncedAt: now() };
       await cacheProfile(saved);
       return saved;
+    }
+    if (retry.authorityActive) {
+      const pending = {
+        ...merged,
+        pendingSync: true,
+        syncError: retry.error ?? "Open Parallette25 vNext to reconcile this locally saved work.",
+      };
+      await cacheProfile(pending);
+      return pending;
     }
     const pending = { ...merged, pendingSync: true, syncError: retry.error ?? "Revision conflict needs retry" };
     await cacheProfile(pending);
@@ -671,7 +1053,10 @@ export async function deleteProfile(profileId: string, password?: string): Promi
     }, profileId);
   }
   clearSession(profileId);
-  await removeLocalProfile(profileId);
+  await Promise.all([removeLocalProfile(profileId), clearVNextShadowAthlete(profileId)]);
+  await clearVNextShadowAthlete(profileId, VNEXT_PRODUCTION_SHADOW_DATABASE);
+  clearVNextWorkflowState(profileId, "vnext-rc");
+  clearVNextWorkflowState(profileId, VNEXT_PRODUCTION_STORAGE_NAMESPACE);
 }
 
 export function exportProfile(profile: ProfileRecord): string {

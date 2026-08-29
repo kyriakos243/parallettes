@@ -1,0 +1,26 @@
+# NON-PRODUCTION EXAMPLE ONLY.
+# Use this as a separate config (`wrangler --config wrangler.vnext-rc.toml ...`)
+# after replacing every placeholder. Never point it at the production Worker,
+# D1 database, KV namespace or Pages origin.
+
+name = "parallette25-profile-api-vnext-rc"
+main = "worker.js"
+compatibility_date = "2026-08-10"
+
+[observability]
+enabled = true
+
+[vars]
+ALLOWED_ORIGINS = "https://replace-with-isolated-vnext-rc-origin.example"
+VNEXT_SHADOW_MODE = "true"
+VNEXT_DATABASE_ID = "replace-with-isolated-vnext-rc-d1-database-id"
+
+[[kv_namespaces]]
+binding = "PROFILES"
+id = "replace-with-isolated-vnext-rc-kv-namespace-id"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "parallette25-profiles-vnext-rc"
+database_id = "replace-with-isolated-vnext-rc-d1-database-id"
+migrations_dir = "migrations"

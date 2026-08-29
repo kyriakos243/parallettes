@@ -16,7 +16,13 @@ globalThis.localStorage = {
 };
 globalThis.indexedDB = undefined;
 const loaded = { exports: {} };
-new Function("exports", "module", "require", compiled)(loaded.exports, loaded, () => { throw new Error("Unexpected import"); });
+new Function("exports", "module", "require", compiled)(loaded.exports, loaded, (specifier) => {
+  if (specifier === "./accountSessionSignals") return {
+    ACCOUNT_SESSION_STORAGE_KEY: "parallette25-account-sessions-v1",
+    announceAccountSessionChange: () => {},
+  };
+  throw new Error(`Unexpected import ${specifier}`);
+});
 const { applyFactoryReset, exportProfile, importProfile, mergeProfiles, newProfile, resetProfileTraining } = loaded.exports;
 
 memory.set("parallette25-profile-index-v1", JSON.stringify([{ profileId: "old", username: "Old" }]));

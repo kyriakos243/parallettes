@@ -1,3 +1,6 @@
+import { handleVNextShadowSync } from "./vnext-shadow.js";
+import { buildProfileApiReleaseHealth } from "./release-health.js";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 // Cloudflare Workers Web Crypto rejects PBKDF2 iteration counts above 100,000.
@@ -6,6 +9,7 @@ const decoder = new TextDecoder();
 const PASSWORD_ITERATIONS = 100_000;
 const SESSION_DAYS = 30;
 const MAX_PROFILE_BYTES = 750_000;
+const MAX_VNEXT_SHADOW_BYTES = 1_500_000;
 const MAX_FAILED_ATTEMPTS = 8;
 const RATE_WINDOW_MS = 15 * 60 * 1000;
 const base64Url = (bytes) => {
@@ -79,9 +83,9 @@ const json = (value, status = 200, origin = null) => new Response(JSON.stringify
   headers: responseHeaders(origin),
 });
 
-const readJson = async (request) => {
+const readJsonWithin = async (request, maximumBytes) => {
   const declared = Number(request.headers.get("content-length") ?? 0);
-  if (declared > MAX_PROFILE_BYTES) throw new Error("REQUEST_TOO_LARGE");
+  if (declared > maximumBytes) throw new Error("REQUEST_TOO_LARGE");
   if (!request.body) return {};
   const reader = request.body.getReader();
   const chunks = [];
@@ -90,7 +94,7 @@ const readJson = async (request) => {
     const { done, value } = await reader.read();
     if (done) break;
     length += value.byteLength;
-    if (length > MAX_PROFILE_BYTES) {
+    if (length > maximumBytes) {
       await reader.cancel("REQUEST_TOO_LARGE");
       throw new Error("REQUEST_TOO_LARGE");
     }
@@ -101,6 +105,8 @@ const readJson = async (request) => {
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
   return bytes.byteLength ? JSON.parse(decoder.decode(bytes)) : {};
 };
+const readJson = (request) => readJsonWithin(request, MAX_PROFILE_BYTES);
+const readVNextShadowJson = (request) => readJsonWithin(request, MAX_VNEXT_SHADOW_BYTES);
 
 const defaultProfile = (profileId, username) => {
   const timestamp = now();
@@ -338,6 +344,23 @@ const recover = async (request, env, origin) => {
 const profileMe = async (request, env, origin, account) => {
   if (request.method === "GET") return json(parseProfile(account), 200, origin);
   if (request.method === "PUT") {
+    // The first successful vNext sync creates this athlete's sync head and is
+    // the irreversible authority hand-off marker. A stale/open v1.2 client may
+    // keep its local pending profile, but it must never mutate the cloud legacy
+    // blob after that point or create a mixed v1.2/vNext write path.
+    if (env.VNEXT_PRODUCTION_AUTHORITY_MODE === "true") {
+      const activeVNextAuthority = await env.DB.prepare(
+        "SELECT 1 AS active FROM vnext_shadow_sync_heads WHERE profile_id = ? LIMIT 1",
+      ).bind(account.profile_id).first();
+      if (activeVNextAuthority) {
+        return json({
+          error: "This athlete now uses Parallette25 vNext. Refresh the app to reconcile locally saved work.",
+          code: "VNEXT_AUTHORITY_ACTIVE",
+          authority: "vnext-production",
+          profile: parseProfile(account),
+        }, 409, origin);
+      }
+    }
     const incoming = await readJson(request);
     const expected = Number(request.headers.get("if-match"));
     if (!Number.isInteger(expected) || expected !== Number(account.revision)) {
@@ -382,7 +405,10 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: responseHeaders(origin) });
     try {
       const url = new URL(request.url);
-      if (url.pathname === "/health" && request.method === "GET") return json({ ok: true, auth: "password", storage: "d1" }, 200, origin);
+      if (url.pathname === "/health" && request.method === "GET") {
+        const health = await buildProfileApiReleaseHealth(env);
+        return json(health, health.ok ? 200 : 503, origin);
+      }
       if (url.pathname === "/auth/register" && request.method === "POST") return await register(request, env, origin);
       if (url.pathname === "/auth/login" && request.method === "POST") return await login(request, env, origin);
       if (url.pathname === "/auth/claim" && request.method === "POST") return await claimLegacy(request, env, origin);
@@ -395,6 +421,9 @@ export default {
         const token = request.headers.get("authorization").slice(7).trim();
         await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(await digest(token)).run();
         return json({ signedOut: true }, 200, origin);
+      }
+      if (env.VNEXT_SHADOW_MODE === "true" && url.pathname === "/vnext/shadow/sync" && request.method === "POST") {
+        return await handleVNextShadowSync(request, env, origin, account, { json, readJson: readVNextShadowJson });
       }
       if (url.pathname === "/profiles/me") return await profileMe(request, env, origin, account);
       return json({ error: "Not found." }, 404, origin);
