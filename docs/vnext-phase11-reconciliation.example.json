@@ -16,6 +16,12 @@
   },
   "preexistingLegacyAuthorityBeforeSha256": "REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS",
   "preexistingLegacyAuthorityAfterSha256": "REPLACE_WITH_SAME_64_LOWERCASE_HEX_CHARACTERS",
+  "legacyAuthorityBoundary": {
+    "initialRecoveryProjectionSha256": "REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS",
+    "latestPreexistingWriteAt": "REPLACE_WITH_EXACT_UTC_TIMESTAMP",
+    "cutoverAt": "REPLACE_WITH_EXACT_UTC_TIMESTAMP",
+    "baselineCapturedAt": "REPLACE_WITH_EXACT_UTC_TIMESTAMP"
+  },
   "expectedMigratedProfiles": 1,
   "beforeMetrics": {
     "accounts": 0,

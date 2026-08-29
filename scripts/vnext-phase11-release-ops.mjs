@@ -310,6 +310,24 @@ export const validatePhase11Reconciliation = (
       !== evidence.preexistingLegacyAuthorityAfterSha256) {
     issue(issues, "legacy-authority-changed", "Pre-existing legacy profile authority changed during additive migration.");
   }
+  const legacyBoundary = evidence.legacyAuthorityBoundary;
+  const cutoverAt = exactTime(legacyBoundary?.cutoverAt);
+  const baselineCapturedAt = exactTime(legacyBoundary?.baselineCapturedAt);
+  const latestPreexistingWriteAt = exactTime(legacyBoundary?.latestPreexistingWriteAt);
+  if (!object(legacyBoundary)
+    || !SHA256.test(legacyBoundary.initialRecoveryProjectionSha256 ?? "")
+    || !Number.isFinite(cutoverAt)
+    || !Number.isFinite(baselineCapturedAt)
+    || !Number.isFinite(latestPreexistingWriteAt)
+    || latestPreexistingWriteAt > cutoverAt
+    || baselineCapturedAt < cutoverAt
+    || baselineCapturedAt > capturedAt) {
+    issue(issues, "legacy-authority-boundary",
+      "Legacy authority evidence must prove the latest pre-existing write preceded cutover and the matching baseline was captured at or after that boundary.");
+  }
+  if (preflight && cutoverAt < exactTime(preflight.verifiedAt)) {
+    issue(issues, "legacy-authority-boundary", "The authority cutover cannot predate the accepted cutover preflight.");
+  }
   const expected = evidence.expectedMigratedProfiles;
   const beforeMetrics = evidence.beforeMetrics;
   const metrics = evidence.metrics;
