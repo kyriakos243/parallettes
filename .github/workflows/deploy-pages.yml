@@ -32,6 +32,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.expected_source_commit }}
+          fetch-depth: 0
       - name: Verify exact source commit
         run: test "$(git rev-parse HEAD)" = "${{ inputs.expected_source_commit }}"
       - name: Install pnpm
