@@ -325,8 +325,8 @@ export const validatePhase11Reconciliation = (
     issue(issues, "legacy-authority-boundary",
       "Legacy authority evidence must prove the latest pre-existing write preceded cutover and the matching baseline was captured at or after that boundary.");
   }
-  if (preflight && cutoverAt < exactTime(preflight.verifiedAt)) {
-    issue(issues, "legacy-authority-boundary", "The authority cutover cannot predate the accepted cutover preflight.");
+  if (preflight && cutoverAt < exactTime(preflight.releaseAttempt?.startedAt)) {
+    issue(issues, "legacy-authority-boundary", "The authority cutover cannot predate this release attempt.");
   }
   const expected = evidence.expectedMigratedProfiles;
   const beforeMetrics = evidence.beforeMetrics;
