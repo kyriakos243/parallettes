@@ -258,6 +258,13 @@ assert(!validatePhase11Reconciliation({
     baselineCapturedAt: at(-30_000),
   },
 }, { preflight, nowMs: testNow + 60_000 }).pass, "A pre-cutover authority baseline was accepted");
+assert(!validatePhase11Reconciliation({
+  ...reconciliation,
+  legacyAuthorityBoundary: {
+    ...reconciliation.legacyAuthorityBoundary,
+    cutoverAt: at(-11 * 60 * 1000),
+  },
+}, { preflight, nowMs: testNow + 60_000 }).pass, "A cutover predating the release attempt was accepted");
 
 const rollback = buildPhase11RollbackPlan({ owners: { rollback: "rollback-owner" } });
 assert(rollback.executable === false && rollback.dataRestoreIncluded === false
