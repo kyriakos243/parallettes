@@ -30,7 +30,7 @@ During Phases 4–10, that variable was enabled only in a local, preview or othe
 - configured production release identity plus the accepted RC.3 provenance;
 - migration-0002/immutability readiness and whether authenticated vNext sync is enabled.
 
-The checked-in production configuration carries only non-sensitive identity values for `parallette25-vnext.1`. `VNEXT_SHADOW_MODE=true` remains deliberately absent until the snapshot, additive-schema, disabled-API health and rollback-owner gates in the [Phase 11 production runbook](../docs/VNEXT_PRODUCTION_RELEASE_RUNBOOK.md) pass. A healthy v1.2 API does not imply that vNext is ready; final readiness requires exact identity, complete observation schema and explicit sync enablement.
+The checked-in production configuration carries only non-sensitive identity values for `parallette25-vnext.1`. After the Phase 11 snapshot, additive-schema, disabled-API health and rollback-owner gates passed, `VNEXT_SHADOW_MODE=true` and `VNEXT_PRODUCTION_AUTHORITY_MODE=true` were enabled together. Keep them paired while vNext is authoritative; a normal rollback restores coherent v1.2 application authority before closing vNext writes. A healthy legacy account API alone does not imply that vNext is ready: exact release/database identity, complete observation schema and both explicit authority gates are required.
 
 The runbook also defines private D1 snapshot evidence, the read-only `phase11-reconciliation.sql` checks and the fail-closed `scripts/vnext-phase11-release-ops.mjs` preflight/reconciliation/rollback-plan commands. Neither script deploys, migrates, restores nor deletes data. Never put database exports or credential material in the repository.
 

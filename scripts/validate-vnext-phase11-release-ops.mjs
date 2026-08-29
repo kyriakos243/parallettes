@@ -170,6 +170,12 @@ const reconciliation = {
   },
   preexistingLegacyAuthorityBeforeSha256: sha,
   preexistingLegacyAuthorityAfterSha256: sha,
+  legacyAuthorityBoundary: {
+    initialRecoveryProjectionSha256: sha,
+    latestPreexistingWriteAt: at(-30_000),
+    cutoverAt: at(0),
+    baselineCapturedAt: at(30_000),
+  },
   expectedMigratedProfiles: 2,
   beforeMetrics: {
     accounts: 1,
@@ -238,6 +244,20 @@ assert(!validatePhase11Reconciliation({
   ...reconciliation,
   preexistingLegacyAuthorityAfterSha256: "b".repeat(64),
 }, { preflight, nowMs: testNow + 60_000 }).pass, "Changed pre-existing legacy authority was accepted");
+assert(!validatePhase11Reconciliation({
+  ...reconciliation,
+  legacyAuthorityBoundary: {
+    ...reconciliation.legacyAuthorityBoundary,
+    latestPreexistingWriteAt: at(30_000),
+  },
+}, { preflight, nowMs: testNow + 60_000 }).pass, "A post-cutover legacy authority write was accepted");
+assert(!validatePhase11Reconciliation({
+  ...reconciliation,
+  legacyAuthorityBoundary: {
+    ...reconciliation.legacyAuthorityBoundary,
+    baselineCapturedAt: at(-30_000),
+  },
+}, { preflight, nowMs: testNow + 60_000 }).pass, "A pre-cutover authority baseline was accepted");
 
 const rollback = buildPhase11RollbackPlan({ owners: { rollback: "rollback-owner" } });
 assert(rollback.executable === false && rollback.dataRestoreIncluded === false

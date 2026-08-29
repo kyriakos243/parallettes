@@ -116,9 +116,10 @@ The remaining actions form one controlled cutover. Pause if any gate fails.
    node scripts/vnext-phase11-release-ops.mjs preflight --evidence /absolute/path/to/preflight.json --require-sync
    ```
 
-4. Publish the frozen `parallette25-vnext.1` app/service-worker artifacts with the recorded hashes.
-5. Switch the served application coherently to vNext production read/write authority. Never run a v1.2 presentation with vNext writes, or a vNext presentation with v1.2 progression authority.
-6. Confirm a stale/incorrect build identity fails inert rather than falling back to legacy startup, and confirm the service worker does not mix v1 and vNext cache lanes.
+4. At the authority switch, export the pre-existing cohort's legacy training-authority projection (`profile_id`, revision and profile blob) as the authority-boundary baseline. Prefer a capture immediately before publishing and verify it again immediately after. A just-after-cutover capture may establish the boundary only when the latest row write timestamp strictly precedes the exact deployment cutover and the earlier recovery export remains preserved. A legitimate v1.2 save may differ from that recovery export because v1.2 remains authoritative until this boundary.
+5. Publish the frozen `parallette25-vnext.1` app/service-worker artifacts with the recorded hashes.
+6. Switch the served application coherently to vNext production read/write authority. Never run a v1.2 presentation with vNext writes, or a vNext presentation with v1.2 progression authority.
+7. Confirm a stale/incorrect build identity fails inert rather than falling back to legacy startup, and confirm the service worker does not mix v1 and vNext cache lanes.
 
 The migration is intentionally **per-athlete and first-access**, not a server-side bulk profile rewrite. On an athlete's first production vNext open, the exact v1.2 authority surface is snapshotted, converted idempotently, stored locally and reconciled through authenticated delta sync. Therefore `expectedMigratedProfiles` means the activated cohort observed during the release window—not every account in D1. Reopening or reconnecting the same profile must reuse the same migration receipt and must not create duplicate observations.
 
@@ -134,14 +135,16 @@ Run the bounded Phase 11 smoke flows against synthetic/release-owner profiles on
 - stale cache/service-worker identity cannot mix v1.2 and vNext;
 - rollback owner can select the verified v1.2 deployment.
 
-Export the `accounts` table again. New registrations and password recovery may legitimately change account rows during the observation window, so do not require the whole table to remain byte-identical. Instead, compare the pre-existing cohort's legacy training-authority projection (`profile_id`, revision and profile blob) privately and record only matching before/after hashes. Run the checked-in read-only query and retain all result sets:
+Export the `accounts` table again. New registrations and password recovery may legitimately change account rows during the observation window, so do not require the whole table to remain byte-identical. Instead, compare the pre-existing cohort's legacy training-authority projection privately against the authority-boundary baseline and record only matching before/after hashes. Preserve the earlier recovery projection hash separately. Run the checked-in read-only query and retain its single aggregate result row:
 
 ```sh
 cd profile-api
 npx wrangler d1 export parallette25-profiles --remote --table=accounts --output="$release_evidence_dir/accounts-after.sql"
 shasum -a 256 "$release_evidence_dir/accounts-after.sql"
-npx wrangler d1 execute parallette25-profiles --remote --file=phase11-reconciliation.sql --json
+npx wrangler d1 execute parallette25-profiles --remote --command="$(sed '/^--/d' phase11-reconciliation.sql | tr '\n' ' ')" --json
 ```
+
+Current Wrangler remote uploaded-file mode reports execution metadata rather than the query row, so use the direct read-only statement form above for evidence capture. The reconciliation validator requires the latest pre-existing legacy write to precede the exact cutover and the matching baseline capture to occur at or after cutover; any post-cutover legacy-authority delta remains a rollback trigger.
 
 Map the query's snake-case metric/invariant names into the reconciliation evidence JSON. All invariant counts must be zero. Snapshot and migration-run counts must cover the activated cohort. Then run:
 
@@ -182,3 +185,13 @@ Keep rollback controls, the legacy data path and snapshots through the agreed ob
 - unresolved limitations and observation-window owner.
 
 Retiring rollback, deleting legacy fields, removing migration snapshots or purging additive observations is **not** part of Phase 11. It requires a separate explicit maintenance approval.
+
+## 10. Current production checkpoint
+
+The owner-authorised release attempt `520c65f9-2d89-4044-9481-b9ba05911363` published the exact frozen `parallette25-vnext.1` artifact through GitHub Actions run `33244593778` and Pages deployment `6154176269`. The live index and service worker match the frozen hashes, build `33055d9391f5136450dc` and cache lane `vnext-production1`. The retained-v1 rollback rehearsal succeeded through run `33243858575` and deployment `6154034303`.
+
+Production D1 was recovery-exported and locally restore-verified before additive migrations. Migration history and exact schema fingerprint are healthy; both authority variables are enabled together. Immediate bounded smoke passed a fresh 25-minute workout through Session Record and next recommendation, exact retry/offline replay, a second-device replay, first-access legacy conversion, repeated migration, reset followed by stale-device suppression, cache isolation and rollback readiness.
+
+The `2026-08-29T10:54:59Z` read-only checkpoint contained five activated profiles: four had idempotent migration snapshots/receipts and one was a fresh native session path. It recorded 13 Session Plans, 32 Evidence Events and 11 Session Records; every checked identity, cursor, reset, reference, correction, migration and immutable-row invariant was zero. The pre-existing legacy authority projection was byte-identical from the `2026-08-29T09:05:27Z` cutover boundary through reconciliation. The earlier recovery export remains preserved separately because a legitimate v1.2 synchronization-clock write completed before cutover.
+
+The private evidence set binds exact Worker/D1 identities, hashes, timestamps and recovery material without committing athlete payloads or credentials. The observation window remains active through `2026-08-30T08:40:19Z`. Run final health, authority-hash and read-only invariant reconciliation before declaring Phase 11 complete; retain rollback and all legacy/additive data afterward until separately authorised cleanup.

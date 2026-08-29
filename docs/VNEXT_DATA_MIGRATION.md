@@ -245,11 +245,14 @@ Live conversion is intentionally per-athlete on first vNext access, not a server
 
 The canonical [production release runbook](VNEXT_PRODUCTION_RELEASE_RUNBOOK.md) fixes the snapshot/schema/API/app/service-worker/authority order, immediate smoke flows, rollback triggers and observation-window closeout. `profile-api/phase11-reconciliation.sql` is a read-only aggregate/invariant query that exposes no profile IDs or payloads; `scripts/vnext-phase11-release-ops.mjs` validates source identity, operator evidence, exact health, migration counts, zero data-integrity violations and non-destructive rollback readiness. These tools never deploy, migrate, restore, delete or embed credentials. Normal rollback disables vNext authority/code while retaining additive schema, observations, snapshots, reset tombstones, migration receipts and all legacy data; D1 Time Travel/export restoration remains a separate destructive incident decision requiring new explicit owner approval.
 
+The 2026-08-29 production checkpoint completed the rehearsed order: a recoverable D1 export/bookmark, additive migrations, exact schema/API health, paired sync and production-authority enablement, retained-v1 rollback proof, exact frozen Pages publication and bounded live smoke. Conversion remained first-access and idempotent rather than a bulk rewrite. Immediate aggregate reconciliation covered four migrated profiles plus one fresh native profile, preserved the pre-existing legacy authority projection exactly from the cutover boundary, and reported all integrity invariants at zero. A legitimate v1.2 metadata-clock save occurred before the Pages authority switch; release evidence therefore preserves both the earlier recovery hash and the matching cutover-to-reconciliation authority hashes. Phase 11 remains open through the agreed observation window, with no legacy deletion or rollback retirement.
+
 ## 9. Compatibility Guarantees
 
 - Existing accounts, history, equipment and useful preferences are preserved wherever safely interpretable.
 - Old records remain readable even when exercises are deprecated.
 - No legacy claim becomes more precise or authoritative than its stored source permits.
 - Reset history stays reset.
-- v1.2 remains authoritative outside isolated vNext cohorts until Phase 11 cutover.
-- No live migration or production authority switch occurs before explicit Phase 11 owner approval.
+- vNext is production authority after the explicitly approved Phase 11 cutover; v1.2 remains a coherent retained rollback/historical compatibility path, never a mixed concurrent authority path.
+- Live conversion is per-athlete and idempotent on first access. It does not bulk-rewrite the legacy profile blob.
+- Legacy cleanup, rollback retirement or destructive D1 restoration remains outside Phase 11 and requires separate explicit approval.

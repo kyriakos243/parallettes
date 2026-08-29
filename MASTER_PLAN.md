@@ -1,9 +1,9 @@
 # Parallette25 vNext Master Plan
 
-**STATUS: PHASE 11 AUTHORISED — CONTROLLED RELEASE PREFLIGHT IN PROGRESS**
+**STATUS: PHASE 11 PRODUCTION RELEASE LIVE — OBSERVATION WINDOW ACTIVE**
 
 - Architecture direction: approved foundation
-- Last substantial update: 2026-08-28
+- Last substantial update: 2026-08-29
 - Inspected v1.2 implementation baseline: release commit `61b0876`; live GitHub Pages deployment verified as successor `4507da4` with the same application tree and `61b0876` ancestry
 - Current implementation phase: **Phase 11 — Controlled production migration and release**
 - Implementation authorised: **YES — PHASE 11 ONLY**
@@ -228,12 +228,12 @@ The complete delivery contract and every review gate live only in [Implementatio
 
 ## 12. Current Project State
 
-- **Current production version:** Parallette25 v1.2.0. The live GitHub Pages deployment at successor `4507da4` was verified to contain `61b0876` and the same application tree; it remains authoritative until the Phase 11 cutover gate passes.
+- **Current production version:** **`parallette25-vnext.1`**, build `33055d9391f5136450dc`, distribution fingerprint `6ea84cd7835a8d605708e33fa9e673534d38c5fed230914162e1842b55dee6d4`, cache lane `vnext-production1`. The retained v1.2 rollback artifact remains verified at successor `4507da4`, which contains `61b0876` and the same v1.2 application tree.
 - **Architecture status:** **APPROVED FOUNDATION**
 - **Current implementation phase:** **Phase 11**, authorised by the owner after approving Phase 10 and the exact RC.3 live animations.
-- **Completed phases:** **Phases 1–10**, through owner-approved comprehensive validation and release approval on 2026-08-28.
-- **Current approved milestone:** Owner-approved `parallette25-vnext-rc.3` remains immutable provenance. The corrected production artifact `parallette25-vnext.1` is frozen as build `33055d9391f5136450dc`, distribution fingerprint `6ea84cd7835a8d605708e33fa9e673534d38c5fed230914162e1842b55dee6d4`, and cache lane `vnext-production1`. Phase 11 corrections add per-athlete stale-v1 write exclusion at the production authority switch, fail-closed sync classification, secure device-athlete claiming/recovery/reset/deletion, pre-start replanning, production/RC browser-storage isolation, exact D1/schema/migration health, non-replayable release evidence, exact artifact deployment and an executable retained-v1 rollback lane. All historical validators, 12 complete athlete journeys, type checking and mutually exclusive v1/RC/production builds pass; all 28 owned guides covering 30 movements retain exact owner approval.
-- **Next intended action:** Complete the remaining target-environment gates in order: obtain action-time Cloudflare CLI authorisation, capture and recovery-verify the exact production D1 snapshot, apply additive migration `0002`, deploy and verify the compatible API with sync/production authority disabled, enable sync and production authority together, grant the exact frozen artifact, publish it, smoke a bounded activated cohort and reconcile against the same release-attempt evidence. Stop and retain v1.2 authority if any gate fails.
+- **Completed phases:** **Phases 1–10** are complete and owner-approved. Phase 11 snapshot, additive schema, API authority, exact artifact publication, bounded live smoke and immediate reconciliation gates are complete; the agreed observation window remains open.
+- **Current approved milestone:** Owner-approved `parallette25-vnext-rc.3` remains immutable provenance. `parallette25-vnext.1` is production authority at the exact frozen hashes. D1 migration `0002` is applied additively; per-athlete conversion is active; all legacy data, recovery snapshots and the verified v1.2 rollback lane are retained. Immediate production smoke passed fresh workout/session/next-recommendation, migrated-profile idempotence, offline replay, multi-device union, reset/stale-device suppression, cache isolation and rollback readiness. Read-only reconciliation recorded five activated profiles, four migration receipts/snapshots, 13 plans, 32 evidence events and 11 Session Records with every integrity invariant at zero.
+- **Next intended action:** Keep production under bounded observation through `2026-08-30T08:40:19Z`, retain rollback controls and legacy compatibility, then run the final read-only reconciliation and close Phase 11 only if health, authority hashes and all invariants remain clean. Legacy cleanup or rollback retirement is not authorised.
 - **Implementation authorised:** **YES — PHASE 11 ONLY**
-- **Live application behaviour/data changed:** Not yet. GitHub production still serves coherent v1.2 authority; no live D1 schema application, profile conversion, Worker deployment, vNext sync/authority enablement or application cutover has occurred. The checked-in Worker configuration omits both `VNEXT_SHADOW_MODE` and `VNEXT_PRODUCTION_AUTHORITY_MODE` until snapshot/schema/health/rollback gates pass.
+- **Live application behaviour/data changed:** **Yes, within authorised Phase 11 scope.** Production now serves one coherent vNext read/write path; the compatible Worker has vNext sync and production authority enabled together; D1 carries additive normalised observation tables; and first-access profiles convert idempotently. No live profile was bulk-rewritten, no legacy field/path was deleted, and projection caches remain rebuildable.
 - **Repository warning:** original-workspace `2d7ee8e` and local `main` are not valid vNext implementation bases without reconciliation; continue vNext work from `codex/vnext-phase-1` or a verified successor containing `61b0876`; see Section 3.
