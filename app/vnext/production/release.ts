@@ -169,9 +169,10 @@ const ownerMediaApprovals = Object.entries(VNEXT_PHASE10_OWNER_APPROVED_MEDIA_FI
   }));
 
 /**
- * Owner approval starts Phase 11 but does not itself grant a live operation.
- * Every production preflight remains pending until evidence from the actual
- * target environment is bound to a newly frozen Phase 11 artifact.
+ * The production grant is bound to release attempt
+ * 520c65f9-2d89-4044-9481-b9ba05911363. Its private evidence proves the
+ * retained v1 deployment, recoverable D1 snapshot, exact additive schema,
+ * coherent Worker authority switch and active rollback controls.
  */
 export const vNextPhase11ProductionReleaseContract = deepFreeze({
   schemaVersion: VNEXT_PHASE11_PRODUCTION_RELEASE_CONTRACT_VERSION,
@@ -197,20 +198,55 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
     status: "frozen",
     sourceFingerprint: "6ea84cd7835a8d605708e33fa9e673534d38c5fed230914162e1842b55dee6d4",
   },
-  preflight: REQUIRED_PREFLIGHT_GATES.map((id) => id === "phase11-release-artifact-frozen"
-    ? {
-        id,
-        status: "passed" as const,
-        evidence: "dist-set:6ea84cd7835a8d605708e33fa9e673534d38c5fed230914162e1842b55dee6d4",
-      }
-    : { id, status: "pending" as const }),
+  preflight: [
+    {
+      id: "deployed-v12-baseline-verified",
+      status: "passed",
+      evidence: "github-pages:6154034303;source:4507da4ee40616e97106698f18f49ad74d1600b3",
+    },
+    {
+      id: "phase11-release-artifact-frozen",
+      status: "passed",
+      evidence: "dist-set:6ea84cd7835a8d605708e33fa9e673534d38c5fed230914162e1842b55dee6d4",
+    },
+    {
+      id: "recoverable-production-snapshots-verified",
+      status: "passed",
+      evidence: "release-attempt:520c65f9-2d89-4044-9481-b9ba05911363;d1-bookmark-and-private-export-recovery-verified",
+    },
+    {
+      id: "compatible-schema-api-app-worker-order-ready",
+      status: "passed",
+      evidence: "worker:10b6df5e-0c54-4311-9fb4-dd531694c5e8;schema:2e5ff8e06af41b2e0aad00671d13c995c938ba5fc0db2db1023f9f5549dddc9d",
+    },
+    {
+      id: "live-migration-idempotency-and-reconciliation-ready",
+      status: "passed",
+      evidence: "migration:0002_vnext_shadow_observations.sql;phase11-reconciliation-validator-passed",
+    },
+    {
+      id: "release-and-rollback-owners-identified",
+      status: "passed",
+      evidence: "release-attempt:520c65f9-2d89-4044-9481-b9ba05911363;owner-roles-recorded",
+    },
+    {
+      id: "rollback-controls-active",
+      status: "passed",
+      evidence: "workflow-run:33243858575;rollback-v1-lane-passed",
+    },
+    {
+      id: "observation-window-and-stop-thresholds-approved",
+      status: "passed",
+      evidence: "release-attempt:520c65f9-2d89-4044-9481-b9ba05911363;window-ends:2026-08-30T08:40:19.000Z",
+    },
+  ],
   productionGrant: {
-    status: "withheld",
-    releaseArtifactFingerprint: null,
+    status: "granted",
+    releaseArtifactFingerprint: "6ea84cd7835a8d605708e33fa9e673534d38c5fed230914162e1842b55dee6d4",
     authorizations: {
-      deployCompatibleRelease: false,
-      runIdempotentLiveMigration: false,
-      switchProductionAuthority: false,
+      deployCompatibleRelease: true,
+      runIdempotentLiveMigration: true,
+      switchProductionAuthority: true,
       deleteLegacyDataOrPaths: false,
     },
   },
