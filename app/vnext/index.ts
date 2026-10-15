@@ -8,3 +8,4 @@ export * from "./planning";
 export * from "./presentation";
 export * from "./projection";
 export * from "./validation";
+export * from "./workoutUx";

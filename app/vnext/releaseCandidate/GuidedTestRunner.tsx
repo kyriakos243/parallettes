@@ -5,6 +5,7 @@ import type {
   ObservationMeasurement,
 } from "../index";
 import { guidedTestPresentation } from "../assessment/presentation";
+import { VNextMotionGuide } from "../media/VNextMotionGuide";
 
 export type GuidedTestFormResult = Readonly<{
   outcome: "clean" | "partial" | "not-yet" | "symptom";
@@ -83,6 +84,9 @@ export const GuidedTestRunner = ({
   const equipmentLabel = presentation.conditions.equipment
     .map((item) => item.split(":").at(-1)!.replaceAll("-", " "))
     .join(", ");
+  const mediaReference = presentation.exercise.media.find((item) => item.kind === "motion")?.reference
+    ?? presentation.exercise.media[0]?.reference;
+  if (!mediaReference) throw new TypeError(`${presentation.exercise.name} has no renderable movement guide`);
 
   return (
     <main className="vnext-experience vnext-rc-overlay" aria-labelledby="vnext-guided-title">
@@ -91,29 +95,41 @@ export const GuidedTestRunner = ({
           <div>
             <p className="vnext-kicker">Guided confirmation</p>
             <h1 id="vnext-guided-title">{presentation.exercise.name}</h1>
-            <p>{presentation.exercise.instructions.how}</p>
+            <p>Watch the complete movement, then record one honest attempt.</p>
           </div>
           <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onClose}>Close</button>
         </div>
 
-        <div className="vnext-rc-anchor">
-          <section>
-            <h2>Exact test conditions</h2>
-            <p><strong>Target:</strong> {metricRequirement}</p>
-            <p><strong>Equipment:</strong> {equipmentLabel || "No additional equipment"}</p>
-            <p><strong>Assistance:</strong> {presentation.conditions.assistance}</p>
-            <p><strong>Range:</strong> {presentation.conditions.range}</p>
-            <ul>{presentation.exercise.instructions.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul>
-            <h3>Quality criteria</h3>
-            <ul>{presentation.qualityCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul>
-            <h3>Safety criteria</h3>
-            <ul>{presentation.safetyCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul>
-            {presentation.exercise.safetyNotes.length > 0 && (
-              <p className="vnext-authority">{presentation.exercise.safetyNotes.join(" ")}</p>
-            )}
-            <p className="vnext-help">Confirmation policy: {presentation.confirmation.qualifyingObservations} qualifying observation{presentation.confirmation.qualifyingObservations === 1 ? "" : "s"} across at least {presentation.confirmation.minimumDistinctSessions} distinct session{presentation.confirmation.minimumDistinctSessions === 1 ? "" : "s"}.</p>
-            <p className="vnext-authority">Stop if a safety criterion is not met. A preference or self-report cannot bypass this protocol.</p>
-          </section>
+        <section className="vnext-rc-question-movement" aria-label={`${presentation.exercise.name} movement demonstration`}>
+          <div className="vnext-rc-question-motion">
+            <VNextMotionGuide preset={mediaReference} />
+          </div>
+          <div className="vnext-rc-question-copy">
+            <p className="vnext-kicker">Exact test</p>
+            <p>{presentation.exercise.instructions.how}</p>
+            <div className="vnext-rc-test-facts">
+              <span><strong>Target</strong>{metricRequirement}</span>
+              <span><strong>Equipment</strong>{equipmentLabel || "No additional equipment"}</span>
+            </div>
+            <details open>
+              <summary>Setup, technique &amp; safety</summary>
+              <p><strong>Assistance:</strong> {presentation.conditions.assistance}</p>
+              <p><strong>Range:</strong> {presentation.conditions.range}</p>
+              <ul>{presentation.exercise.instructions.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul>
+              <h3>Quality criteria</h3>
+              <ul>{presentation.qualityCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul>
+              <h3>Safety criteria</h3>
+              <ul>{presentation.safetyCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul>
+              {presentation.exercise.safetyNotes.length > 0 && (
+                <p className="vnext-authority">{presentation.exercise.safetyNotes.join(" ")}</p>
+              )}
+              <p className="vnext-help">Confirmation policy: {presentation.confirmation.qualifyingObservations} qualifying observation{presentation.confirmation.qualifyingObservations === 1 ? "" : "s"} across at least {presentation.confirmation.minimumDistinctSessions} distinct session{presentation.confirmation.minimumDistinctSessions === 1 ? "" : "s"}.</p>
+              <p className="vnext-authority">Stop if a safety criterion is not met. A preference or self-report cannot bypass this protocol.</p>
+            </details>
+          </div>
+        </section>
+
+        <div className="vnext-rc-anchor vnext-rc-guided-form">
 
           {needsMeasurement && (
             <div className="vnext-rc-field-row">

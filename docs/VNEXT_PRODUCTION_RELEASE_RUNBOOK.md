@@ -186,7 +186,7 @@ Keep rollback controls, the legacy data path and snapshots through the agreed ob
 
 Retiring rollback, deleting legacy fields, removing migration snapshots or purging additive observations is **not** part of Phase 11. It requires a separate explicit maintenance approval.
 
-## 10. Current production checkpoint
+## 10. Original production cutover checkpoint
 
 The owner-authorised release attempt `520c65f9-2d89-4044-9481-b9ba05911363` published the exact frozen `parallette25-vnext.1` artifact through GitHub Actions run `33244593778` and Pages deployment `6154176269`. The live index and service worker match the frozen hashes, build `33055d9391f5136450dc` and cache lane `vnext-production1`. The retained-v1 rollback rehearsal succeeded through run `33243858575` and deployment `6154034303`.
 
@@ -194,4 +194,24 @@ Production D1 was recovery-exported and locally restore-verified before additive
 
 The `2026-08-29T10:54:59Z` read-only checkpoint contained five activated profiles: four had idempotent migration snapshots/receipts and one was a fresh native session path. It recorded 13 Session Plans, 32 Evidence Events and 11 Session Records; every checked identity, cursor, reset, reference, correction, migration and immutable-row invariant was zero. The pre-existing legacy authority projection was byte-identical from the `2026-08-29T09:05:27Z` cutover boundary through reconciliation. The earlier recovery export remains preserved separately because a legitimate v1.2 synchronization-clock write completed before cutover.
 
-The private evidence set binds exact Worker/D1 identities, hashes, timestamps and recovery material without committing athlete payloads or credentials. The observation window remains active through `2026-08-30T08:40:19Z`. Run final health, authority-hash and read-only invariant reconciliation before declaring Phase 11 complete; retain rollback and all legacy/additive data afterward until separately authorised cleanup.
+The private evidence set binds exact Worker/D1 identities, hashes, timestamps and recovery material without committing athlete payloads or credentials. The original observation window ended at `2026-08-30T08:40:19Z`. Retain rollback and all legacy/additive data until separately authorised cleanup. The private cutover authority-hash evidence remains the reference for historical migration closeout; the frontend correction below does not repeat migration or change authority.
+
+## 11. Owner-approved workout UX correction — 2026-10-15
+
+The owner accepted the isolated correction in motion and explicitly authorised deployment once checks passed. This is a frontend release under the existing Phase 11 authority: no Worker deployment, schema change, migration rerun, reset, legacy deletion or rollback retirement. The accepted RC.3 provenance and exact owned-media approvals remain unchanged.
+
+The complete local check chain passed (with the stale guided-test label assertion corrected to the accepted UI), including type checking, 118 UI/accessibility assertions, focused workout/custom/recovery checks, domain/data/auth regressions and the production build. The standard Phase 11 check now includes the workout UX validator. The production distribution is bound to:
+
+| Identity | Frozen value |
+|---|---|
+| Build | `eb58fb904465ddeb6c25` |
+| Cache lane | `vnext-production1` |
+| Distribution SHA-256 | `7c0fedc4712a75386a7bbed74b5d70440f3b68449dc874d784d4af2cfac9a357` |
+| Index SHA-256 | `e83362dc485ce2838afc81056dd0ee5b31ead55d71f0e43224023bb128b956eb` |
+| Service-worker SHA-256 | `6b026448bb0b23c98e41493c20c7c9e467e066abfda590b3432868f39ee15ffa` |
+
+The existing read-only reconciliation query was run through the signed-in Cloudflare D1 console against the exact production database, observed at `2026-10-15T10:14:07Z`: 5 accounts/sync heads, 74 changes, 14 plans, 32 evidence events, 12 session records, 5 intents, 2 reset tombstones, 4 snapshots and 4 active migration runs; no rolled-back runs/entities and all 14 integrity invariants zero. This is fresh aggregate integrity evidence, not a replacement for the private historical legacy-authority hash comparison. Public API health separately confirms the exact release/database/schema identity and paired sync/production authority. No CLI OAuth grant or database mutation was needed.
+
+The previous live distribution was downloaded and independently matched the complete frozen fingerprint `6ea84cd7835a8d605708e33fa9e673534d38c5fed230914162e1842b55dee6d4`. It is retained in the operator's local release-evidence directory together with fresh health and aggregate results. Its source is `c2063f938911197df5fdf6e7d52e14d7749e7fe0` (run `33244593778`, deployment `6154176269`), so code-only rollback can use the controlled `vnext-production` lane with that exact commit while preserving all current data and authority. The older verified v1 rollback lane also remains available.
+
+Deployment status: pending controlled workflow publication and served-artifact verification.

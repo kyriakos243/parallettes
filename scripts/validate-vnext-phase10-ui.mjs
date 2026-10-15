@@ -12,6 +12,7 @@ const sources = {
   assessment: read("app/vnext/releaseCandidate/AssessmentRunner.tsx"),
   guided: read("app/vnext/releaseCandidate/GuidedTestRunner.tsx"),
   workout: read("app/vnext/releaseCandidate/WorkoutRunner.tsx"),
+  custom: read("app/vnext/releaseCandidate/CustomSessionBuilder.tsx"),
   rcCss: read("app/vnext/releaseCandidate/phase9.css"),
   motion: read("app/MotionGuide.tsx"),
   entry: read("src/main.tsx"),
@@ -58,7 +59,13 @@ includesAll(sources.experience, [
   'Previously demonstrated in this family',
   'Choose one primary goal and up to two secondary goals',
   'Safe progression still comes from current evidence.',
-  'Resume today’s workout',
+  'workoutRecoveryStage === "active"',
+  'Resume ${workoutOrigin === "custom" ? "Custom Session" : "today’s workout"}',
+  'Build a 5–20 minute session',
+  'data-duration={durationMinutes}',
+  'Your {durationAdjective} plan',
+  'History',
+  'Recent sessions',
   '<fieldset>',
   '<legend',
   'role="alert"',
@@ -81,8 +88,14 @@ for (const [label, source] of Object.entries({
     `${label} flow uses a pointer-only non-interactive click target`);
 }
 includesAll(sources.assessment, ["<fieldset", "<legend", "type=\"radio\"", "type=\"checkbox\"", "Save &amp; close"], "adaptive placement");
-includesAll(sources.guided, ["Exact test conditions", "Observed outcome", "quality criteria", "safety criteria", "role=\"alert\""], "guided confirmation");
-includesAll(sources.workout, ["aria-label=\"Workout timer\"", "Save &amp; close", "Finish early", "role=\"alert\""], "workout execution");
+includesAll(sources.guided, ["Exact test", "Target", "Equipment", "Assistance:", "Range:", "Observed outcome", "quality criteria", "safety criteria", "role=\"alert\""], "guided confirmation");
+includesAll(sources.workout, ["aria-label=\"Workout timer\"", "Save & close", "Finish early", "role=\"alert\"", "Up next:", "vnext-rc-session-progress"], "workout execution");
+includesAll(sources.custom, [
+  "([5, 10, 15, 20] as const)",
+  "If you have 25 minutes, use Today",
+  "Build safe {minutes}-minute session",
+  "It does not use the legacy custom generator",
+], "Custom Session builder");
 includesAll(sources.account, [
   "<form className=\"vnext-account-form\"",
   'autoComplete="username"',
@@ -96,6 +109,8 @@ includesAll(sources.experienceCss, [
   ".vnext-experience button:focus-visible",
   "outline: 3px solid",
   "min-height: 44px",
+  ".vnext-plan-swap { min-height: 44px",
+  ".vnext-swap-tabs button { min-height: 44px",
   "env(safe-area-inset-top)",
   "@media (max-width: 760px)",
   "grid-template-columns: minmax(0, 1fr)",
@@ -109,6 +124,8 @@ includesAll(sources.rcCss, [
   ":has(.vnext-rc-file:focus-visible)",
   ".phase10-media-audit nav a { min-height: 44px",
   ".phase10-media-audit nav a:focus-visible",
+  ".vnext-rc-sequence li button { min-height: 44px",
+  ".vnext-custom-choice-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }",
   "@media (max-width: 760px)",
   "@media (prefers-reduced-motion: reduce)",
 ], "release-candidate responsive styles");

@@ -12,7 +12,12 @@ import {
   type GraphId,
   type PlacementResponse,
 } from "../index";
-import { assessmentAnchorPresentation, placementResponseOptions } from "../assessment/presentation";
+import {
+  assessmentAnchorPresentation,
+  guidedTestPresentation,
+  placementResponseOptions,
+} from "../assessment/presentation";
+import { VNextMotionGuide } from "../media/VNextMotionGuide";
 
 const labelFromId = (value: string): string => value
   .split(":").at(-1)!
@@ -22,6 +27,15 @@ const labelFromId = (value: string): string => value
 
 const toggle = <Value extends string>(values: readonly Value[], value: Value): readonly Value[] =>
   values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
+
+const motionReferenceFor = (
+  media: readonly Readonly<{ kind: string; reference: string }>[],
+  exerciseName: string,
+): string => {
+  const reference = media.find((item) => item.kind === "motion")?.reference ?? media[0]?.reference;
+  if (!reference) throw new TypeError(`${exerciseName} has no renderable movement guide`);
+  return reference;
+};
 
 const Choice = ({
   name,
@@ -191,14 +205,23 @@ const AnswerStep = ({
 
       {step.kind === "anchor" && (() => {
         const anchor = assessmentAnchorPresentation(step, bundle);
+        const mediaReference = motionReferenceFor(anchor.exercise.media, anchor.exercise.name);
         return (
           <div className="vnext-rc-anchor">
-            <div>
-              <p className="vnext-kicker">Small placement anchor</p>
-              <h3>{anchor.exercise.name}</h3>
-              <p>{anchor.exercise.instructions.how}</p>
-              <ul>{anchor.exercise.instructions.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul>
-            </div>
+            <section className="vnext-rc-question-movement" aria-label={`${anchor.exercise.name} movement demonstration`}>
+              <div className="vnext-rc-question-motion">
+                <VNextMotionGuide preset={mediaReference} />
+              </div>
+              <div className="vnext-rc-question-copy">
+                <p className="vnext-kicker">Watch this movement</p>
+                <h3>{anchor.exercise.name}</h3>
+                <p>{anchor.exercise.instructions.how}</p>
+                <details>
+                  <summary>Technique tips</summary>
+                  <ul>{anchor.exercise.instructions.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul>
+                </details>
+              </div>
+            </section>
             <fieldset>
               <legend>What best describes this today?</legend>
               <div className="vnext-rc-answer-grid">
@@ -254,12 +277,19 @@ export const AssessmentRunner = ({
             <section>
               <h2>Optional guided confirmation</h2>
               <div className="vnext-assessment-list">
-                {review!.guidedTests.map((offer) => (
-                  <div className="vnext-assessment-action" key={offer.protocolId}>
-                    <div><strong>{offer.label}</strong><span>{labelFromId(offer.reason)}</span>{offer.blockers.map((blocker) => <span key={blocker}>{blocker}</span>)}</div>
-                    <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || offer.availability === "blocked" || !onGuidedTestRequested} onClick={() => onGuidedTestRequested?.(offer)}>{offer.availability === "blocked" ? "Unavailable today" : "Save placement & open test"}</button>
-                  </div>
-                ))}
+                {review!.guidedTests.map((offer) => {
+                  const test = guidedTestPresentation(offer, bundle);
+                  const mediaReference = motionReferenceFor(test.exercise.media, test.exercise.name);
+                  return (
+                    <article className="vnext-assessment-action vnext-assessment-motion-action" key={offer.protocolId}>
+                      <div className="vnext-assessment-action-motion" aria-label={`${test.exercise.name} movement demonstration`}>
+                        <VNextMotionGuide preset={mediaReference} />
+                      </div>
+                      <div><strong>{test.exercise.name}</strong><span>{labelFromId(offer.reason)}</span>{offer.blockers.map((blocker) => <span key={blocker}>{blocker}</span>)}</div>
+                      <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || offer.availability === "blocked" || !onGuidedTestRequested} onClick={() => onGuidedTestRequested?.(offer)}>{offer.availability === "blocked" ? "Unavailable today" : "Save placement & open test"}</button>
+                    </article>
+                  );
+                })}
               </div>
             </section>
           )}

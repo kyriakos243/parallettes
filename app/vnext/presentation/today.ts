@@ -6,6 +6,7 @@ import type {
   TodayWorkoutPresentation,
 } from "./contracts";
 import { presentationFamilyLabel } from "./progress";
+import { structureWorkoutItem } from "../workoutUx";
 
 const demandPresentation = (
   demand: SessionDemand,
@@ -148,12 +149,18 @@ export const buildTodayWorkoutPresentation = (
     const exercise = bundle.exercises.find((candidate) => candidate.id === item.exerciseId
       && candidate.definitionVersion === item.exerciseDefinitionVersion);
     const explanation = explanationByItem.get(item.id);
+    const structured = structureWorkoutItem(item, bundle);
+    const media = exercise?.media[0];
     return {
       planItemId: item.id,
       exerciseId: item.exerciseId,
       exerciseName: exercise?.name ?? "Planned movement",
       blockLabel: blockLabel(explanation?.block ?? "supplemental"),
       plannedMinutes: Math.round(item.plannedSeconds / 6) / 10,
+      prescriptionLabel: structured.targetLabel,
+      setStructureLabel: structured.structureLabel,
+      plannedRestSeconds: structured.plannedRestSeconds,
+      mediaReference: media?.kind === "motion" ? media.reference : "",
       reason: explanation
         ? simpleExerciseReason(explanation)
         : "Supports today’s safe, goal-directed session.",

@@ -21,14 +21,19 @@ import {
   type GuidedTestResultInput,
   type IsoTimestamp,
   type ObservationExportBundle,
+  type PlanItemId,
   type PreviousEmphasis,
+  type SafeWorkoutSwap,
   type SessionDemand,
   type VNextShadowStore,
   type WorkoutCompletionAnswer,
+  generateVNextCustomSession,
+  safeWorkoutSwaps,
 } from "../index";
-import { VNextExperience, type VNextWorkoutReviewFeedback } from "../ui";
+import { VNextExperience, type VNextRecentSession, type VNextWorkoutReviewFeedback } from "../ui";
 import { AssessmentRunner } from "./AssessmentRunner";
 import { GuidedTestRunner, type GuidedTestFormResult } from "./GuidedTestRunner";
+import { CustomSessionBuilder, type VNextCustomSessionRequest } from "./CustomSessionBuilder";
 import {
   VNextAccountGate,
   ACCOUNT_SESSION_CHANGED_EVENT,
@@ -53,6 +58,9 @@ import {
   type VNextRuntimeSnapshot,
 } from "./runtime";
 import {
+  clearActiveWorkoutDraft,
+  hasActiveWorkoutDraft,
+  recoverActiveWorkoutFacts,
   WorkoutRunner,
   type WorkoutExecutionFacts,
   unresolvedRenderablePlanItems,
@@ -95,8 +103,11 @@ type StoredPreviousEmphasis = PreviousEmphasis & Readonly<{ lastCountedRecordId?
 type WorkoutRecovery = Readonly<{
   version: 1;
   athleteId: string;
-  stage: "active" | "review" | "prepared";
+  stage: "preview" | "active" | "review" | "prepared";
+  origin: "today" | "custom";
   generated: GeneratedSession;
+  selections?: Readonly<Partial<Record<PlanItemId, SafeWorkoutSwap>>>;
+  swapOptions?: Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>;
   facts?: WorkoutExecutionFacts;
   prepared?: PreparedVNextWorkoutCompletion;
 }>;
@@ -163,7 +174,7 @@ const readWorkoutRecovery = (athleteId: string, namespace: string): WorkoutRecov
   try {
     const parsed = JSON.parse(localStorage.getItem(key) ?? "null") as Partial<WorkoutRecovery> | null;
     const plan = parsed?.generated?.plan;
-    const validStage = parsed?.stage === "active" || parsed?.stage === "review" || parsed?.stage === "prepared";
+    const validStage = parsed?.stage === "preview" || parsed?.stage === "active" || parsed?.stage === "review" || parsed?.stage === "prepared";
     const factsRequired = parsed?.stage === "review" || parsed?.stage === "prepared";
     if (!parsed || parsed.version !== 1 || parsed.athleteId !== athleteId || !validStage
       || parsed.generated?.ok !== true || !plan || plan.athleteId !== athleteId
@@ -176,7 +187,24 @@ const readWorkoutRecovery = (athleteId: string, namespace: string): WorkoutRecov
       localStorage.removeItem(key);
       return undefined;
     }
-    return parsed as WorkoutRecovery;
+    const inferredOrigin = parsed.origin === "today" || parsed.origin === "custom"
+      ? parsed.origin
+      : plan.rationale.some((reason) => reason.code === "planning-custom-short-session")
+        ? "custom"
+        : "today";
+    const recoveredStage = parsed.stage === "active" && !hasActiveWorkoutDraft(athleteId, plan.id)
+      ? "preview"
+      : parsed.stage;
+    return {
+      ...parsed,
+      stage: recoveredStage,
+      origin: inferredOrigin,
+      ...(parsed.facts ? { facts: {
+        ...parsed.facts,
+        completedPlanItemIds: parsed.facts.completedPlanItemIds ?? [],
+        performedByPlanItem: parsed.facts.performedByPlanItem ?? {},
+      } } : {}),
+    } as WorkoutRecovery;
   } catch {
     localStorage.removeItem(key);
     return undefined;
@@ -223,18 +251,48 @@ const completionStatus = (
   feedback: readonly VNextWorkoutReviewFeedback[],
 ): "complete" | "modified" | "partial" | "abandoned" => {
   const reviewed = new Map(feedback.map((item) => [item.planItemId, item]));
+  const completed = new Set(facts.completedPlanItemIds);
   const statuses = plan.items.map((item) => {
     const seconds = facts.participationSeconds[item.id] ?? 0;
     const review = reviewed.get(item.id);
+    const performed = facts.performedByPlanItem[item.id];
+    const identityChanged = performed !== undefined && (
+      performed.exerciseId !== item.exerciseId
+        || performed.exerciseDefinitionVersion !== item.exerciseDefinitionVersion
+        || performed.prescriptionVariantId !== item.prescriptionVariantId);
     if (seconds === 0) return "skipped" as const;
     if (review?.status === "modified" || review?.status === "skipped"
-      || review?.symptomOrInstability || seconds < item.plannedSeconds) return "modified" as const;
+      || review?.symptomOrInstability || !completed.has(item.id) || identityChanged) return "modified" as const;
     return "completed" as const;
   });
   if (statuses.every((status) => status === "skipped")) return "abandoned";
   if (statuses.includes("skipped")) return "partial";
   if (statuses.includes("modified")) return "modified";
   return "complete";
+};
+
+const recentSessionPresentation = (snapshot: VNextRuntimeSnapshot): readonly VNextRecentSession[] => {
+  const plans = new Map(snapshot.sources.sessionPlans.map((plan) => [plan.id, plan] as const));
+  return [...snapshot.sources.sessionRecords]
+    .sort((left, right) => Date.parse(right.completedAt) - Date.parse(left.completedAt)
+      || right.id.localeCompare(left.id))
+    .slice(0, 12)
+    .map((record) => {
+      const plan = plans.get(record.planId);
+      const custom = plan?.rationale.some((reason) => reason.code === "planning-custom-short-session");
+      const graphId = plan?.rationale.find((reason) => reason.relatedGraphId)?.relatedGraphId;
+      const graph = graphId
+        ? vNextDefinitionBundle.graphs.find((candidate) => candidate.id === graphId)
+        : undefined;
+      return {
+        id: record.id,
+        title: custom ? "Custom Session" : graph ? `${graph.label} session` : "Parallette25 session",
+        completedAt: record.completedAt,
+        participationSeconds: record.itemOutcomes.reduce((sum, outcome) => sum + outcome.participationSeconds, 0),
+        status: record.status,
+        source: record.legacySource ? "migrated" : "vnext",
+      };
+    });
 };
 
 const VNextAthleteApplication = ({
@@ -270,7 +328,13 @@ const VNextAthleteApplication = ({
   const [guidedOffer, setGuidedOffer] = useState<GuidedTestOffer | undefined>(initialGuidedRecovery?.offer);
   const [guidedRecovery, setGuidedRecovery] = useState<GuidedRecovery | undefined>(initialGuidedRecovery);
   const [workoutRecovery, setWorkoutRecovery] = useState<WorkoutRecovery | undefined>(initialWorkoutRecovery);
-  const [workoutOpen, setWorkoutOpen] = useState(initialWorkoutRecovery?.stage === "active");
+  const [workoutSelections, setWorkoutSelections] = useState<Readonly<Partial<Record<PlanItemId, SafeWorkoutSwap>>>>(
+    initialWorkoutRecovery?.selections ?? {},
+  );
+  const [workoutOpen, setWorkoutOpen] = useState(
+    initialWorkoutRecovery?.stage === "active" || initialWorkoutRecovery?.stage === "preview",
+  );
+  const [customOpen, setCustomOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [message, setMessage] = useState(deployment.openingMessage);
@@ -297,6 +361,7 @@ const VNextAthleteApplication = ({
   const clearWorkoutRecovery = useCallback((): void => {
     localStorage.removeItem(workoutRecoveryKey(athleteId, storageNamespace));
     setWorkoutRecovery(undefined);
+    setWorkoutSelections({});
   }, [athleteId, storageNamespace]);
 
   const persistGuidedRecovery = useCallback((recovery: GuidedRecovery): void => {
@@ -342,6 +407,8 @@ const VNextAthleteApplication = ({
       setSnapshot(result.snapshot);
       if (initialWorkoutRecovery?.stage === "active") {
         setMessage("Your exact in-progress workout is ready to resume on this device.");
+      } else if (initialWorkoutRecovery?.stage === "preview") {
+        setMessage(`Your ${initialWorkoutRecovery.origin === "custom" ? "Custom Session" : "Today workout"} preview was restored. It has not recorded training.`);
       } else if (initialWorkoutRecovery?.stage === "review") {
         setMessage("Your completed timer facts were recovered. Add the short review to save one Session Record.");
       } else if (initialWorkoutRecovery?.stage === "prepared") {
@@ -435,6 +502,17 @@ const VNextAthleteApplication = ({
 
   const displayedGenerated = workoutRecovery?.generated ?? snapshot?.generated;
   const plan = displayedGenerated?.plan;
+  const workoutSwapOptions = useMemo(() => !plan || !snapshot ? {} : Object.fromEntries(
+    plan.items.map((item) => [item.id, safeWorkoutSwaps({
+      plan,
+      item,
+      bundle: vNextDefinitionBundle,
+      state: snapshot.state,
+      intent: snapshot.intent,
+      projectionPolicy: vNextProjectionPolicy,
+    })]),
+  ) as Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>, [plan, snapshot]);
+  const effectiveWorkoutSwapOptions = workoutRecovery?.swapOptions ?? workoutSwapOptions;
   const mediaEvaluation = useMemo(() => plan ? evaluateVNextPlanMediaRelease(plan) : undefined, [plan]);
   const unrenderableItems = useMemo(() => plan
     ? unresolvedRenderablePlanItems(plan, vNextDefinitionBundle)
@@ -574,36 +652,46 @@ const VNextAthleteApplication = ({
       try {
         const exactRecovery = workoutRecovery;
         const currentPlan = exactRecovery.generated.plan!;
-        const reviewAnswers: WorkoutCompletionAnswer[] = feedback.map((item) => {
-          const planned = currentPlan.items.find((candidate) => candidate.id === item.planItemId);
-          if (!planned || planned.purpose === "preparation" || planned.purpose === "recovery") {
-            throw new TypeError(`Workout review references an unexpected plan item ${item.planItemId}`);
-          }
-          const measured = executionFacts.participationSeconds[item.planItemId] ?? 0;
-          if (item.symptomOrInstability && !item.bodyRegion?.trim()) {
+        const completedPlanItemIds = new Set(executionFacts.completedPlanItemIds);
+        const feedbackByItem = new Map(feedback.map((item) => [item.planItemId, item]));
+        const reviewAnswers: WorkoutCompletionAnswer[] = currentPlan.items
+          .filter((planned) => planned.purpose !== "preparation" && planned.purpose !== "recovery")
+          .map((planned) => {
+          const item = feedbackByItem.get(planned.id);
+          const measured = executionFacts.participationSeconds[planned.id] ?? 0;
+          if (item?.symptomOrInstability && !item.bodyRegion?.trim()) {
             throw new TypeError("A symptom or instability report requires the affected body area");
           }
           if (measured === 0) return {
-            planItemId: item.planItemId,
+            planItemId: planned.id,
             status: "skipped",
             participationSeconds: 0,
           };
-          const modified = item.status !== "completed"
-            || measured < planned.plannedSeconds
-            || item.symptomOrInstability === true;
+          const performed = executionFacts.performedByPlanItem[planned.id];
+          const identityChanged = performed !== undefined && (
+            performed.exerciseId !== planned.exerciseId
+              || performed.exerciseDefinitionVersion !== planned.exerciseDefinitionVersion
+              || performed.prescriptionVariantId !== planned.prescriptionVariantId);
+          const modified = !item || item.status !== "completed"
+            || !completedPlanItemIds.has(planned.id)
+            || item.symptomOrInstability === true
+            || identityChanged;
           const modificationReasons = [
-            item.modificationReason?.trim(),
-            item.status === "skipped" ? `Timer retained ${measured} seconds completed before the athlete stopped.` : undefined,
-            measured < planned.plannedSeconds ? "Timer recorded a shortened dose." : undefined,
-            item.symptomOrInstability ? `Reported symptom or instability area: ${item.bodyRegion!.trim()}.` : undefined,
+            item?.modificationReason?.trim(),
+            item?.status === "skipped" ? `Timer retained ${measured} seconds completed before the athlete stopped.` : undefined,
+            !item ? "Only a brief partial attempt was recorded, so no progression rating was requested." : undefined,
+            !completedPlanItemIds.has(planned.id) ? "Timer recorded a shortened dose." : undefined,
+            identityChanged ? "Athlete selected an approved safe alternative." : undefined,
+            item?.symptomOrInstability ? `Reported symptom or instability area: ${item.bodyRegion!.trim()}.` : undefined,
           ].filter((reason): reason is string => Boolean(reason));
           return {
-            planItemId: item.planItemId,
+            planItemId: planned.id,
             status: modified ? "modified" : "completed",
             participationSeconds: measured,
             participationBasis: "measured",
-            ...(item.difficulty ? { difficulty: item.difficulty } : {}),
-            ...(item.symptomOrInstability ? { symptomOrInstability: true } : {}),
+            ...(item?.difficulty ? { difficulty: item.difficulty } : {}),
+            ...(item?.symptomOrInstability ? { symptomOrInstability: true } : {}),
+            ...(identityChanged ? { performed } : {}),
             ...(modified ? { modificationReason: modificationReasons.join(" ") || "Measured work differed from the planned dose." } : {}),
           };
         });
@@ -617,13 +705,25 @@ const VNextAthleteApplication = ({
               participationSeconds: 0,
               participationBasis: "measured" as const,
             };
-            const modified = seconds < item.plannedSeconds;
+            const performed = executionFacts.performedByPlanItem[item.id];
+            const identityChanged = performed !== undefined && (
+              performed.exerciseId !== item.exerciseId
+                || performed.exerciseDefinitionVersion !== item.exerciseDefinitionVersion
+                || performed.prescriptionVariantId !== item.prescriptionVariantId);
+            const modified = !completedPlanItemIds.has(item.id) || identityChanged;
             return {
               planItemId: item.id,
               status: modified ? "modified" as const : "completed" as const,
               participationSeconds: seconds,
               participationBasis: "measured" as const,
-              ...(modified ? { modificationReason: "Timer recorded a shortened preparation or recovery dose." } : {}),
+              ...(identityChanged ? {
+                performedExerciseId: performed.exerciseId,
+                performedExerciseDefinitionVersion: performed.exerciseDefinitionVersion,
+                performedPrescriptionVariantId: performed.prescriptionVariantId,
+              } : {}),
+              ...(modified ? { modificationReason: identityChanged
+                ? "Athlete selected an approved safe alternative."
+                : "Timer recorded a shortened preparation or recovery dose." } : {}),
             };
           });
         const prepared = runtime.prepareWorkoutCompletion({
@@ -719,11 +819,63 @@ const VNextAthleteApplication = ({
     setMessage("Training progress was reset. Account access remains available and old devices cannot restore earlier evidence.");
   };
 
+  const startCustomSession = (request: VNextCustomSessionRequest): void => runCommand(async () => {
+    const refreshed = await runtime.refresh(refreshInput(request.demand));
+    setSnapshot(refreshed);
+    const plannerGraphId = request.focus.kind === "graph"
+      ? request.focus.graphId
+      : request.focus.kind === "capacity"
+        ? request.focus.plannerGraphId
+        : undefined;
+    const intent = {
+      ...refreshed.intent,
+      updatedAt: refreshed.asOf,
+      ...(plannerGraphId ? { goals: [{ graphId: plannerGraphId, priority: "primary" as const }] } : {}),
+      equipment: request.equipment,
+      defaultSessionDemand: request.demand,
+    };
+    const generated = generateVNextCustomSession({
+      createdAt: refreshed.asOf,
+      bundle: vNextDefinitionBundle,
+      intent,
+      state: refreshed.state,
+      projectionPolicy: vNextProjectionPolicy,
+      sessionDemand: request.demand,
+      seed: `${athleteId}:custom:${request.focus.kind}:${request.focus.label}:${request.minutes}:${refreshed.asOf.slice(0, 10)}`,
+    }, request.minutes, request.focus.kind === "capacity" ? {
+      label: request.focus.label,
+      capacityIds: request.focus.capacityIds,
+    } : undefined);
+    if (!generated.ok || !generated.plan) {
+      throw new Error("No safe short session is available for that focus and equipment today.");
+    }
+    const media = evaluateVNextPlanMediaRelease(generated.plan);
+    const unresolved = unresolvedRenderablePlanItems(generated.plan, vNextDefinitionBundle);
+    if (!media.releaseAllowed || unresolved.length > 0) {
+      throw new Error("This short session is blocked because an exact owned movement guide is unavailable.");
+    }
+    const swapOptions = Object.fromEntries(generated.plan.items.map((item) => [item.id, safeWorkoutSwaps({
+      plan: generated.plan!,
+      item,
+      bundle: vNextDefinitionBundle,
+      state: refreshed.state,
+      intent,
+      projectionPolicy: vNextProjectionPolicy,
+    })])) as Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>;
+    setWorkoutSelections({});
+    persistWorkoutRecovery({ version: 1, athleteId, stage: "preview", origin: "custom", generated, selections: {}, swapOptions });
+    setCustomOpen(false);
+    setWorkoutOpen(true);
+    setMessage(`${request.minutes}-minute vNext Custom Session built from current evidence and safety rules.`);
+  });
+
   const startOrResumeWorkout = (): void => {
     if (busy || workoutRecovery?.stage === "review" || workoutRecovery?.stage === "prepared") return;
-    if (workoutRecovery?.stage === "active") {
+    if (workoutRecovery?.stage === "active" || workoutRecovery?.stage === "preview") {
       setWorkoutOpen(true);
-      setMessage("Resuming the exact locally retained Session Plan.");
+      setMessage(workoutRecovery.stage === "active"
+        ? "Resuming the exact locally retained Session Plan."
+        : `Reviewing the ${workoutRecovery.origin === "custom" ? "Custom Session" : "Today workout"} before its timer starts.`);
       return;
     }
     runCommand(async () => {
@@ -739,9 +891,70 @@ const VNextAthleteApplication = ({
       if (!media.releaseAllowed || unresolved.length > 0) {
         throw new Error("This workout is blocked because an exact owned movement guide is unavailable.");
       }
-      persistWorkoutRecovery({ version: 1, athleteId, stage: "active", generated });
+      const previewItems = plan?.items ?? [];
+      const freshSwapOptions = Object.fromEntries(generated.plan.items.map((item) => [item.id, safeWorkoutSwaps({
+        plan: generated.plan!,
+        item,
+        bundle: vNextDefinitionBundle,
+        state: refreshed.state,
+        intent: refreshed.intent,
+        projectionPolicy: vNextProjectionPolicy,
+      })])) as Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>;
+      const validSelections = Object.fromEntries(generated.plan.items.flatMap((item, index) => {
+        const previewItem = previewItems[index];
+        const selection = previewItem ? workoutSelections[previewItem.id] : undefined;
+        if (!selection) return [];
+        const safe = freshSwapOptions[item.id] ?? [];
+        return safe.some((option) => option.exerciseId === selection.exerciseId
+          && option.exerciseDefinitionVersion === selection.exerciseDefinitionVersion
+          && option.prescriptionVariantId === selection.prescriptionVariantId)
+          ? [[item.id, selection] as const]
+          : [];
+      }));
+      persistWorkoutRecovery({ version: 1, athleteId, stage: "preview", origin: "today", generated, selections: validSelections, swapOptions: freshSwapOptions });
       setWorkoutOpen(true);
     });
+  };
+
+  const beginWorkout = (): boolean => {
+    const preview = workoutRecovery;
+    if (!preview || preview.stage !== "preview") return preview?.stage === "active";
+    try {
+      persistWorkoutRecovery({ ...preview, stage: "active" });
+      setMessage(`${preview.origin === "custom" ? "Custom Session" : "Today’s workout"} started. Exact timer progress is recoverable on this device.`);
+      return true;
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The workout could not be made recoverable, so its timer was not started.");
+      return false;
+    }
+  };
+
+  const closeWorkout = (started: boolean): void => {
+    setWorkoutOpen(false);
+    if (started) {
+      setMessage("The exact in-progress workout remains on this device and can be resumed, reviewed or discarded.");
+      return;
+    }
+    const origin = workoutRecovery?.origin ?? "today";
+    clearActiveWorkoutDraft(athleteId);
+    clearWorkoutRecovery();
+    setWorkoutSelections({});
+    setMessage(origin === "custom"
+      ? "Custom Session cancelled. Today’s normal workout is available again."
+      : "Returned to Today. No workout or evidence was saved because the timer never started.");
+  };
+
+  const discardWorkout = (): void => {
+    const recovery = workoutRecovery;
+    if (!recovery || (recovery.stage !== "preview" && recovery.stage !== "active")) return;
+    if (recovery.stage === "active" && typeof window !== "undefined"
+      && !window.confirm("Discard this in-progress workout without saving its performed work?")) return;
+    clearActiveWorkoutDraft(athleteId);
+    clearWorkoutRecovery();
+    setWorkoutSelections({});
+    setMessage(recovery.origin === "custom"
+      ? "Custom Session discarded. Today’s normal workout is available again."
+      : "Saved workout discarded. Today has returned to the current recommendation.");
   };
 
   const finishWorkout = (facts: WorkoutExecutionFacts): boolean => {
@@ -761,6 +974,23 @@ const VNextAthleteApplication = ({
     return true;
   };
 
+  const endRecoveredWorkout = (): void => {
+    const recovery = workoutRecovery;
+    const recoveryPlan = recovery?.generated.plan;
+    if (!recovery || recovery.stage !== "active" || !recoveryPlan) return;
+    const facts = recoverActiveWorkoutFacts(
+      recoveryPlan,
+      vNextDefinitionBundle,
+      recovery.selections,
+      effectiveWorkoutSwapOptions,
+    );
+    if (!facts) {
+      setError("The saved timer could not be read safely. Resume the workout to inspect it before ending.");
+      return;
+    }
+    finishWorkout(facts);
+  };
+
   if (accountOpen) {
     const AccountGate = deployment.AccountGate ?? VNextAccountGate;
     return <AccountGate current={identity} onSelected={onIdentitySelected} onClose={() => setAccountOpen(false)} onSignedOut={onSignedOut} onResetProgress={resetProgress} presentation={deployment.accountPresentation} storageNamespace={storageNamespace} shadowDatabaseName={deployment.shadowDatabaseName} />;
@@ -774,8 +1004,12 @@ const VNextAthleteApplication = ({
     );
   }
 
+  if (customOpen) {
+    return <CustomSessionBuilder goals={snapshot.presentations.goals} currentEquipment={snapshot.intent.equipment} defaultDemand={snapshot.intent.defaultSessionDemand} busy={busy} onClose={() => setCustomOpen(false)} onBuild={startCustomSession} />;
+  }
+
   if (workoutOpen && plan) {
-    return <WorkoutRunner plan={plan} bundle={vNextDefinitionBundle} onClose={() => { setWorkoutOpen(false); setMessage("The exact in-progress workout remains on this device and can be resumed."); }} onFinish={finishWorkout} />;
+    return <WorkoutRunner plan={plan} bundle={vNextDefinitionBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} onClose={closeWorkout} onFinish={finishWorkout} />;
   }
 
   if (guidedOffer) {
@@ -794,7 +1028,12 @@ const VNextAthleteApplication = ({
     ? buildTodayWorkoutPresentation({ bundle: vNextDefinitionBundle, generated: workoutRecovery.generated })
     : snapshot.presentations.today;
   const completionPresentation = executionFacts && workoutRecovery
-    ? buildWorkoutCompletionPresentation({ bundle: vNextDefinitionBundle, generated: workoutRecovery.generated })
+    ? buildWorkoutCompletionPresentation({
+      bundle: vNextDefinitionBundle,
+      generated: workoutRecovery.generated,
+      participationSecondsByPlanItem: executionFacts.participationSeconds,
+      performedByPlanItem: executionFacts.performedByPlanItem,
+    })
     : undefined;
 
   return (
@@ -826,14 +1065,29 @@ const VNextAthleteApplication = ({
         goals={snapshot.presentations.goals}
         assessment={snapshot.presentations.assessment}
         restrictions={snapshot.presentations.restrictions}
+        recentSessions={recentSessionPresentation(snapshot)}
         completion={completionPresentation}
         busy={busy}
         workoutStartBlocker={workoutStartBlocker}
-        resumingWorkout={workoutRecovery?.stage === "active"}
-        onDemandChange={!workflowLocked && !busy ? (demand) => runCommand(async () => { const updated = await runtime.selectDailyDemand({ ...refreshInput(), sessionDemand: demand }); setSnapshot(updated); setMessage(`${demand === "technique" ? "Easier / Technique" : demand === "challenge" ? "Challenge" : "Standard"} changes today’s dose only; the safe frontier was preserved.`); }) : undefined}
-        onGoalSelectionChange={!workflowLocked && !busy ? (selection) => runCommand(async () => { const updated = await runtime.updateGoals({ ...refreshInput(), selection }); setSnapshot(updated); setMessage("Goals saved as Athlete Intent. No skill was manually unlocked."); }) : undefined}
+        workoutOrigin={workoutRecovery?.origin}
+        workoutRecoveryStage={workoutRecovery?.stage === "preview" || workoutRecovery?.stage === "active"
+          ? workoutRecovery.stage
+          : undefined}
+        workoutSwapOptions={!workflowLocked ? workoutSwapOptions : effectiveWorkoutSwapOptions}
+        workoutSelections={!workflowLocked ? workoutSelections : workoutRecovery?.selections}
+        onWorkoutSwap={!workflowLocked && !busy ? (planItemId, selection) => setWorkoutSelections((current) => {
+          const next = { ...current };
+          if (selection) next[planItemId] = selection;
+          else delete next[planItemId];
+          return next;
+        }) : undefined}
+        onCustomSessionRequested={!workflowLocked && !busy ? () => setCustomOpen(true) : undefined}
+        onDemandChange={!workflowLocked && !busy ? (demand) => runCommand(async () => { const updated = await runtime.selectDailyDemand({ ...refreshInput(), sessionDemand: demand }); setWorkoutSelections({}); setSnapshot(updated); setMessage(`${demand === "technique" ? "Easier / Technique" : demand === "challenge" ? "Challenge" : "Standard"} changes today’s dose only; the safe frontier was preserved.`); }) : undefined}
+        onGoalSelectionChange={!workflowLocked && !busy ? (selection) => runCommand(async () => { const updated = await runtime.updateGoals({ ...refreshInput(), selection }); setWorkoutSelections({}); setSnapshot(updated); setMessage("Goals saved as Athlete Intent. No skill was manually unlocked."); }) : undefined}
         onAssessmentRequested={!workflowLocked && !busy ? startAssessment : undefined}
-        onStartWorkout={!busy && plan && (workoutRecovery?.stage === "active" || (!workoutRecovery && snapshot.generated.ok && !mediaBlocked)) ? startOrResumeWorkout : undefined}
+        onStartWorkout={!busy && plan && ((workoutRecovery?.stage === "active" || workoutRecovery?.stage === "preview") || (!workoutRecovery && snapshot.generated.ok && !mediaBlocked)) ? startOrResumeWorkout : undefined}
+        onDiscardWorkout={!busy && (workoutRecovery?.stage === "preview" || workoutRecovery?.stage === "active") ? discardWorkout : undefined}
+        onEndRecoveredWorkout={!busy && workoutRecovery?.stage === "active" ? endRecoveredWorkout : undefined}
         onWorkoutReviewSubmitted={!busy && workoutRecovery?.stage === "review" ? submitWorkoutReview : undefined}
         onRestrictionRequested={!workflowLocked && !busy ? () => startAssessment() : undefined}
       />

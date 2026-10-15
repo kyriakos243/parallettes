@@ -160,6 +160,10 @@ export type TodayWorkoutPresentation = Readonly<{
     exerciseName: string;
     blockLabel: string;
     plannedMinutes: number;
+    prescriptionLabel: string;
+    setStructureLabel: string;
+    plannedRestSeconds: number;
+    mediaReference: string;
     reason: string;
     intensity: string;
   }>[];
@@ -253,6 +257,7 @@ export type WorkoutCompletionPresentation = Readonly<{
     planItemId: PlanItemId;
     exerciseId: ExerciseId;
     exerciseName: string;
+    mediaReference: string;
     purposeLabel: string;
     statusPrompt: string;
     statusOptions: readonly Readonly<{
@@ -302,6 +307,12 @@ export type TodayPresentationInput = Readonly<{
 export type WorkoutCompletionInput = Readonly<{
   bundle: DefinitionBundle;
   generated: GeneratedSession;
+  participationSecondsByPlanItem?: Readonly<Partial<Record<PlanItemId, number>>>;
+  performedByPlanItem?: Readonly<Partial<Record<PlanItemId, Readonly<{
+    exerciseId: ExerciseId;
+    exerciseDefinitionVersion: DefinitionVersion;
+    prescriptionVariantId: PrescriptionVariantId;
+  }>>>>;
 }>;
 
 export const observationPresentationSourceKey = (
