@@ -309,13 +309,19 @@
 .vnext-rc-anchor ul { margin: 0; padding-left: 20px; color: #49655d; line-height: 1.6; }
 .vnext-rc-field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 
-.vnext-rc-player { place-items: stretch; }
+body:has(.vnext-rc-player) { margin: 0; }
+.vnext-rc-player { place-items: stretch; box-sizing: border-box; overflow-anchor: none; }
 .vnext-rc-player-shell {
   width: min(100%, 1160px);
   margin: 0 auto;
   display: grid;
   gap: 18px;
 }
+.vnext-rc-player-stage,
+.vnext-rc-player-controls { display: grid; gap: 18px; }
+.vnext-rc-close-icon { display: none; }
+.vnext-rc-sound-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.vnext-rc-sound-button svg { width: 18px; height: 18px; }
 .vnext-rc-player-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(270px, .75fr); gap: 18px; }
 .vnext-rc-motion,
 .vnext-rc-coaching {
@@ -368,7 +374,6 @@
   .vnext-rc-banner details[open] > div { right: auto; left: 0; }
   .vnext-rc-modal-header,
   .vnext-rc-player-header { display: grid; }
-  .vnext-rc-player-grid,
   .vnext-rc-check-grid,
   .vnext-rc-field-row,
   .vnext-custom-choice-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -377,23 +382,48 @@
   .vnext-rc-test-facts,
   .vnext-assessment-motion-action { grid-template-columns: minmax(0, 1fr); }
   .vnext-assessment-action-motion { min-height: 250px; }
-  .vnext-rc-motion,
-  .vnext-rc-coaching { min-height: 300px; }
-  .vnext-rc-sequence li { grid-template-columns: minmax(0, 1fr); }
-  .vnext-rc-player-header-actions { justify-content: stretch; }
-  .vnext-rc-player-header-actions > * { flex: 1; }
-  .vnext-rc-player-actions {
-    position: sticky;
-    z-index: 4;
-    bottom: max(8px, env(safe-area-inset-bottom));
-    padding: 10px;
-    border: 1px solid #dce5e0;
-    border-radius: 14px;
-    background: rgba(255, 253, 249, .96);
-    box-shadow: 0 14px 36px rgba(13, 41, 35, .16);
-    backdrop-filter: blur(12px);
+  /* Let the guide take the space left after readable coaching and controls.
+     Intrinsic minimum rows keep enlarged text accessible on short screens. */
+  .vnext-rc-player {
+    padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+      max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   }
-  .vnext-rc-player-actions .vnext-action { flex: 1 1 140px; }
+  .vnext-rc-player-shell { gap: 8px; }
+  .vnext-rc-player-stage {
+    min-height: calc(100svh - max(8px, env(safe-area-inset-top)) - max(8px, env(safe-area-inset-bottom)));
+    grid-template-rows: auto 4px minmax(min-content, 1fr) auto;
+    gap: 8px;
+  }
+  .vnext-rc-player-header { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 0; border: 0; }
+  .vnext-rc-player h1 { font-size: 20px; line-height: 1.15; }
+  .vnext-rc-player-header .vnext-kicker { margin: 0 0 3px; font-size: 10px; letter-spacing: .07em; }
+  .vnext-rc-player-header p:not(.vnext-kicker) { margin: 3px 0 0; font-size: 12px; }
+  .vnext-rc-player-header-actions { flex-wrap: nowrap; gap: 4px; }
+  .vnext-rc-player-header-actions button { width: 44px; height: 44px; padding: 10px; }
+  .vnext-rc-player-header-actions button span { display: none; }
+  .vnext-rc-close-icon { display: block; width: 20px; height: 20px; }
+  .vnext-rc-session-progress { height: 4px; }
+  .vnext-rc-player-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(120px, 1fr) auto; gap: 8px; }
+  .vnext-rc-motion { min-height: 120px; padding: 0; border-radius: 14px; contain: size; }
+  .vnext-rc-motion > div, .vnext-rc-motion svg { height: 100%; max-height: none; }
+  .vnext-rc-coaching { min-height: 0; padding: 0 4px; gap: 5px; border: 0; border-radius: 0; background: transparent; overflow: visible; }
+  .vnext-rc-coaching h2 { font-size: 16px; line-height: 1.2; }
+  .vnext-rc-coaching p, .vnext-rc-coaching ul { margin: 0; font-size: 14px; line-height: 1.3; }
+  .vnext-rc-coaching ul { padding-left: 18px; }
+  .vnext-rc-coaching .vnext-rc-purpose, .vnext-rc-coaching .vnext-rc-target { display: none; }
+  .vnext-rc-coaching .vnext-rc-structure { font-size: 12px; color: #49655d; }
+  .vnext-rc-coaching .vnext-authority { padding: 5px 8px; font-size: 12px; }
+  .vnext-rc-player-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .vnext-rc-timer { grid-column: 1 / 3; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; padding: 5px 10px; border-radius: 12px; }
+  .vnext-rc-timer strong { grid-column: 2; grid-row: 1 / 3; justify-self: end; font-size: 34px; line-height: 1.1; white-space: nowrap; }
+  .vnext-rc-timer span { justify-self: start; font-size: 10px; }
+  .vnext-rc-timer small { justify-self: start; max-width: 115px; font-size: 9px; letter-spacing: 0; text-transform: none; }
+  .vnext-rc-player-actions { display: contents; }
+  .vnext-rc-player-actions .vnext-action { min-height: 44px; padding: 7px 4px; font-size: 12px; }
+  .vnext-rc-player-actions .vnext-action:first-child { grid-column: 3; grid-row: 1; }
+  .vnext-rc-sequence { padding: 4px 10px; }
+  .vnext-rc-sequence li { grid-template-columns: minmax(0, 1fr); }
+
 }
 
 @media (prefers-reduced-motion: reduce) {

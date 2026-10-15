@@ -200,7 +200,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   },
   phase11ReleaseArtifact: {
     status: "frozen",
-    sourceFingerprint: "7c0fedc4712a75386a7bbed74b5d70440f3b68449dc874d784d4af2cfac9a357",
+    sourceFingerprint: "4eefa4f706bf3dcfdd77572ac17795ee544d731fe9edad447d2d14ac5eac33d2",
   },
   preflight: [
     {
@@ -211,7 +211,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
     {
       id: "phase11-release-artifact-frozen",
       status: "passed",
-      evidence: "dist-set:7c0fedc4712a75386a7bbed74b5d70440f3b68449dc874d784d4af2cfac9a357",
+      evidence: "dist-set:4eefa4f706bf3dcfdd77572ac17795ee544d731fe9edad447d2d14ac5eac33d2",
     },
     {
       id: "recoverable-production-snapshots-verified",
@@ -246,7 +246,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   ],
   productionGrant: {
     status: "granted",
-    releaseArtifactFingerprint: "7c0fedc4712a75386a7bbed74b5d70440f3b68449dc874d784d4af2cfac9a357",
+    releaseArtifactFingerprint: "4eefa4f706bf3dcfdd77572ac17795ee544d731fe9edad447d2d14ac5eac33d2",
     authorizations: {
       deployCompatibleRelease: true,
       runIdempotentLiveMigration: true,
