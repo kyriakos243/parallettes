@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Volume2, VolumeX, X } from "lucide-react";
 import type {
   DefinitionBundle,
   IsoTimestamp,
@@ -284,6 +285,12 @@ export const WorkoutRunner = ({
   }, [completedPlanItemIds, currentItem.id, onFinish, participation, plan.athleteId, plan.items, selections, startedAt]);
 
   useEffect(() => {
+    // Opening the player or starting after the expanded preview must show the
+    // current guide, rather than retain the previous screen's scroll position.
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [startedAt]);
+
+  useEffect(() => {
     if (!running) return undefined;
     const timer = window.setInterval(() => {
       setElapsedSeconds((value) => value + 1);
@@ -370,69 +377,73 @@ export const WorkoutRunner = ({
   return (
     <main className="vnext-experience vnext-rc-player" aria-labelledby="vnext-player-title">
       <div className="vnext-rc-player-shell">
-        <header className="vnext-rc-player-header">
-          <div>
-            <p className="vnext-kicker">Block {blockIndex + 1} of {plan.items.length} • {currentInterval.kind === "work" ? `Set ${currentInterval.set} of ${currentInterval.sets}` : "Planned rest"}</p>
-            <h1 id="vnext-player-title">{currentInterval.kind === "rest" ? "Rest" : currentExercise.name}</h1>
-            {currentInterval.kind === "rest" && <p>{nextStructured
-              ? `Up next: ${nextStructured.exercise.name}${nextInterval?.kind === "work" ? `, set ${nextInterval.set} of ${nextInterval.sets}` : ""}`
-              : "Workout complete after this recovery interval."}</p>}
-          </div>
-          <div className="vnext-rc-player-header-actions">
-            <button
-              type="button"
-              className="vnext-rc-sound-button"
-              aria-pressed={soundOn}
-              aria-label={soundOn ? "Turn timer sound off" : "Turn timer sound on"}
-              onClick={() => setSoundOn((value) => {
-                localStorage.setItem("parallette25-vnext-timer-sound-v1", value ? "off" : "on");
-                return !value;
-              })}
-            >{soundOn ? "Sound on" : "Sound off"}</button>
-            <button type="button" className="vnext-action" data-kind="secondary" onClick={() => { setRunning(false); onClose(Boolean(startedAt)); }}>{closeLabel}</button>
-          </div>
-        </header>
+        <div className="vnext-rc-player-stage">
+          <header className="vnext-rc-player-header">
+            <div>
+              <p className="vnext-kicker">Block {blockIndex + 1} of {plan.items.length} • {currentInterval.kind === "work" ? `Set ${currentInterval.set} of ${currentInterval.sets}` : "Planned rest"}</p>
+              <h1 id="vnext-player-title">{currentInterval.kind === "rest" ? "Rest" : currentExercise.name}</h1>
+              {currentInterval.kind === "rest" && <p>{nextStructured
+                ? `Up next: ${nextStructured.exercise.name}${nextInterval?.kind === "work" ? `, set ${nextInterval.set} of ${nextInterval.sets}` : ""}`
+                : "Workout complete after this recovery interval."}</p>}
+            </div>
+            <div className="vnext-rc-player-header-actions">
+              <button
+                type="button"
+                className="vnext-rc-sound-button"
+                aria-pressed={soundOn}
+                aria-label={soundOn ? "Turn timer sound off" : "Turn timer sound on"}
+                onClick={() => setSoundOn((value) => {
+                  localStorage.setItem("parallette25-vnext-timer-sound-v1", value ? "off" : "on");
+                  return !value;
+                })}
+              >{soundOn ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
+                <span>{soundOn ? "Sound on" : "Sound off"}</span></button>
+              <button type="button" className="vnext-action" data-kind="secondary" aria-label={closeLabel} onClick={() => { setRunning(false); onClose(Boolean(startedAt)); }}><X className="vnext-rc-close-icon" aria-hidden="true" /><span>{closeLabel}</span></button>
+            </div>
+          </header>
 
-        <div className="vnext-rc-session-progress" aria-label={`${progressPercent}% of workout elapsed`}>
-          <span style={{ width: `${progressPercent}%` }} />
+          <div className="vnext-rc-session-progress" aria-label={`${progressPercent}% of workout elapsed`}>
+            <span style={{ width: `${progressPercent}%` }} />
+          </div>
+
+          <section className="vnext-rc-player-grid">
+            <div className={`vnext-rc-motion${currentInterval.kind === "rest" ? " is-resting" : ""}`} role="img" aria-label={`${previewExercise.name} owned technique guide`}>
+              {motionPreset ? (
+                <Suspense fallback={<div className="motion-loading" aria-label="Loading owned movement guide" />}>
+                  <VNextMotionGuide preset={motionPreset} />
+                </Suspense>
+              ) : <p role="alert">This movement has no technically approved guide. The session cannot continue.</p>}
+            </div>
+            <div className="vnext-rc-coaching">
+              <p className="vnext-kicker vnext-rc-purpose">{currentInterval.kind === "rest" ? "Recover and set up" : currentItem.purpose.replaceAll("-", " ")}</p>
+              <h2>{currentStructured.variant.label}</h2>
+              <p className="vnext-rc-target">{currentStructured.targetLabel}</p>
+              <p className="vnext-rc-structure">{currentStructured.structureLabel}</p>
+              {currentInterval.kind === "work" ? (
+                <>
+                  <p>{currentExercise.instructions.how}</p>
+                  <ul>{currentExercise.instructions.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul>
+                  {currentExercise.safetyNotes.length > 0 && <p className="vnext-authority">{currentExercise.safetyNotes.join(" ")}</p>}
+                </>
+              ) : <p>Relax the grip, breathe, and set the parallettes or assistance exactly before the next work interval.</p>}
+            </div>
+          </section>
+
+          <div className="vnext-rc-player-controls">
+            <section className="vnext-rc-timer" aria-label="Workout timer">
+              <span>{currentInterval.kind === "work" ? "Work" : "Rest"}</span>
+              <strong aria-live="off">{displayTime(remaining)}</strong>
+              <small>{displayTime(elapsedSeconds)} elapsed • next interval starts automatically</small>
+            </section>
+
+            <div className="vnext-rc-player-actions">
+              <button type="button" className="vnext-action" disabled={!motionPreset} onClick={toggleWorkout}>{running ? "Pause" : elapsedSeconds > 0 ? "Resume" : "Start workout"}</button>
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={intervalIndex === 0} onClick={() => move(-1)}>Previous interval</button>
+              <button type="button" className="vnext-action" data-kind="secondary" onClick={() => intervalIndex < timeline.length - 1 ? move(1) : finish()}>{intervalIndex < timeline.length - 1 ? "Skip interval" : "Finish workout"}</button>
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={elapsedSeconds === 0} onClick={() => finish()}>Finish early</button>
+            </div>
+          </div>
         </div>
-
-        <section className="vnext-rc-player-grid">
-          <div className={`vnext-rc-motion${currentInterval.kind === "rest" ? " is-resting" : ""}`} role="img" aria-label={`${previewExercise.name} owned technique guide`}>
-            {motionPreset ? (
-              <Suspense fallback={<div className="motion-loading" aria-label="Loading owned movement guide" />}>
-                <VNextMotionGuide preset={motionPreset} />
-              </Suspense>
-            ) : <p role="alert">This movement has no technically approved guide. The session cannot continue.</p>}
-          </div>
-          <div className="vnext-rc-coaching">
-            <p className="vnext-kicker">{currentInterval.kind === "rest" ? "Recover and set up" : currentItem.purpose.replaceAll("-", " ")}</p>
-            <h2>{currentStructured.variant.label}</h2>
-            <p>{currentStructured.targetLabel}</p>
-            <p>{currentStructured.structureLabel}</p>
-            {currentInterval.kind === "work" ? (
-              <>
-                <p>{currentExercise.instructions.how}</p>
-                <ul>{currentExercise.instructions.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul>
-                {currentExercise.safetyNotes.length > 0 && <p className="vnext-authority">{currentExercise.safetyNotes.join(" ")}</p>}
-              </>
-            ) : <p>Relax the grip, breathe, and set the parallettes or assistance exactly before the next work interval.</p>}
-          </div>
-        </section>
-
-        <section className="vnext-rc-timer" aria-label="Workout timer">
-          <span>{currentInterval.kind === "work" ? "Work" : "Rest"}</span>
-          <strong aria-live="off">{displayTime(remaining)}</strong>
-          <small>{displayTime(elapsedSeconds)} elapsed • next interval starts automatically</small>
-        </section>
-
-        <div className="vnext-rc-player-actions">
-          <button type="button" className="vnext-action" disabled={!motionPreset} onClick={toggleWorkout}>{running ? "Pause" : elapsedSeconds > 0 ? "Resume" : "Start workout"}</button>
-          <button type="button" className="vnext-action" data-kind="secondary" disabled={intervalIndex === 0} onClick={() => move(-1)}>Previous interval</button>
-          <button type="button" className="vnext-action" data-kind="secondary" onClick={() => intervalIndex < timeline.length - 1 ? move(1) : finish()}>{intervalIndex < timeline.length - 1 ? "Skip interval" : "Finish workout"}</button>
-          <button type="button" className="vnext-action" data-kind="secondary" disabled={elapsedSeconds === 0} onClick={() => finish()}>Finish early</button>
-        </div>
-
         <details className="vnext-rc-sequence" open={!startedAt ? true : undefined}>
           <summary>Workout sequence and exercise changes</summary>
           <ol>
