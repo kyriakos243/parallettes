@@ -1,12 +1,12 @@
 # Parallette25 vNext Master Plan
 
-**STATUS: PHASE 11 PRODUCTION RELEASE LIVE — OBSERVATION WINDOW ACTIVE**
+**STATUS: PHASE 11 WORKOUT UX CORRECTION DEPLOYED AND VERIFIED**
 
 - Architecture direction: approved foundation
-- Last substantial update: 2026-08-29
+- Last substantial update: 2026-10-15
 - Inspected v1.2 implementation baseline: release commit `61b0876`; live GitHub Pages deployment verified as successor `4507da4` with the same application tree and `61b0876` ancestry
 - Current implementation phase: **Phase 11 — Controlled production migration and release**
-- Implementation authorised: **YES — PHASE 11 ONLY**
+- Implementation authorised: **NO NEW IMPLEMENTATION — approved correction delivered**
 
 > **MASTER_PLAN.md is the authoritative persistent project context. Read it before substantial architectural or implementation work. Update it only when an approved architectural decision, significant product requirement, completed implementation phase, important project discovery, roadmap change or project-state change occurs. Do not turn it into a conversation transcript or routine implementation log.**
 
@@ -40,7 +40,7 @@ Parallettes do not provide complete pulling or lower-body development. The defau
 
 ## 3. Current v1.2 Baseline
 
-The repository's designated v1.2 implementation baseline is package version `1.2.0` at release commit `61b0876` (`codex/final-product-audit`). Internal code/docs also use “V2/V2.1.” Live deployment was not independently inspected, so verify it against this baseline before release/cutover work.
+The repository's designated v1.2 implementation baseline is package version `1.2.0` at release commit `61b0876` (`codex/final-product-audit`). Internal code/docs also use “V2/V2.1.” The Phase 11 cutover verified deployed successor `4507da4` against this baseline; current release identities are recorded in Section 12.
 
 | Area | Inspected v1.2 behaviour |
 |---|---|
@@ -195,7 +195,7 @@ The RC coordinator owns bootstrap, exact cache-or-replay projection, adaptive as
 
 Phase 10 corrects and freezes `parallette25-vnext-rc.3` as the comprehensive-validation candidate at source fingerprint `1aba25c526ddbc1280489e464aa48b7aace8e1e5f365944652bb4bc676c38d47`. The domain, seven-graph, protocol/catalogue, assessment/projection/planning, complete athlete-journey, persistence/sync/migration/reset/rollback, account-boundary, owned-media, accessibility/mobile/PWA and mutually exclusive build checks pass. Corrections stayed within the approved architecture: explicit goals report missing-content gaps even when a safe prerequisite family is promoted; ordinary v1 does not bundle vNext media; prerequisite blocks do not appear as athlete restrictions; recoverable workouts say Resume; and account-scoped observations fail closed around session identity and expiry.
 
-The owner rejected the RC.2 still-frame media review because motion revealed incorrect L/V geometry and face direction. RC.3 re-audits all 28 code-native guides/30 movements in their exact final-product player, with frozen frames retained only as secondary technical evidence. The corrected fingerprints are technically approved against exact pose, apparatus, assistance, depth, duration, direction, landing and one-way-playback contracts. Production remains fail-closed because explicit owner acceptance of the live RC.3 animations is pending; no silent fallback exists. Phase 10 therefore recommends **NOT READY FOR PHASE 11** until that gate is accepted. No architecture redesign, live migration, deployment or production authority switch occurred.
+The owner rejected the RC.2 still-frame media review because motion revealed incorrect L/V geometry and face direction. RC.3 re-audits all 28 code-native guides/30 movements in their exact final-product player, with frozen frames retained only as secondary technical evidence. The corrected fingerprints are technically approved against exact pose, apparatus, assistance, depth, duration, direction, landing and one-way-playback contracts. At that checkpoint, production remained fail-closed pending explicit owner acceptance of the live RC.3 animations. The owner subsequently accepted them on 2026-08-28 and authorised Phase 11; the historical RC manifest remains unchanged. No architecture redesign occurred.
 
 The Phase 10 owner checkpoint should review the corrected release evidence and exact owned-motion guides. Later gates must also confirm:
 
@@ -228,12 +228,12 @@ The complete delivery contract and every review gate live only in [Implementatio
 
 ## 12. Current Project State
 
-- **Current production version:** **`parallette25-vnext.1`**, build `33055d9391f5136450dc`, distribution fingerprint `6ea84cd7835a8d605708e33fa9e673534d38c5fed230914162e1842b55dee6d4`, cache lane `vnext-production1`. The retained v1.2 rollback artifact remains verified at successor `4507da4`, which contains `61b0876` and the same v1.2 application tree.
+- **Current production version:** **`parallette25-vnext.1`**, workout UX correction build `eb58fb904465ddeb6c25`, distribution fingerprint `7c0fedc4712a75386a7bbed74b5d70440f3b68449dc874d784d4af2cfac9a357`, cache lane `vnext-production1`. Controlled workflow [38719486015](https://github.com/kyriakos243/parallettes/actions/runs/38719486015) deployed exact source `2dff93a5b809abdbcd309c2f708a3ff0ebcb29be` on 2026-10-15; all 22 served files match the approved artifact.
 - **Architecture status:** **APPROVED FOUNDATION**
-- **Current implementation phase:** **Phase 11**, authorised by the owner after approving Phase 10 and the exact RC.3 live animations.
-- **Completed phases:** **Phases 1–10** are complete and owner-approved. Phase 11 snapshot, additive schema, API authority, exact artifact publication, bounded live smoke and immediate reconciliation gates are complete; the agreed observation window remains open.
-- **Current approved milestone:** Owner-approved `parallette25-vnext-rc.3` remains immutable provenance. `parallette25-vnext.1` is production authority at the exact frozen hashes. D1 migration `0002` is applied additively; per-athlete conversion is active; all legacy data, recovery snapshots and the verified v1.2 rollback lane are retained. Immediate production smoke passed fresh workout/session/next-recommendation, migrated-profile idempotence, offline replay, multi-device union, reset/stale-device suppression, cache isolation and rollback readiness. Read-only reconciliation recorded five activated profiles, four migration receipts/snapshots, 13 plans, 32 evidence events and 11 Session Records with every integrity invariant at zero.
-- **Next intended action:** Keep production under bounded observation through `2026-08-30T08:40:19Z`, retain rollback controls and legacy compatibility, then run the final read-only reconciliation and close Phase 11 only if health, authority hashes and all invariants remain clean. Legacy cleanup or rollback retirement is not authorised.
-- **Implementation authorised:** **YES — PHASE 11 ONLY**
-- **Live application behaviour/data changed:** **Yes, within authorised Phase 11 scope.** Production now serves one coherent vNext read/write path; the compatible Worker has vNext sync and production authority enabled together; D1 carries additive normalised observation tables; and first-access profiles convert idempotently. No live profile was bulk-rewritten, no legacy field/path was deleted, and projection caches remain rebuildable.
-- **Repository warning:** original-workspace `2d7ee8e` and local `main` are not valid vNext implementation bases without reconciliation; continue vNext work from `codex/vnext-phase-1` or a verified successor containing `61b0876`; see Section 3.
+- **Current implementation phase:** **Phase 11 — production release and workout UX correction delivered.** Historical migration closeout remains separate from this frontend correction.
+- **Completed phases:** **Phases 1–10** are complete and owner-approved. Phase 11 snapshotting, additive schema, compatible Worker, coherent production cutover, immediate smoke and initial reconciliation were delivered in August. The owner accepted the workout UX correction on 2026-10-15; its full controlled-release checks, deployment and served-artifact/API verification passed.
+- **Current approved milestone:** The live correction restores animated preview, safe exercise changes, automatic work/rest execution, performed-only review, 5/10/15/20-minute vNext Custom Sessions, explicit preview/active recovery, timer sound/progress/up-next cues, mobile controls and Session-Record-backed History. Cancelling an unstarted Custom Session restores Today. The accepted RC.3 provenance and exact owned-media approvals remain unchanged. Fresh production reconciliation recorded 5 profiles, 4 migration receipts/snapshots, 14 plans, 32 evidence events and 12 Session Records, with all 14 integrity invariants zero. Live startup/reload reached the sign-in gate without browser errors; authenticated workout flows were checked in the accepted isolated preview, not repeated against a live account in this release.
+- **Next intended action:** Owner review/use of the corrected live release. For formal historical migration closeout, retain and reconcile the private cutover legacy-authority hash evidence; this frontend release did not reconstruct that older comparison. Preserve both the prior vNext artifact and verified v1.2 rollback lane, all legacy/additive data and recovery material. No next phase, cleanup or rollback retirement is authorised.
+- **Implementation authorised:** **NO NEW IMPLEMENTATION — approved correction delivered; await the next owner instruction.**
+- **Live application behaviour/data changed:** The approved workout correction is live. This deployment changed only the frontend; the existing Worker, schema, production authority, stable observation IDs and user data were preserved. No migration rerun, database mutation, profile reset or legacy deletion was performed by release operations.
+- **Repository warning:** The original workspace at `2d7ee8e` remains an invalid vNext base. Continue from `codex/workout-ux-correction` or a verified successor containing `61b0876` and the deployed correction; see Section 3.

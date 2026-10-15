@@ -106,6 +106,7 @@
   background: white;
   box-shadow: 0 24px 70px rgba(13, 41, 35, .13);
 }
+.vnext-rc-modal > * { min-width: 0; }
 .vnext-rc-modal-header,
 .vnext-rc-player-header {
   display: flex;
@@ -114,6 +115,30 @@
   align-items: start;
   padding-bottom: 18px;
   border-bottom: 1px solid #dce5e0;
+}
+.vnext-rc-player-header-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.vnext-rc-sound-button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #b8d3cb;
+  border-radius: 10px;
+  color: #17665d;
+  background: #fff;
+  font-weight: 850;
+}
+.vnext-rc-sound-button[aria-pressed="false"] { color: #687b75; background: #f5f7f6; }
+.vnext-rc-session-progress {
+  overflow: hidden;
+  height: 7px;
+  border-radius: 999px;
+  background: #dce9e4;
+}
+.vnext-rc-session-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #11796f, #56b49d);
+  transition: width .25s linear;
 }
 .vnext-rc-modal h1,
 .vnext-rc-player h1 { margin: 0; font-size: clamp(28px, 5vw, 44px); letter-spacing: -.04em; }
@@ -196,6 +221,69 @@
 .vnext-rc-followup,
 .vnext-rc-anchor,
 .vnext-rc-review { display: grid; gap: 15px; }
+.vnext-rc-question-movement {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  align-items: start;
+}
+.vnext-rc-question-motion,
+.vnext-assessment-action-motion {
+  min-width: 0;
+  min-height: 360px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  border: 1px solid #dce5e0;
+  border-radius: 18px;
+  background: #f1f6f3;
+}
+.vnext-rc-question-motion > div,
+.vnext-rc-question-motion svg,
+.vnext-assessment-action-motion > div,
+.vnext-assessment-action-motion svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: 460px;
+}
+.vnext-rc-question-copy { min-width: 0; display: grid; gap: 9px; align-items: start; }
+.vnext-rc-question-copy h3,
+.vnext-rc-question-copy p { margin: 0; }
+.vnext-rc-question-copy details {
+  min-width: 0;
+  padding: 0 12px 12px;
+  border: 1px solid #dce5e0;
+  border-radius: 12px;
+  background: #fbfcfb;
+}
+.vnext-rc-question-copy summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: #173b33;
+  font-weight: 850;
+  cursor: pointer;
+}
+.vnext-rc-test-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.vnext-rc-test-facts span { min-width: 0; display: grid; gap: 3px; padding: 10px 11px; border-radius: 11px; color: #49655d; background: #f1f8f5; font-size: 12px; line-height: 1.4; }
+.vnext-rc-test-facts strong { color: #173b33; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; }
+.vnext-assessment-motion-action { grid-template-columns: minmax(180px, .8fr) minmax(0, 1fr) auto; }
+.vnext-assessment-action-motion { min-height: 180px; }
+.vnext-rc-guided-form { padding-top: 4px; }
+.vnext-rc-custom { display: grid; gap: 18px; }
+.vnext-rc-custom > p { margin: 0; color: #536963; line-height: 1.55; }
+.vnext-rc-custom fieldset { margin: 0; padding: 0; border: 0; }
+.vnext-rc-custom legend,
+.vnext-rc-custom > label > span { display: block; margin-bottom: 9px; color: #173b33; font-weight: 850; }
+.vnext-rc-custom > label { display: grid; gap: 6px; }
+.vnext-rc-custom select { min-height: 48px; padding: 9px 11px; border: 1px solid #dce5e0; border-radius: 10px; color: #173b33; background: #fff; font: inherit; }
+.vnext-custom-choice-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.vnext-custom-choice-row button { min-height: 46px; border: 1px solid #c8d9d3; color: #35564d; background: #fff; font-weight: 850; }
+.vnext-custom-choice-row button[aria-pressed="true"] { border-color: #11796f; color: #fff; background: #11796f; }
+.vnext-custom-checks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.vnext-custom-checks label { min-height: 46px; display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid #dce5e0; border-radius: 10px; color: #35564d; font-weight: 750; }
+.vnext-custom-checks input { width: 18px; height: 18px; accent-color: #11796f; }
 .vnext-rc-followup fieldset,
 .vnext-rc-anchor fieldset { margin: 0; padding: 0; border: 0; }
 .vnext-rc-followup legend,
@@ -242,7 +330,9 @@
 }
 .vnext-rc-motion > div,
 .vnext-rc-motion svg { width: 100%; max-height: 66vh; }
+.vnext-rc-motion.is-resting { opacity: .64; }
 .vnext-rc-coaching { place-items: start; align-content: center; }
+.vnext-rc-coaching h2 { margin: 0; font-size: clamp(20px, 3vw, 28px); }
 .vnext-rc-coaching p { line-height: 1.55; }
 .vnext-rc-coaching ul { padding-left: 20px; line-height: 1.65; }
 .vnext-rc-timer {
@@ -257,8 +347,21 @@
 .vnext-rc-timer small { color: #b9d7ce; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
 .vnext-rc-timer strong { font-size: clamp(48px, 9vw, 78px); font-variant-numeric: tabular-nums; letter-spacing: -.05em; }
 .vnext-rc-player-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.vnext-rc-sequence,
+.vnext-rc-swap { padding: 16px; border: 1px solid #dce5e0; border-radius: 16px; background: #fff; }
+.vnext-rc-sequence summary { min-height: 44px; display: flex; align-items: center; color: #173b33; font-weight: 850; cursor: pointer; }
+.vnext-rc-sequence ol { display: grid; gap: 7px; margin: 8px 0 0; padding: 0; list-style: none; }
+.vnext-rc-sequence li { min-height: 52px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 10px; border-radius: 10px; background: #f5f8f6; }
+.vnext-rc-sequence li[data-current="true"] { box-shadow: inset 3px 0 #11796f; background: #eaf7f3; }
+.vnext-rc-sequence li div { display: grid; gap: 3px; }
+.vnext-rc-sequence li span { color: #64736e; font-size: 11px; line-height: 1.4; }
+.vnext-rc-sequence li button { min-height: 44px; border: 1px solid #b8d3cb; color: #17665d; background: #fff; font-weight: 850; }
+.vnext-rc-swap { display: grid; gap: 10px; }
+.vnext-rc-swap h2 { margin: 0; }
 
 @media (max-width: 760px) {
+  .vnext-rc-overlay { place-items: start center; }
+  .vnext-rc-modal { align-self: start; padding: 18px 14px; border-radius: 18px; }
   .vnext-rc-banner { align-items: flex-start; }
   .vnext-rc-banner-tools { width: 100%; justify-content: space-between; }
   .vnext-rc-banner details { width: 100%; }
@@ -267,9 +370,30 @@
   .vnext-rc-player-header { display: grid; }
   .vnext-rc-player-grid,
   .vnext-rc-check-grid,
-  .vnext-rc-field-row { grid-template-columns: minmax(0, 1fr); }
+  .vnext-rc-field-row,
+  .vnext-custom-choice-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vnext-custom-checks { grid-template-columns: minmax(0, 1fr); }
+  .vnext-rc-question-motion { min-height: min(320px, 42vh); }
+  .vnext-rc-test-facts,
+  .vnext-assessment-motion-action { grid-template-columns: minmax(0, 1fr); }
+  .vnext-assessment-action-motion { min-height: 250px; }
   .vnext-rc-motion,
   .vnext-rc-coaching { min-height: 300px; }
+  .vnext-rc-sequence li { grid-template-columns: minmax(0, 1fr); }
+  .vnext-rc-player-header-actions { justify-content: stretch; }
+  .vnext-rc-player-header-actions > * { flex: 1; }
+  .vnext-rc-player-actions {
+    position: sticky;
+    z-index: 4;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    padding: 10px;
+    border: 1px solid #dce5e0;
+    border-radius: 14px;
+    background: rgba(255, 253, 249, .96);
+    box-shadow: 0 14px 36px rgba(13, 41, 35, .16);
+    backdrop-filter: blur(12px);
+  }
+  .vnext-rc-player-actions .vnext-action { flex: 1 1 140px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

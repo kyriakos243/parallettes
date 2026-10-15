@@ -6,6 +6,7 @@ import type {
   WorkoutCompletionMapping,
   WorkoutCompletionPresentation,
 } from "./contracts";
+import { structureWorkoutItem } from "../workoutUx";
 
 const purposeLabel = (purpose: SessionPlanItem["purpose"]): string => purpose === "primary-development"
   ? "Primary development"
@@ -20,15 +21,15 @@ const purposeLabel = (purpose: SessionPlanItem["purpose"]): string => purpose ==
           : "Reset";
 
 const statusOptions = [
-  { value: "completed", label: "Completed as planned" },
-  { value: "modified", label: "Completed with a change" },
-  { value: "skipped", label: "Did not complete" },
+  { value: "completed", label: "As planned" },
+  { value: "modified", label: "Modified" },
+  { value: "skipped", label: "Stopped" },
 ] as const;
 
 const difficultyOptions = [
-  { value: "easy", label: "Easier than expected" },
-  { value: "right", label: "About right" },
-  { value: "hard", label: "Harder than expected" },
+  { value: "easy", label: "Easy" },
+  { value: "right", label: "Right" },
+  { value: "hard", label: "Hard" },
 ] as const;
 
 export const buildWorkoutCompletionPresentation = (
@@ -42,25 +43,34 @@ export const buildWorkoutCompletionPresentation = (
     authorityNotice: "Only an immutable Session Record can become the authority for what happened in a workout.",
     createsSessionRecord: false,
   };
-  const prompts = workoutReviewPrompts(plan).map((prompt) => {
+  const prompts = workoutReviewPrompts(plan).flatMap((prompt) => {
     const item = plan.items.find((candidate) => candidate.id === prompt.planItemId)!;
-    const exercise = input.bundle.exercises.find((candidate) => candidate.id === prompt.exerciseId
-      && candidate.definitionVersion === item.exerciseDefinitionVersion);
-    return {
+    const measured = input.participationSecondsByPlanItem?.[item.id];
+    const firstWorkSeconds = structureWorkoutItem(item, input.bundle).intervals
+      .find((interval) => interval.kind === "work")?.durationSeconds ?? 1;
+    if (measured !== undefined && measured < Math.max(1, Math.ceil(firstWorkSeconds / 2))) return [];
+    const performed = input.performedByPlanItem?.[item.id];
+    const exercise = input.bundle.exercises.find((candidate) => candidate.id === (performed?.exerciseId ?? prompt.exerciseId)
+      && candidate.definitionVersion === (performed?.exerciseDefinitionVersion ?? item.exerciseDefinitionVersion));
+    const mediaReference = exercise?.media.find((media) => media.kind === "motion")?.reference
+      ?? exercise?.media[0]?.reference
+      ?? "";
+    return [{
       planItemId: prompt.planItemId,
-      exerciseId: prompt.exerciseId,
+      exerciseId: exercise?.id ?? prompt.exerciseId,
       exerciseName: exercise?.name ?? "Planned movement",
+      mediaReference,
       purposeLabel: purposeLabel(prompt.purpose),
-      statusPrompt: `How did ${exercise?.name ?? "this movement"} go?`,
+      statusPrompt: "Did you complete it?",
       statusOptions,
       asksModificationReason: true as const,
       modificationPrompt: "What did you change?",
       asksDifficulty: prompt.asksDifficulty,
       difficultyOptions: prompt.asksDifficulty ? difficultyOptions : [],
       asksPainOrInstability: true as const,
-      painPrompt: "Did this cause pain, symptoms or unexpected instability?",
+      painPrompt: "Pain or unexpected instability?",
       painFollowUp: "If yes, the next step asks where you felt it so future training can be adjusted.",
-    };
+    }];
   });
   return {
     title: "How did today's workout go?",

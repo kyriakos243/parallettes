@@ -317,6 +317,8 @@ assert(migratedPlanche?.demonstratedState.kind === "provisional"
 "Migrated estimate was not distinguished as an imported provisional starting point");
 assert(migratedPlanche?.confidence.state === "not-established",
   "Migrated estimate was presented as confirmed capability");
+assert(migratedPlanche?.nextTarget?.label === "Confirm Stable tuck planche",
+  "A provisional current placement was repeated as the same achieved-looking next step");
 const migratedAssessment = presentation.buildAssessmentEntryPoints({
   bundle,
   state: migratedState,
@@ -756,7 +758,7 @@ assert(/detail\.assessmentAction\.protocolIds/.test(uiSources)
 "Skill-detail guided actions are not matched to the exact approved protocol offer");
 assert(/disabled=\{(?:busy\s*\|\|\s*)?!onDemandChange\}/.test(uiSources),
   "Today's demand controls remain interactive without an owning change callback");
-assert(/disabled=\{(?:busy\s*\|\|\s*)?!allAnswered\s*\|\|\s*!onWorkoutReviewSubmitted\}/.test(uiSources),
+assert(/disabled=\{busy\s*\|\|[^}]*!onWorkoutReviewSubmitted[^}]*\}/.test(uiSources),
   "Workout review can be submitted without an owning completion callback");
 assert(/:focus-visible\b/.test(uiCss), "vNext CSS lacks a visible keyboard focus treatment");
 assert(/(?:44px|2\.75rem)/.test(uiCss), "vNext controls do not declare a 44px minimum touch target");

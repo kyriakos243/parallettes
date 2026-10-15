@@ -4,7 +4,11 @@ import {
   type GoalControlSelection,
   type GoalControlsPresentation,
 } from "./contracts";
-import { presentationFamilyLabel, presentationFamilyOrder } from "./progress";
+import {
+  presentationFamilyDescription,
+  presentationFamilyLabel,
+  presentationFamilyOrder,
+} from "./progress";
 
 export const buildGoalControls = (
   bundle: DefinitionBundle,
@@ -23,7 +27,7 @@ export const buildGoalControls = (
     return {
       graphId,
       label: presentationFamilyLabel(graph),
-      description: graph.description,
+      description: presentationFamilyDescription(graph),
       ...(selected ? { selectedPriority: selected.priority } : {}),
       ...(currentEmphasis ? { currentEmphasis } : {}),
     };

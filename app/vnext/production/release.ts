@@ -169,10 +169,14 @@ const ownerMediaApprovals = Object.entries(VNEXT_PHASE10_OWNER_APPROVED_MEDIA_FI
   }));
 
 /**
- * The production grant is bound to release attempt
+ * The original authority cutover is bound to release attempt
  * 520c65f9-2d89-4044-9481-b9ba05911363. Its private evidence proves the
  * retained v1 deployment, recoverable D1 snapshot, exact additive schema,
  * coherent Worker authority switch and active rollback controls.
+ * The owner accepted the workout UX correction and authorised deployment on
+ * 2026-10-15. Its distinct artifact is frozen below; the same production
+ * schema/authority remains active. Fresh aggregate reconciliation passed all
+ * 14 invariants and the prior production artifact is retained for code rollback.
  */
 export const vNextPhase11ProductionReleaseContract = deepFreeze({
   schemaVersion: VNEXT_PHASE11_PRODUCTION_RELEASE_CONTRACT_VERSION,
@@ -196,7 +200,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   },
   phase11ReleaseArtifact: {
     status: "frozen",
-    sourceFingerprint: "6ea84cd7835a8d605708e33fa9e673534d38c5fed230914162e1842b55dee6d4",
+    sourceFingerprint: "7c0fedc4712a75386a7bbed74b5d70440f3b68449dc874d784d4af2cfac9a357",
   },
   preflight: [
     {
@@ -207,7 +211,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
     {
       id: "phase11-release-artifact-frozen",
       status: "passed",
-      evidence: "dist-set:6ea84cd7835a8d605708e33fa9e673534d38c5fed230914162e1842b55dee6d4",
+      evidence: "dist-set:7c0fedc4712a75386a7bbed74b5d70440f3b68449dc874d784d4af2cfac9a357",
     },
     {
       id: "recoverable-production-snapshots-verified",
@@ -222,7 +226,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
     {
       id: "live-migration-idempotency-and-reconciliation-ready",
       status: "passed",
-      evidence: "migration:0002_vnext_shadow_observations.sql;phase11-reconciliation-validator-passed",
+      evidence: "migration:0002_vnext_shadow_observations.sql;original-cutover-reconciliation-passed;ux-correction:2026-10-15T10:14:07Z;all-14-invariants-zero",
     },
     {
       id: "release-and-rollback-owners-identified",
@@ -242,7 +246,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   ],
   productionGrant: {
     status: "granted",
-    releaseArtifactFingerprint: "6ea84cd7835a8d605708e33fa9e673534d38c5fed230914162e1842b55dee6d4",
+    releaseArtifactFingerprint: "7c0fedc4712a75386a7bbed74b5d70440f3b68449dc874d784d4af2cfac9a357",
     authorizations: {
       deployCompatibleRelease: true,
       runIdempotentLiveMigration: true,

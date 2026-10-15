@@ -45,7 +45,22 @@ export const presentationFamilyLabel = (graph: DevelopmentGraph): string =>
     : graph.id === graphIds.verticalPushHspu ? "HSPU"
       : graph.id === graphIds.pressToHandstand ? "Press"
         : graph.id === graphIds.parallettePushing ? "Pushing"
-          : graph.label;
+        : graph.label;
+
+export const presentationFamilyDescription = (graph: DevelopmentGraph): string =>
+  graph.id === graphIds.planche
+    ? "Build straight-arm leaning strength toward stable tuck and advanced planche holds."
+    : graph.id === graphIds.lSitVSit
+      ? "Build support and compression for longer L-sits and higher V-sit shapes."
+      : graph.id === graphIds.handstandBalance
+        ? "Develop safe entries, a strong line, balance control and confident exits."
+        : graph.id === graphIds.verticalPushHspu
+          ? "Build overhead pressing from pike work toward controlled handstand push-ups."
+          : graph.id === graphIds.pressToHandstand
+            ? "Develop the compression, support and control needed to press into handstand."
+            : graph.id === graphIds.parallettePushing
+              ? "Build strong, controlled parallette push-ups through a useful range."
+              : "Connect established positions smoothly and under control.";
 
 const lifecycleRank: Readonly<Record<NodeLifecycle, number>> = {
   unknown: 0,
@@ -497,14 +512,24 @@ const familySummary = (
     ? stateFor(input.state, demonstratedState.milestone)
     : undefined;
   const confidence = confidencePresentation(selected);
-  const nextTarget = nextTargetFor(graph, input);
+  const projectedNextTarget = nextTargetFor(graph, input);
+  const nextTarget = projectedNextTarget
+    && demonstratedState.kind === "provisional"
+    && demonstratedState.milestone
+    && milestoneKey(demonstratedState.milestone) === milestoneKey(projectedNextTarget.milestone)
+    ? {
+      ...projectedNextTarget,
+      label: `Confirm ${projectedNextTarget.label}`,
+      message: "This placement estimate is useful for training, but the approved guided evidence is still needed before it counts as demonstrated.",
+    }
+    : projectedNextTarget;
   const targetNode = nextTarget ? nodeFor(input.bundle, nextTarget.milestone) : undefined;
   const prerequisites = prerequisitesFor(targetNode, input.bundle, input.state);
   const availability = availabilityFor(graph, demonstratedState, confidence, nextTarget, input);
   return {
     graphId: graph.id,
     label: presentationFamilyLabel(graph),
-    description: graph.description,
+    description: presentationFamilyDescription(graph),
     demonstratedState,
     confidence,
     availability,
