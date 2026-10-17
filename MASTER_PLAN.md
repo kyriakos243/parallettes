@@ -3,10 +3,11 @@
 **STATUS: PHASE 11 COMPLETE — HISTORICAL ARCHIVE EXCEPTION ACCEPTED**
 
 - Architecture direction: approved foundation
-- Last substantial update: 2026-10-15
+- Last substantial update: 2026-10-17
 - Inspected v1.2 implementation baseline: release commit `61b0876`; live GitHub Pages deployment verified as successor `4507da4` with the same application tree and `61b0876` ancestry
 - Current implementation phase: **None — Phase 11 closed on 2026-10-15**
-- Implementation authorised: **NO — completed scope; await a new owner-approved task**
+- Current approved task: **Completion-feedback and landscape corrections, checks and deployment; physical iPhone review follows**
+- Implementation authorised: **APPROVED — the two named usability fixes and deployment once checks pass; progression content remains planning only**
 
 > **MASTER_PLAN.md is the authoritative persistent project context. Read it before substantial architectural or implementation work. Update it only when an approved architectural decision, significant product requirement, completed implementation phase, important project discovery, roadmap change or project-state change occurs. Do not turn it into a conversation transcript or routine implementation log.**
 
@@ -235,7 +236,7 @@ The complete delivery contract and every review gate live only in [Implementatio
 - **Current approved milestone:** Phone instructions sit below the largest animation that fits alongside coaching, safety text, timer and controls at normal text size; 320×568 through 390×844 browser frames and desktop passed. A live test account confirmed custom cancellation, automatic work/rest, exact paused recovery, performed-only review, one saved/synced record, next recommendation and persistence through deployment/reload. Current aggregate reconciliation has 6 profiles, 4 migration snapshots/receipts, 15 plans, 32 events and 13 records, with all 14 integrity invariants zero. Exact API/schema/authority health passed.
 - **Historical evidence recovered:** Original cutover/reconciliation/final-source equality and successful isolated restore are established from the project audit. The current encrypted export also proves that the one-account pre-existing cohort’s serialized legacy-authority bytes match the original cutover hash exactly. Detailed provenance and limits belong only in [the release runbook, Section 12](docs/VNEXT_PRODUCTION_RELEASE_RUNBOOK.md#12-iphone-correction-and-closeout-verification--2026-10-15).
 - **Accepted closeout exception:** The original August SQL recovery exports could not be found. On 2026-10-15 the owner explicitly accepted this historical retention exception and closed Phase 11. The current full/account export is retained in FileVault-protected storage and passes isolated restore and all 14 reconciliation invariants; it protects current recovery but cannot recreate the missing original recovery point. Temporary CLI access was logged out. This exception does not relax backup retention for future releases.
-- **Next intended action:** Stop and await a new owner-approved task. Preserve the current backup, previous vNext artifacts, verified v1.2 rollback lane and all legacy/additive data. No next phase, cleanup or rollback retirement is authorised.
-- **Implementation authorised:** **NO — Phase 11 is closed; further implementation requires a new owner-approved task.**
+- **Next intended action:** The browser usability review and six-batch plan for all 30 remaining progression nodes are prepared; collect physical iPhone 17 results, then review narrow completion-form/landscape fixes and the proposed first content batch. The detailed review, phone checklist, exact node inventory and proposed gates are canonical in [the roadmap’s post-release section](docs/VNEXT_IMPLEMENTATION_ROADMAP.md#post-release-task--iphone-usability-and-remaining-progression-plan). Phase 11 remains closed. Preserve current recovery and rollback material; no next phase, cleanup or rollback retirement is authorised.
+- **Implementation authorised:** **APPROVED — completion-feedback and landscape corrections, proportionate checks and exact-artifact deployment. No progression-content implementation is authorised.**
 - **Live application behaviour/data changed:** The approved phone/workout corrections are live. The test account saved one synthetic Session Plan/Session Record through normal app sync. No direct database write, migration rerun, production restore, profile reset, legacy deletion or Worker source change was performed.
 - **Repository warning:** The original workspace at `2d7ee8e` remains an invalid vNext base. Continue from `codex/phase11-recovery-closeout` or a verified successor containing `61b0876` and the deployed correction; see Section 3.

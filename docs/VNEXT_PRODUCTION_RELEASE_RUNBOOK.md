@@ -263,3 +263,23 @@ The owner explicitly approved account lookup, D1 access and Wrangler’s mandato
 The fresh legacy comparison selects accounts created before the original export timestamp (`2026-08-29T08:41:02.000Z`), confirms one row, and hashes `profile_id`, `revision`, original unmodified `profile_json` in profile-ID order using SQLite CLI quote mode without headers (UTF-8/LF with final newline). The resulting full-projection hash equals the recovered historical hash, establishing the selected cohort’s exact equality. The original export join itself cannot be replayed without the missing file. No private SQL rows were included in repository evidence, and no production restore was performed.
 
 **Closeout status: PHASE 11 COMPLETE on 2026-10-15, with an owner-accepted historical retention exception.** Release, migration audit, fresh legacy-byte equality, current integrity/smoke and current backup/restore checks pass. After reviewing the missing original August pre-migration archive and the limits of the current backup, the owner explicitly replied “Accept exception and close Phase 11.” This accepts the historical Section 4 retention failure for this closeout only; it does not claim that the original archive is available or alter future release backup requirements. The current archive protects current recovery but cannot recreate the missing original recovery point. Preserve current recovery material, vNext/v1 code rollback lanes and all legacy/additive data. No next phase, legacy cleanup, rollback retirement or destructive restoration is authorised.
+
+
+## 13. Completion feedback and landscape corrections — 2026-10-17
+
+The owner explicitly authorised both fixes and deployment after checks. This frontend release places completion before the workout preview and focuses its heading on initial or recovered review; radio input focus remains stable while answering. Compact landscape places the guide beside readable coaching and timer/controls. Portrait presentation, owned media, workout timing, training policy, data schemas, authority and the accepted historical archive exception are unchanged. No Worker/configuration deployment, migration, database reset or destructive restore is required or performed by the Pages workflow.
+
+Local verification: full `pnpm check` passed (including 118 UI/accessibility assertions, domain/data/auth and workout/recovery checks) and two production builds produced the same exact distribution. The existing keyboard validator now permits only negative programmatic-focus tabindex while continuing to reject explicit/dynamic tab order. Browser frames at 874×402, 874×320 and 667×375 landscape, 402×874, 402×650 and 375×667 portrait, plus 1024×768 desktop have no horizontal overflow. All five representative workout movements fit the 874×402 stage through y=394; 874×320 fits through y=312. Early completion and reload both focus the review heading at y≈16, with the save action initially visible; answering Stopped saves one additional local Partial record. A 30-node/21-group progression plan is recorded in the roadmap, with no content implementation approved.
+
+| Frozen release identity | Value |
+|---|---|
+| Build / cache lane | `b8449f390b94cb9cee17` / `vnext-production1` |
+| Distribution SHA-256 | `89e3ac3a5b8f2e82471eedb5e5e8463d8986ed273fb9a376f9f3540406831ebf` |
+| Index SHA-256 | `887b435e0ae61611c8c7094f4241fcb2ad2be52874978a06cd135c2b68d03ec8` |
+| Service-worker SHA-256 | `e9908395a27351d0a81af67fcb527a6ab83dc171fe02f28ac1cc0fd8c3159884` |
+
+The previous build `f995bec866dc6645b3c0`, exact source `096150391ddc6543c2341af797da3a6f74d4ec2a`, is retained as a complete frozen rollback artifact; all 22 normally served files matched it at `2026-10-17T14:11:22.547Z`. The restore-verified encrypted current backup from 2026-10-15 remains owner-retained; this frontend-only correction does not rerun migration or claim a new D1 reconciliation. Public health is revalidated for deployment. No renewed Cloudflare CLI access is needed.
+
+Evidence is private outside Git under `Documents/Codex/parallette25-release-evidence/2026-10-17-usability-fixes`, including old/new frozen distributions, build/check logs, public health, layout measurements and screenshots. Phase 11 remains closed. Physical Safari/Home Screen safe areas, audio, screen lock/background timing and larger text still await the owner's iPhone 17 test; no physical-device certification is inferred from browser frames.
+
+**Deployment status:** Frozen and locally verified; controlled publication and served-file verification pending.

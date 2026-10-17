@@ -284,3 +284,142 @@ The owner then found a genuine lifecycle defect: building Custom marked an unsta
 **Migration/backward compatibility:** Migrate live data only after snapshotting; preserve idempotency, old reads and the tested rollback path throughout the agreed observation window.
 
 **Owner review before post-release cleanup:** Review release health and migration reconciliation. Retiring rollback or deleting legacy data is a separate, explicitly approved maintenance action.
+
+
+## Post-release task — iPhone usability and remaining progression plan
+
+**Status (2026-10-17):** The owner authorised an iPhone usability pass followed by preparation of this content plan. Phase 11 remains closed with its accepted historical archive exception. The owner subsequently authorised the named completion-feedback and landscape corrections, followed by deployment once checks pass. Progression content, changed safety gates and legacy cleanup remain unapproved. Proposed content batches below need explicit owner approval before implementation.
+
+### iPhone review scope and evidence
+
+Owner device: iPhone 17, reported latest iOS; the exact installed iOS version and Safari/Home Screen preference have not been provided. Review uses the released application source at `0961503` and main successor `937629a`, with the same shared workout component and CSS in an isolated device-only preview. Production index/service-worker hashes still match the released phone correction and public API health passes the exact release/schema/D1/paired-authority validator. The existing signed-in release-test profile has an unfinished recovered workout; it was preserved.
+
+Portrait frames: nominal 402×874, reduced-height 402×720 and 402×650, plus 375×667. The nominal frame is a test assumption based on a three-times scale of Apple’s [2622×1206 display specification](https://www.apple.com/iphone-17/specs/); it is not a claim about Safari’s actual visible viewport, display zoom or safe areas. Landscape was reviewed at 874×402. This browser review does not emulate iOS WebKit, physical safe areas, screen locking, audio policy, accessibility text enlargement or offline installation.
+
+| Check | Desktop-preview result / remaining device evidence |
+|---|---|
+| Portrait workout stage | Pass: animation above complete coaching, timer and controls; no horizontal overflow. At 402×874 the guide is 378×522 and stage ends at y=866. At 402×650 the guide is 378×298 and stage ends at y=642. |
+| Custom preview cancellation | Pass: cancelling an unstarted five-minute Custom preview restores Today and its start action. |
+| Work/rest execution | Pass: normal work advances to rest and back to work automatically, reaching the next planned rest before Knee Push-Up set 3 of 4 without manual interval changes. Direct taps preserve scroll position at the top; pause/resume remain available. |
+| Exact paused recovery | Pass: paused Knee Push-Up recovered 00:40 remaining / 00:48 elapsed; paused rest recovered 00:53 remaining / 01:55 elapsed. These are synthetic local test timings, not training achievements. |
+| Header and scroll position | A direct tap preserves scroll position at the top. Locator automation can scroll a control into view and hide the header; do not classify that automation-only movement as a product defect. Physical touch and automatic transitions still need confirmation. |
+| Completion entry / local save | Original finding (corrected in the approved post-release build): Finish early returned to the long Today preview; the feedback heading is at document y=3929 and Save workout at viewport y=4462, rather than bringing the form into view. Once reached, selecting Stopped saves one local Partial Session Record, rebuilds the recommendation and preserves exactly one History entry after reload. The correction places completion before the preview and focuses/scrolls its heading into view, including recovered reviews. See release runbook Section 13 for validation and deployment. |
+| Landscape | Original finding (corrected in the approved post-release build): width exceeded the desktop breakpoint, creating a side-by-side stage; the controls end at y=881 in a 402px-high viewport. The correction keeps the guide on the left and readable coaching/timer/controls on the right. At 874×402 the complete stage ends at y=394, and at 874×320 at y=312; physical iPhone confirmation remains pending. |
+| Optional placement draft | Reproduced: unfinished placement reopens after reloading the completed local test session. Save & close returns to the app without inventing health answers. Clarify the defer/resume experience if it disrupts normal use. |
+| Progress & Goals / History | Pass at 402×874: all seven family summaries remain reachable, no horizontal overflow or undersized visible buttons; the single local Partial record remains after reload. |
+| Screen lock / background | Pending on the physical phone. The current timer increments delivered one-second callbacks and has no wake-lock or explicit background-resume policy. Do not promise accurate background continuation until measured; a correction may require a deliberate timer-policy decision. |
+| Sound / larger text / installed app | Pending on the physical phone. The visual timer remains authoritative and enlarged copy must remain reachable even if scrolling is necessary. |
+
+Evidence is retained outside Git under `Documents/Codex/parallette25-release-evidence/2026-10-17-iphone-usability`, including viewport measurements, portrait/landscape screenshots, current public release checks and the machine-derived remaining-node inventory. No production account payloads or credentials are needed for this task.
+
+### Physical iPhone checklist
+
+Use a separate test athlete for synthetic saved sessions. If that is unavailable, use a private Safari tab with “Start fresh on this device” for the visual/timer checks; keep that tab open during the test. Private browsing is not evidence of normal installed-app or offline persistence. Do not sign out of an existing training account or replace its history just to run this review. No Cloudflare/GitHub login is needed.
+
+1. Open the live app in Safari, keep the phone upright and use ordinary text size. Build a five-minute Custom Session (General / balanced). Before starting, cancel once and confirm Today is available again; then rebuild it.
+2. Start the timer without performing exercises. Check that the whole animation, how-to/cues/safety text, countdown and Pause control are visible together, with no sideways scrolling. Check with Safari’s bars visible and after they shrink. Note whether the notch/home indicator obscures anything.
+3. Let a complete work interval advance into rest and then into work. Listen for cues at a comfortable audible volume; toggle sound off/on. Note animation clarity, unexpected scroll jumps, missed/duplicate cues and any small or difficult touch targets.
+4. Pause, note the exercise/set/countdown, choose Save & close, reload the page and Resume. The paused countdown and exercise/set should be unchanged and should remain paused until Resume is tapped.
+5. For background behavior, note the running countdown, switch away for about 15 seconds, return and compare. Separately repeat with a 15-second screen lock. Report what the clock actually did and whether it was understandable; do not assume the app promises background continuation.
+6. Rotate to landscape and back. The corrected landscape layout should show the guide, instructions and timer together; confirm that on the phone and check whether portrait restores a readable position. Increase Safari text size to about 150%; content and controls must remain reachable, even when scrolling is necessary. Return text size to normal afterwards.
+7. Only in a separate non-private test athlete or account: after the app reports offline ready, test airplane-mode reload/resume and then reconnect. End early and note whether the completion form appears immediately or requires searching/scrolling; select Stopped/Modified honestly, save once and verify exactly one History entry. Do not claim clean exercise performance for this UI test. Report device-only persistence separately from account sync.
+8. If already using the Home Screen app, repeat the portrait visibility, sound and pause/reopen checks there. A separate result is needed because browser bars, installation storage and audio/background behavior differ. Do not change account/security settings to perform this check.
+
+Return: exact iOS version (Settings → General → About), Safari/Home Screen mode, pass/fail for visibility, cues, pause/reload, background/lock, rotation, larger text and optional offline/save. For a failure, include the exercise, work/rest state and what was hidden or unexpected. Physical results are pending until supplied; no device pass is inferred from silence.
+
+### Proposed content delivery order
+
+The canonical current bundle has **30 missing nodes in 21 bridge groups: 1 automatic, 19 stronger-gated and 10 specialist**. The inventory below was derived from `remainingProgressionBridges` and `currentDevelopmentGraphs`, not from the older catalogue-v1 gap list. It accounts for every remaining node exactly once and orders every currently missing prerequisite before its dependent node. Batch order is a development sequence, not a new athlete prerequisite or training prescription.
+
+| Proposed batch | Nodes | Purpose / dependency |
+|---|---:|---|
+| A — Advanced foundations | 5 | Stable balance plus independent Planche, V-sit and forward-loaded pushing outcomes. |
+| B — Full Planche and presses | 5 | Assisted → full Planche after A; three independent press branches. |
+| C — Freestanding control / HSPU | 6 | Balance transfer and eccentric → partial → full → deficit HSPU after A’s balance anchor. |
+| D — Advanced transitions | 4 | Exact composite skills after A/B endpoints; retain independent transition evidence. |
+| E — Optional specialist holds/balance/repetition | 5 | V hold, one-arm branch and repeated presses after their respective A/B/C prerequisites. |
+| F — Optional specialist dynamic work | 5 | Planche eccentric/concentric, 90-degree pressing and high-load connections after their respective A/B/C prerequisites. |
+| **Total** | **30** | **20 automatic/stronger-gated nodes, then 10 separately opted-in specialist nodes.** |
+
+#### Proposed batch A — Advanced foundations (5 nodes)
+
+Author the high-dependency balance anchor first, then the independent Planche, V-sit and forward-loaded pushing outcomes. Each currently has content-backed prerequisites. “Content-backed” does not mean an athlete has demonstrated them.
+
+| Stable node ID | Existing milestone | Existing boundary |
+|---|---|---|
+| `stable-longer-parallette-balance` | Stable longer parallette balance | stronger-gated |
+| `one-leg-planche` | One-leg planche | stronger-gated |
+| `stable-straddle-planche` | Stable straddle planche | stronger-gated |
+| `stable-v-sit` | Stable V-sit | stronger-gated |
+| `advanced-forward-loaded-push-up` | Advanced forward-loaded push-up | stronger-gated |
+
+#### Proposed batch B — Full Planche and unassisted presses (5 nodes)
+
+Stable straddle Planche from A precedes assisted full Planche, which precedes full Planche. The three press branches use their existing assisted/negative prerequisites independently; bent-arm press never becomes a prerequisite for straight-arm press.
+
+| Stable node ID | Existing milestone | Existing boundary |
+|---|---|---|
+| `assisted-full-planche` | Assisted full planche | automatic |
+| `full-planche` | Full planche | stronger-gated |
+| `full-bent-arm-tuck-press` | Full bent-arm tuck press | stronger-gated |
+| `full-straddle-press` | Full straight-arm straddle press | stronger-gated |
+| `full-pike-press` | Full straight-arm pike press | stronger-gated |
+
+#### Proposed batch C — Freestanding control and HSPU (6 nodes)
+
+A’s stable longer balance unlocks the content dependency for transfer and freestanding HSPU. Deliver transfer before one-hand-light balance, and eccentric → partial → full → deficit pressing. Retain the existing standard/deeper exit and wall-strength prerequisites; eccentric evidence never proves concentric strength.
+
+| Stable node ID | Existing milestone | Existing boundary |
+|---|---|---|
+| `freestanding-weight-transfer` | Freestanding weight transfer | stronger-gated |
+| `freestanding-parallette-one-hand-light-balance` | Freestanding parallette one-hand-light balance | stronger-gated |
+| `freestanding-hspu-eccentric` | Freestanding HSPU eccentric | stronger-gated |
+| `partial-freestanding-hspu` | Partial freestanding HSPU | stronger-gated |
+| `full-freestanding-hspu` | Full freestanding HSPU | stronger-gated |
+| `deficit-freestanding-hspu` | Deficit freestanding HSPU | stronger-gated |
+
+#### Proposed batch D — Advanced transitions (4 nodes)
+
+Use the exact A/B endpoints plus each transition’s existing independent benchmark and safety prerequisites. The negative must remain a one-way controlled lower. Endpoint achievements alone never demonstrate a transition.
+
+| Stable node ID | Existing milestone | Existing boundary |
+|---|---|---|
+| `straddle-l-press-handstand` | Straddle L-sit to press handstand | stronger-gated |
+| `full-l-pike-press-to-handstand` | Full L-sit through pike press to handstand | stronger-gated |
+| `handstand-to-l-sit-negative` | Handstand to L-sit negative | stronger-gated |
+| `straddle-planche-to-handstand-press` | Straddle planche to handstand press | stronger-gated |
+
+#### Proposed batch E — Optional specialist holds, balance and repeated presses (5 nodes)
+
+Separate opt-in approval is required. Extended V follows A’s stable V; assisted one-arm follows C’s one-hand-light balance and precedes unassisted one-arm; repeated presses follow their respective B press outcome. Assess each pathway independently rather than requiring unrelated specialist skills.
+
+| Stable node ID | Existing milestone | Existing boundary |
+|---|---|---|
+| `extended-v-sit-hold` | Extended V-sit hold | specialist |
+| `assisted-one-arm-parallette-balance` | Assisted one-arm parallette balance | specialist |
+| `one-arm-handstand` | One-arm handstand | specialist |
+| `repeated-straddle-presses` | Repeated straight-arm straddle presses | specialist |
+| `repeated-pike-presses` | Repeated straight-arm pike presses | specialist |
+
+#### Proposed batch F — Optional specialist dynamic pushing and connections (5 nodes)
+
+Separate opt-in approval is required. Planche eccentric requires full Planche plus advanced forward-loaded pushing and existing capacity evidence; concentric full Planche push-up additionally requires the eccentric. The 90-degree HSPU requires deficit freestanding HSPU and forward-loaded pushing; its handstand-to-Planche connection additionally requires full Planche and stable balance. Preserve the separate Planche-to-handstand path.
+
+| Stable node ID | Existing milestone | Existing boundary |
+|---|---|---|
+| `full-planche-push-up-eccentric` | Full-planche push-up eccentric | specialist |
+| `full-planche-push-up` | Full Planche push-up | specialist |
+| `ninety-degree-hspu` | 90-degree HSPU | specialist |
+| `full-planche-to-handstand-transition` | Full planche to handstand transition | specialist |
+| `ninety-degree-handstand-to-planche-transition` | 90-degree handstand-to-planche transition | specialist |
+
+### Delivery and approval gates for each proposed batch
+
+1. **Prove the content need and scope.** Use the existing planner and representative prerequisite-complete profiles to confirm which missing destination is reached. Preserve the existing graph edges, capacities, restrictions, freshness, demand compatibility and specialist opt-in. Resolve any genuine conflict before implementation; do not add content merely to increase catalogue volume.
+2. **Review the exact content package.** Each node needs an exercise or precisely scoped variant, complete versioned benchmark conditions, apparatus/assistance/range/quality/safety criteria, movement-specific confirmation/freshness, conservative prescriptions and authored regressions. Do not invent numeric thresholds in this planning step. Obtain appropriate coaching/research review when authoring those claims. Existing registry-proposed content IDs are proposals, not proof that one new exercise is sufficient for a multi-node group.
+3. **Preserve historical interpretation.** Catalogue v1/v2 and their semantic fingerprints remain immutable. Plan an additive versioned content overlay and explicit compatibility rules; retain stable IDs for unchanged subjects. Old sessions must replay with their original definitions, and no new advanced outcome receives backdated achievement.
+4. **Produce and approve owned motion.** Specify exact camera, apparatus, assistance, full entry/hold or rep/exit, visible body landmarks and playback behavior. A negative/exit must not reverse into a falsely demonstrated ascent. Reuse a guide only when physical execution truly matches; keep benchmark authority separate. Review every changed guide in motion in the final phone player, then bind approval to its fingerprint.
+5. **Verify the affected paths.** Run focused references/DAG/protocol and generator-frontier checks, positive/negative eligibility cases, symptom/equipment/freshness and Challenge/no-bypass cases, counterpart progression boundaries, historical replay, owned-media integrity and affected phone/UI checks. Run type checking and a production build when source changes. Use broader checks only when the affected scope warrants them.
+6. **Review and release separately.** Present the complete batch in isolation and obtain explicit owner acceptance. Deployment needs an exact approved artifact, fresh release health and retained rollback. Complete a fresh encrypted export and restore check if data/migration/release contracts require it; the Phase 11 historical archive exception does not waive future retention. Stop at the batch checkpoint before starting another unapproved batch.
+
+**Recommended next decision:** deploy the explicitly approved completion-form/landscape corrections after checks, collect the physical iPhone results, then consider Batch A. This plan does not activate any of the 30 missing nodes. Equipment/population expansion, manna/stalder breadth beyond the existing nodes, legacy deletion and rollback retirement remain separate scope decisions.

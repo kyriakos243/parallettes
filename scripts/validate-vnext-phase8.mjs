@@ -745,7 +745,10 @@ assert(/Set \$\{option\.label\} as primary goal/.test(uiSources)
 "Per-family goal buttons do not have distinct accessible names");
 assert(!/<(?:div|span|article|li)\b[^>]*\bonClick=/.test(uiSources),
   "vNext surface uses a non-native click target");
-assert(!/\btabIndex\s*=/.test(uiSources), "vNext surface introduces manual tab order");
+// Negative tabindex allows programmatic heading focus without changing the
+// browser's sequential tab order. Keep explicit/dynamic tab order forbidden.
+const sequentialFocusSource = uiSources.replace(/\btabIndex\s*=\s*\{\s*-1\s*\}/gu, "");
+assert(!/\btabIndex\s*=/.test(sequentialFocusSource), "vNext surface introduces manual tab order");
 assert(!/\.(?:reasonCodes|lifecycle|capacityFindings|programmingBoundary)\b/.test(uiSources),
   "vNext surface renders an internal projection/graph field directly");
 assert(!/(?:Skills\s*&\s*Readiness|mark (?:as )?achieved|claim (?:this )?skill|unlock skill|I have (?:this|the) skill)/i.test(uiSources),

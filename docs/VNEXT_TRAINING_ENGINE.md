@@ -2,9 +2,9 @@
 
 [Back to the project map](../MASTER_PLAN.md)
 
-**Status:** APPROVED FOUNDATION — PHASE 11 RELEASE ONLY; ENGINE/UX ARCHITECTURE FROZEN
+**Status:** APPROVED FOUNDATION — PHASE 11 COMPLETE; ENGINE/UX ARCHITECTURE FROZEN
 
-**Implementation authorised:** NO ENGINE OR UX REDESIGN — PHASE 11 RELEASE ONLY
+**Implementation authorised:** The owner approved completion-feedback and landscape corrections plus deployment after checks. No engine, training-policy or progression-content changes are authorised. Review evidence and the physical-phone checklist are in the roadmap’s post-release section.
 
 This is the canonical detailed source for adaptive placement, capability/readiness interpretation, progression policy, long-term emphasis, workout composition and the user surfaces that expose them. Read it for assessment, projection-policy, generator, Progress & Goals, Today or workout-review work. Data ownership/migration lives in [Data & Migration](VNEXT_DATA_MIGRATION.md); graph content lives in [Skill Architecture](VNEXT_SKILL_ARCHITECTURE.md).
 
@@ -237,6 +237,12 @@ Custom Session is a secondary 5/10/15/20-minute route with general, core/body-li
 An unstarted Today or Custom plan is a **preview**, not an interrupted workout and not evidence. Cancelling an unstarted Custom preview removes only that advisory plan and immediately restores the normal Today recommendation. The recovery lock begins only when the athlete starts the timer; after that, the exact timer draft offers Resume, End and review completed work, or explicit discard. This prevents Custom cancellation from trapping Today while preserving genuine offline recovery.
 
 The parity surface also keeps practical non-authority features from v1.2: a branded athlete shell, an at-a-glance session timeline, timer sound cues, total-session progress, the next exact motion shown during rest, phone-sticky workout controls and Recent Sessions. History is projected from immutable Session Records and matched Session Plans; migrated v1.2 entries remain labelled and retain their sparse-evidence limitations. None of these affordances changes planning, evidence or Session Record authority.
+
+### 6.5 Approved post-release interaction corrections — 2026-10-17
+
+Workout completion is presented before the plan preview, with programmatic heading focus and scrolling when review first opens or is recovered. Answering a prompt preserves input focus; performed-only questions, symptom validation, immutable save/retry and recommendation rebuilding keep their existing authority.
+
+Short landscape viewports use the compact player layout with the guide beside readable coaching and timer/controls. Portrait retains coaching below the guide. Safe-area spacing, minimum touch targets, full safety text and enlarged-text scrolling remain. Exact release evidence is in the production runbook Section 13. No training-content, timer-policy or persistence contract changed.
 
 ## 7. Feature-Isolation Rule
 

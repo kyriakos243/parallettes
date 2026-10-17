@@ -382,6 +382,9 @@ body:has(.vnext-rc-player) { margin: 0; }
   .vnext-rc-test-facts,
   .vnext-assessment-motion-action { grid-template-columns: minmax(0, 1fr); }
   .vnext-assessment-action-motion { min-height: 250px; }
+}
+
+@media (max-width: 760px), (max-width: 1100px) and (max-height: 500px) and (orientation: landscape) {
   /* Let the guide take the space left after readable coaching and controls.
      Intrinsic minimum rows keep enlarged text accessible on short screens. */
   .vnext-rc-player {
@@ -424,6 +427,20 @@ body:has(.vnext-rc-player) { margin: 0; }
   .vnext-rc-sequence { padding: 4px 10px; }
   .vnext-rc-sequence li { grid-template-columns: minmax(0, 1fr); }
 
+}
+
+/* A short landscape phone keeps the guide beside readable coaching and
+   controls. Intrinsic row sizes allow enlarged text to scroll without clipping. */
+@media (max-width: 1100px) and (max-height: 500px) and (orientation: landscape) {
+  .vnext-rc-player-stage {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  }
+  .vnext-rc-player-header { grid-column: 1; grid-row: 1; }
+  .vnext-rc-session-progress { grid-column: 1; grid-row: 2; }
+  .vnext-rc-player-grid { display: contents; }
+  .vnext-rc-motion { grid-column: 1; grid-row: 3 / 5; }
+  .vnext-rc-coaching { grid-column: 2; grid-row: 1 / 4; align-content: center; }
+  .vnext-rc-player-controls { grid-column: 2; grid-row: 4; }
 }
 
 @media (prefers-reduced-motion: reduce) {

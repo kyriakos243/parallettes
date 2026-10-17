@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { GraphId, PlanItemId, SessionDemand } from "../contracts";
 import { VNextMotionGuide } from "../media/VNextMotionGuide";
 import type { SafeWorkoutSwap } from "../workoutUx";
@@ -181,6 +181,13 @@ const TodayView = ({
   const [swapDirection, setSwapDirection] = useState<SafeWorkoutSwap["direction"]>("similar");
   const [reviews, setReviews] = useState<Record<string, ReviewDraft>>({});
   const prompts = completion?.prompts ?? [];
+  const completionHeading = useRef<HTMLHeadingElement>(null);
+  const reviewing = Boolean(completion);
+  useEffect(() => {
+    if (!reviewing) return;
+    completionHeading.current?.focus({ preventScroll: true });
+    completionHeading.current?.scrollIntoView({ block: "start", behavior: "instant" });
+  }, [reviewing]);
   useEffect(() => setReviewIndex(0), [completion]);
   const allAnswered = prompts.length > 0 && prompts.every((prompt) =>
     reviews[prompt.planItemId]?.status !== undefined
@@ -246,6 +253,143 @@ const TodayView = ({
 
   return (
     <section className="vnext-view" aria-labelledby="vnext-today-heading">
+      {completion && (
+        <section className="vnext-completion" aria-labelledby="vnext-completion-heading">
+          <div className="vnext-section-heading">
+            <p className="vnext-kicker">Quick finish</p>
+            <h2 id="vnext-completion-heading" ref={completionHeading} tabIndex={-1}>A few taps, then you’re done</h2>
+            <p>Review only the movements you actually reached.</p>
+          </div>
+          {currentReviewPrompt && currentReviewDraft && (
+              <article className="vnext-review-item" key={currentReviewPrompt.planItemId}>
+                <div className="vnext-review-motion" role="img" aria-label={`${currentReviewPrompt.exerciseName} movement guide`}>
+                  <VNextMotionGuide preset={currentReviewPrompt.mediaReference} />
+                </div>
+                <div className="vnext-review-copy">
+                  <div className="vnext-review-item-heading">
+                    <p className="vnext-kicker">Movement {currentReviewIndex + 1} of {prompts.length} · {currentReviewPrompt.purposeLabel}</p>
+                    <h3>{currentReviewPrompt.exerciseName}</h3>
+                  </div>
+                <fieldset>
+                  <legend>{currentReviewPrompt.statusPrompt}</legend>
+                  <div className="vnext-radio-row vnext-review-status-options">
+                    {currentReviewPrompt.statusOptions.map((option) => (
+                      <label key={option.value}>
+                        <input
+                          type="radio"
+                          name={`status-${currentReviewPrompt.planItemId}`}
+                          value={option.value}
+                          checked={currentReviewDraft.status === option.value}
+                          onChange={() => updateReview(currentReviewPrompt.planItemId, {
+                            status: option.value,
+                            ...(option.value === "skipped" ? {
+                              difficulty: undefined,
+                              symptomOrInstability: false,
+                              bodyRegion: "",
+                              modificationReason: "",
+                            } : {}),
+                          })}
+                        />
+                        {option.label}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                {currentReviewPrompt.asksDifficulty && currentReviewDraft.status && currentReviewDraft.status !== "skipped" && (
+                  <fieldset>
+                    <legend>Effort <span>(optional)</span></legend>
+                    <div className="vnext-radio-row">
+                      {currentReviewPrompt.difficultyOptions.map((option) => (
+                        <label key={option.value}>
+                          <input
+                            type="radio"
+                            name={`difficulty-${currentReviewPrompt.planItemId}`}
+                            value={option.value}
+                            checked={currentReviewDraft.difficulty === option.value}
+                            onChange={() => updateReview(currentReviewPrompt.planItemId, { difficulty: option.value })}
+                          />
+                          {option.label}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
+                {currentReviewDraft.status === "modified" && (
+                  <label>
+                    <span className="vnext-kicker">What changed?</span>
+                    <input
+                      className="vnext-modification"
+                      value={currentReviewDraft.modificationReason}
+                      onChange={(event) => updateReview(currentReviewPrompt.planItemId, { modificationReason: event.target.value })}
+                      placeholder="For example: less range, more assistance or a shorter dose"
+                    />
+                  </label>
+                )}
+                {currentReviewDraft.status && currentReviewDraft.status !== "skipped" && (
+                  <div>
+                    <label className="vnext-symptom-label">
+                      <input
+                        type="checkbox"
+                        checked={currentReviewDraft.symptomOrInstability}
+                        onChange={(event) => updateReview(currentReviewPrompt.planItemId, {
+                          symptomOrInstability: event.target.checked,
+                          ...(!event.target.checked ? { bodyRegion: "" } : {}),
+                        })}
+                      />
+                      {currentReviewPrompt.painPrompt}
+                    </label>
+                    {currentReviewDraft.symptomOrInstability && (
+                      <label>
+                        <span className="vnext-kicker">Affected area</span>
+                        <input
+                          value={currentReviewDraft.bodyRegion}
+                          onChange={(event) => updateReview(currentReviewPrompt.planItemId, { bodyRegion: event.target.value })}
+                          placeholder="For example: left wrist"
+                          required
+                        />
+                      </label>
+                    )}
+                  </div>
+                )}
+                </div>
+              </article>
+          )}
+          {completion.prompts.length === 0 && (
+            <p className="vnext-help">No development or test movement had enough performed work to need a rating. Preparation and recovery timing will still be saved accurately.</p>
+          )}
+          <div className="vnext-actions vnext-review-navigation">
+            {currentReviewIndex > 0 && (
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => setReviewIndex((index) => Math.max(0, index - 1))}>
+                Previous
+              </button>
+            )}
+            {currentReviewPrompt && currentReviewIndex < prompts.length - 1 ? (
+              <button type="button" className="vnext-submit" disabled={busy || !currentReviewReady} onClick={() => setReviewIndex((index) => Math.min(prompts.length - 1, index + 1))}>
+                Next movement
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="vnext-submit"
+                disabled={busy || (completion.prompts.length > 0 && !allAnswered) || !onWorkoutReviewSubmitted}
+                onClick={submitReview}
+              >
+                {completion.prompts.length > 0 ? "Save workout" : "Save workout"}
+              </button>
+            )}
+            {onRestrictionRequested && completion.prompts.length === 0 && (
+              <button type="button" className="vnext-action" data-kind="secondary" onClick={onRestrictionRequested}>
+                Report pain or a new restriction
+              </button>
+            )}
+          </div>
+          <details className="vnext-review-authority">
+            <summary>How this feedback is used</summary>
+            <p>{completion.authorityNotice}</p>
+          </details>
+        </section>
+      )}
+
       <RestrictionNotice presentation={restrictions} onRestrictionRequested={onRestrictionRequested} />
 
       {today.status === "ready" && today.focus ? (
@@ -433,142 +577,7 @@ const TodayView = ({
         </section>
       )}
 
-      {completion && (
-        <section className="vnext-completion" aria-labelledby="vnext-completion-heading">
-          <div className="vnext-section-heading">
-            <p className="vnext-kicker">Quick finish</p>
-            <h2 id="vnext-completion-heading">A few taps, then you’re done</h2>
-            <p>Review only the movements you actually reached.</p>
-          </div>
-          {currentReviewPrompt && currentReviewDraft && (
-              <article className="vnext-review-item" key={currentReviewPrompt.planItemId}>
-                <div className="vnext-review-motion" role="img" aria-label={`${currentReviewPrompt.exerciseName} movement guide`}>
-                  <VNextMotionGuide preset={currentReviewPrompt.mediaReference} />
-                </div>
-                <div className="vnext-review-copy">
-                  <div className="vnext-review-item-heading">
-                    <p className="vnext-kicker">Movement {currentReviewIndex + 1} of {prompts.length} · {currentReviewPrompt.purposeLabel}</p>
-                    <h3>{currentReviewPrompt.exerciseName}</h3>
-                  </div>
-                <fieldset>
-                  <legend>{currentReviewPrompt.statusPrompt}</legend>
-                  <div className="vnext-radio-row vnext-review-status-options">
-                    {currentReviewPrompt.statusOptions.map((option) => (
-                      <label key={option.value}>
-                        <input
-                          type="radio"
-                          name={`status-${currentReviewPrompt.planItemId}`}
-                          value={option.value}
-                          checked={currentReviewDraft.status === option.value}
-                          onChange={() => updateReview(currentReviewPrompt.planItemId, {
-                            status: option.value,
-                            ...(option.value === "skipped" ? {
-                              difficulty: undefined,
-                              symptomOrInstability: false,
-                              bodyRegion: "",
-                              modificationReason: "",
-                            } : {}),
-                          })}
-                        />
-                        {option.label}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-                {currentReviewPrompt.asksDifficulty && currentReviewDraft.status && currentReviewDraft.status !== "skipped" && (
-                  <fieldset>
-                    <legend>Effort <span>(optional)</span></legend>
-                    <div className="vnext-radio-row">
-                      {currentReviewPrompt.difficultyOptions.map((option) => (
-                        <label key={option.value}>
-                          <input
-                            type="radio"
-                            name={`difficulty-${currentReviewPrompt.planItemId}`}
-                            value={option.value}
-                            checked={currentReviewDraft.difficulty === option.value}
-                            onChange={() => updateReview(currentReviewPrompt.planItemId, { difficulty: option.value })}
-                          />
-                          {option.label}
-                        </label>
-                      ))}
-                    </div>
-                  </fieldset>
-                )}
-                {currentReviewDraft.status === "modified" && (
-                  <label>
-                    <span className="vnext-kicker">What changed?</span>
-                    <input
-                      className="vnext-modification"
-                      value={currentReviewDraft.modificationReason}
-                      onChange={(event) => updateReview(currentReviewPrompt.planItemId, { modificationReason: event.target.value })}
-                      placeholder="For example: less range, more assistance or a shorter dose"
-                    />
-                  </label>
-                )}
-                {currentReviewDraft.status && currentReviewDraft.status !== "skipped" && (
-                  <div>
-                    <label className="vnext-symptom-label">
-                      <input
-                        type="checkbox"
-                        checked={currentReviewDraft.symptomOrInstability}
-                        onChange={(event) => updateReview(currentReviewPrompt.planItemId, {
-                          symptomOrInstability: event.target.checked,
-                          ...(!event.target.checked ? { bodyRegion: "" } : {}),
-                        })}
-                      />
-                      {currentReviewPrompt.painPrompt}
-                    </label>
-                    {currentReviewDraft.symptomOrInstability && (
-                      <label>
-                        <span className="vnext-kicker">Affected area</span>
-                        <input
-                          value={currentReviewDraft.bodyRegion}
-                          onChange={(event) => updateReview(currentReviewPrompt.planItemId, { bodyRegion: event.target.value })}
-                          placeholder="For example: left wrist"
-                          required
-                        />
-                      </label>
-                    )}
-                  </div>
-                )}
-                </div>
-              </article>
-          )}
-          {completion.prompts.length === 0 && (
-            <p className="vnext-help">No development or test movement had enough performed work to need a rating. Preparation and recovery timing will still be saved accurately.</p>
-          )}
-          <div className="vnext-actions vnext-review-navigation">
-            {currentReviewIndex > 0 && (
-              <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => setReviewIndex((index) => Math.max(0, index - 1))}>
-                Previous
-              </button>
-            )}
-            {currentReviewPrompt && currentReviewIndex < prompts.length - 1 ? (
-              <button type="button" className="vnext-submit" disabled={busy || !currentReviewReady} onClick={() => setReviewIndex((index) => Math.min(prompts.length - 1, index + 1))}>
-                Next movement
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="vnext-submit"
-                disabled={busy || (completion.prompts.length > 0 && !allAnswered) || !onWorkoutReviewSubmitted}
-                onClick={submitReview}
-              >
-                {completion.prompts.length > 0 ? "Save workout" : "Save workout"}
-              </button>
-            )}
-            {onRestrictionRequested && completion.prompts.length === 0 && (
-              <button type="button" className="vnext-action" data-kind="secondary" onClick={onRestrictionRequested}>
-                Report pain or a new restriction
-              </button>
-            )}
-          </div>
-          <details className="vnext-review-authority">
-            <summary>How this feedback is used</summary>
-            <p>{completion.authorityNotice}</p>
-          </details>
-        </section>
-      )}
+
     </section>
   );
 };

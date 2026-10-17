@@ -1,8 +1,8 @@
 # Parallette25 vNext Skill Architecture
 
-**Status:** APPROVED FOUNDATION — PHASE 11 RELEASE ONLY; SKILL ARCHITECTURE FROZEN
+**Status:** APPROVED FOUNDATION — PHASE 11 COMPLETE; SKILL ARCHITECTURE FROZEN
 
-**Implementation authorised:** NO ARCHITECTURE OR CONTENT CHANGES — PHASE 11 RELEASE ONLY
+**Implementation authorised:** PLANNING ONLY for remaining content; no architecture or content implementation. Proposed delivery order is in the roadmap’s post-release section.
 
 This is the canonical detailed reference for vNext skill graphs, shared capacities, benchmark relationships, exercise roles, catalogue coverage and the advanced/specialist boundary. Read it for graph, benchmark, exercise-content, progression-content or advanced-scope work; most other tasks should use the compact [project map](../MASTER_PLAN.md) instead.
 
