@@ -277,7 +277,7 @@ for (const spec of a.batchASpecs) {
 const releaseApp = readFileSync(new URL("../app/vnext/releaseCandidate/VNextReleaseCandidateApp.tsx",import.meta.url),"utf8");
 assert(releaseApp.includes("const workoutBundle = plan ? bundleFor(plan.catalogueVersion)") && releaseApp.includes("<WorkoutRunner plan={plan} bundle={workoutBundle}"), "Recovered UI does not select its native workout catalogue");
 const productionApp = readFileSync(new URL("../app/vnext/production/VNextProductionApp.tsx",import.meta.url),"utf8");
-assert(productionApp.includes("catalogue: batchAProductionCatalogue") && productionApp.includes("evaluatePlanMedia: evaluateBatchAPlanMediaRelease") && productionApp.includes('import "./batchAMedia"'), "Production omitted coherent catalogue/media activation");
+assert(productionApp.includes("catalogue: combinedProgressionCatalogue") && productionApp.includes("evaluatePlanMedia: evaluateCombinedProgressionPlanMedia") && productionApp.includes('import "./combinedProgressionMedia"'), "Production omitted coherent catalogue/media activation");
 
 const guides = motion.batchAMotionGuides;
 for (const [reference,g] of Object.entries(guides)) {

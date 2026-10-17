@@ -1,0 +1,11 @@
+.batch-c-review { max-width: 900px; margin: 0 auto; padding: 24px; }
+.batch-c-review nav { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
+.batch-c-review nav button { min-height: 44px; }
+.batch-c-review nav button[aria-pressed="true"] { background: #e5eee4; border-color: #38634d; color: #183a2a; }
+.batch-c-review article { border-top: 1px solid #d6ded6; padding-top: 20px; }
+.batch-c-preview { max-width: 700px; margin: 16px auto; background: #f4f7f2; border-radius: 20px; overflow: hidden; }
+.batch-c-preview .motion-guide { width: 100%; }
+.batch-c-review details { margin: 20px 0; padding: 16px; background: #f4f7f2; border-radius: 14px; }
+.batch-c-review summary { cursor: pointer; font-weight: 700; min-height: 32px; }
+.batch-c-review p, .batch-c-review li { line-height: 1.5; }
+@media (max-width: 500px) { .batch-c-review { padding: 16px; } .batch-c-review nav { display: grid; } }

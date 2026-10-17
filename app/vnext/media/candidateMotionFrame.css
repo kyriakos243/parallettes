@@ -1,0 +1,15 @@
+/* Candidate player layout: resolve the SVG against the available grid height.
+   Carry this exact file into the combined release's approved media entry. */
+.vnext-rc-motion > .motion-guide {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.vnext-rc-motion > .motion-guide > svg {
+  display: block;
+  min-height: 0;
+  min-width: 0;
+  max-height: 100%;
+}

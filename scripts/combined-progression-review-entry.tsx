@@ -1,0 +1,23 @@
+import { useState } from "react";
+import { createRoot } from "react-dom/client";
+import "../app/vnext/ui/phase8.css";
+import "../app/vnext/releaseCandidate/phase9.css";
+import "../app/vnext/production/combinedProgressionMedia";
+import { combinedProgressionCatalogue, combinedProgressionBatches, evaluateCombinedProgressionPlanMedia } from "../app/vnext/production/combinedProgressionRelease";
+import { batchASpecs } from "../app/vnext/progression/batchA";
+import { WorkoutRunner, clearActiveWorkoutDraft } from "../app/vnext/releaseCandidate/WorkoutRunner";
+import { vNextGeneratorPolicy } from "../app/vnext/planning/policy";
+import { parseStableId, type SessionPlan } from "../app/vnext/contracts";
+const specs = [...batchASpecs, ...combinedProgressionBatches.flatMap(b => [...b.specs])];
+const athleteId = parseStableId("athlete", "combined-isolated-review");
+const bundle = combinedProgressionCatalogue.bundle;
+const App = () => {
+ const [index, setIndex] = useState(0), [open,setOpen]=useState(false);
+ const spec=specs[index]!, exercise=bundle.exercises.find(e=>e.id===spec.exercise)!;
+ const variant=exercise.prescriptionVariants[0]!;
+ const plan:SessionPlan={schemaVersion:1,id:parseStableId("session-plan",`combined-review-${index}`),athleteId,createdAt:"2026-10-17T09:00:00.000Z",catalogueVersion:bundle.catalogueVersion,generatorPolicyId:vNextGeneratorPolicy.id,generatorPolicyVersion:vNextGeneratorPolicy.version,definitionReferences:[{kind:"exercise",id:exercise.id,version:exercise.definitionVersion}],intendedDurationSeconds:600,items:[{id:parseStableId("plan-item",`combined-item-${index}`),exerciseId:exercise.id,exerciseDefinitionVersion:exercise.definitionVersion,prescriptionVariantId:variant.id,purpose:"primary-development",plannedSeconds:600,demand:variant.demand,targetMilestone:{graphId:spec.graphId,nodeId:parseStableId("node",spec.node)}}],rationale:[{code:parseStableId("reason","isolated-review"),message:"Synthetic layout review only; not an athlete prescription."}]};
+ const close=()=>{clearActiveWorkoutDraft(athleteId);setOpen(false);};
+ if(open)return <WorkoutRunner plan={plan} bundle={bundle} origin="custom" onStart={()=>true} onFinish={()=>{close();return true;}} onClose={close}/>;
+ return <main className="vnext-experience"><h1>Combined progression check</h1><p>Isolated player layout check using the approved production media and catalogue. No training history is opened.</p><nav aria-label="Movements">{specs.map((s,i)=><button className="vnext-action" key={s.exercise} onClick={()=>{setIndex(i);setOpen(true);}}>{i+1}. {s.name}</button>)}</nav>{!evaluateCombinedProgressionPlanMedia(plan).releaseAllowed&&<p role="alert">Media gate failed</p>}</main>;
+};
+createRoot(document.getElementById("root")!).render(<App/>);
