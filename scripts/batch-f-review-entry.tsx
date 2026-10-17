@@ -1,0 +1,11 @@
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { BatchFReview } from "../app/vnext/progression/BatchFReview";
+import "../app/vnext/ui/phase8.css";
+import "../app/vnext/releaseCandidate/phase9.css";
+import "../app/vnext/media/candidateMotionFrame.css";
+import "../app/vnext/progression/batchFReview.css";
+const element = document.getElementById("root");
+if (!element) throw new Error("Review root is unavailable");
+element.dataset.p25BuildLane = "p25-build-lane:batch-f-review";
+createRoot(element).render(<StrictMode><BatchFReview /></StrictMode>);

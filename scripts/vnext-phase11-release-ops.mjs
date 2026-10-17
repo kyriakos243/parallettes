@@ -17,11 +17,11 @@ export const PHASE11_RELEASE = Object.freeze({
   syncRoute: "/vnext/shadow/sync",
   productionArtifact: Object.freeze({
     status: "frozen",
-    buildId: "71bef225371de61db7a6",
+    buildId: "f636d83a464a940fe927",
     cacheChannel: "vnext-production1",
-    distSetSha256: "d241037371556344d387cfaef8eeca02472e9c0db70542da02bce919bbbc6b3c",
-    indexSha256: "31e1e9d6a6205b70872f6bdb22e7186096b75432020875c816bf0ed0434e9565",
-    serviceWorkerSha256: "242a11abda9a67d4d6e8408b290a4cde37d3cc28ea72680eeadd54b1a322ddff",
+    distSetSha256: "432c606f09d25faa03aa45477096ce1f5e9d13bc5941902bb234edfe5e17df6e",
+    indexSha256: "5417c4b081cb2f4355b1e91e745007ba65d4f91aa425df6fed4c9e909fc2ecd9",
+    serviceWorkerSha256: "a356648821e991c42ed56875bcf3bbda63b07e3b0954cf1368b00c25556efa9a",
     profileApiOrigin: "https://parallette25-profile-api.kyriakos243.workers.dev",
   }),
 });
