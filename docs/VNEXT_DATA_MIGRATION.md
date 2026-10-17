@@ -119,6 +119,12 @@ Phase 3 implements this contract as a pure additive module under [`app/vnext/pro
 
 One source may be evaluated against more than one finding only through a versioned directional protocol-reuse rule. Confirmation deduplicates by source and test/session context, provenance points back to that single source, and recent load counts it once. Stronger-node evidence may satisfy only an explicit mechanically necessary milestone predecessor while current; it never manufactures a predecessor lifecycle, capacity, safety result or `anyOf` choice. Cross-catalogue evidence is not merged into current findings without an explicit version-compatibility rule. Phase 3 adds no storage, sync, conversion or production writes; those remain Phase 4 work.
 
+### 5.2 Batch A candidate compatibility — 2026-10-17
+
+The owner accepted Batch A’s animations and authorised release on 2026-10-17. Production selects catalogue v3/projection v3 with immutable definition history v1→v2→v3; the historical RC.3/default exports deliberately remain v1→v2. Both historical bundles and their fingerprints remain immutable. Compatibility explicitly admits v1→v3 only for v1-backed subjects and v2→v3 only for the 94 v2-backed protocol subjects, retaining the historical v1→v2 rules. The five newly backed subjects receive no backdated findings, protocol reuse or predecessor implications.
+
+Focused replay checks cover every historical protocol under both old catalogues, new-protocol confirmation, wrong catalogue/conditions/prescription, reduced practice, freshness and preserved achievement. The candidate changes no observation shape, storage schema, reset/rollback or sync authority. The release binds the runtime’s selected bundle/history and projection policy, catalogue fingerprint, separate media acceptance and exact artifact together. Recovered workouts keep their native catalogue for playback, swaps and Session Record construction; pending assessment/guided results retain their original catalogue. New workflows and export metadata use v3 and all three histories. No old immutable fact is rewritten. Older clients cannot interpret v3 facts: they must update, and publishing a v2-only reader after v3 observations exist is not a valid code rollback. Retain v3 readers for a frontend repair or use the existing controlled v1 authority rollback procedure while preserving all additive data. Never restore a pre-release database over new observations as a normal rollback.
+
 ## 6. Target Persistence and Sync
 
 ### 6.1 Static versioned definitions

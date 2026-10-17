@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import "./batchAMedia";
+import { batchAProductionCatalogue, evaluateBatchAPlanMediaRelease } from "./batchARelease";
 import { isStableId, parseStableId, type VNextShadowStore } from "../index";
 import {
   VNextAccountGate,
@@ -164,6 +166,8 @@ const prepareProductionAthlete = async ({
 
 const PRODUCTION_DEPLOYMENT: VNextApplicationDeployment = {
   kind: "production",
+  catalogue: batchAProductionCatalogue,
+  evaluatePlanMedia: evaluateBatchAPlanMediaRelease,
   productKicker: "Parallette25",
   openingMessage: "Opening your evidence-led training…",
   bannerTitle: "Parallette25",

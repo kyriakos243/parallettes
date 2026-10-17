@@ -4,7 +4,7 @@
 
 **Status:** APPROVED FOUNDATION — RESEARCH BASIS UNCHANGED
 
-**Implementation authorised:** NO
+**Implementation authorised:** Batch A content authoring only; no broader training-policy or scope change.
 
 This is the canonical detailed source for the research and training-science rationale behind the proposed vNext architecture. Read it only for work that changes training logic, benchmark design, progression ordering, load policy, safety assumptions or advanced content. The compact project-wide decisions remain in `MASTER_PLAN.md`.
 
@@ -49,3 +49,12 @@ Do not turn correlations, apparatus-specific findings or elite-sport taxonomies 
 ## Product-Safety Boundary
 
 The proposed first-release audience is healthy adults training independently. The product may screen for symptoms, stop an affected assessment branch, modify or block demands, and suggest professional help. It does not diagnose injury, prescribe rehabilitation, provide return-to-sport clearance or claim to replace qualified coaching for specialist work.
+
+
+## Batch A benchmark authoring review — 2026-10-17
+
+The exact targets are canonical in Skill Architecture and the candidate definitions. They are **authored coaching/product policy**, not validated readiness or injury thresholds. Twenty-second balance, five/eight-second holds, 60° V height, a hand-length shoulder lead, repetition counts, confirmation occasions and freshness windows distinguish observable outcomes and require repeatability; no source establishes those exact consumer thresholds. Review and version them as a package. A shorter guided demonstration is not a completed training/test occasion.
+
+The source review retains the established evidence limits. [Yeadon & Trewartha’s hand-balance experiment](https://pubmed.ncbi.nlm.nih.gov/14999137/) supports small pressure corrections while preserving body configuration; it studied four male gymnasts and does not validate parallette-specific duration gates. [Wang & Shan’s model](https://pubmed.ncbi.nlm.nih.gov/37508787/) supports treating leverage and anthropometry as relevant, not a universal Planche timeline or demographic eligibility rule. [Rosaci et al.](https://pubmed.ncbi.nlm.nih.gov/40014850/) measured different muscle recruitment in the ring support scale and preparatory exercises; this supports keeping preparation distinct from outcome evidence, with no direct validation of these parallette protocols.
+
+The [2026 ACSM position stand](https://pmc.ncbi.nlm.nih.gov/articles/PMC12965823/) supports progressive individualised resistance training in healthy adults; it supersedes the 2009 stand consulted during the review and is not a parallette benchmark prescription. Batch A keeps short quality work, planned rest, existing symptom/freshness/load gates and earlier assisted regressions. The V target and forward-loaded push-up geometry are explicit operational definitions, not claims of proven transfer to a later Press, full Planche or specialist push-up. No new training-score, injury-clearance, equipment or population claim is introduced.
