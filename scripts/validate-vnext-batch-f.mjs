@@ -271,7 +271,7 @@ for(const[ref,g]of Object.entries(guides)){
   assert(g.poses.every(p=>p.head.y+27<g.floor),`Rendered head crosses floor ${ref}`);
   assert([w[0].la.y,w[0].ra.y,w.at(-1).la.y,w.at(-1).ra.y].every(y=>close(y,g.floor)),`Missing grounded setup/landing ${ref}`);
   for(let i=0;i<w.length;i++){
-    for(const joint of Object.keys(w[i]))assert(compareMotionStructures(g.poses[i][joint],motion.projectBatchFPoint(w[i][joint],worlds[ref].camera)).equal,`Projection drift ${ref}/${i}/${joint}`);
+    for(const joint of Object.keys(w[i]))assert(compareMotionStructures(g.poses[i][joint],motion.projectBatchFPoint(w[i][joint],worlds[ref].camera),`$.${ref}.poses.${i}.${joint}`).equal,`Projection drift ${ref}/${i}/${joint}`);
     for(const side of ['l','r']){
       assert(distance(w[i][side+'w'],w[0][side+'w'])<1e-6,`Grip moves ${ref}/${i}/${side}`);
       assert(w[i][side+'a'].y<=g.floor+1e-5&&w[i][side+'k'].y<=g.floor+1e-5,`Foot/knee passes floor ${ref}/${i}/${side}`);

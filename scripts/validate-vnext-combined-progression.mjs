@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { loadTypeScriptModule as load } from "./lib/load-typescript.mjs";
-import { acceptedMotionSnapshot, compareMotionStructures } from "./lib/accepted-motion-snapshots.mjs";
+import { acceptedMotionSnapshot, compareMotionStructures, readAcceptedMotionSnapshot } from "./lib/accepted-motion-snapshots.mjs";
 
 createRequire(import.meta.url)("fake-indexeddb/auto");
 const release = load("app/vnext/production/combinedProgressionRelease.ts");
@@ -106,6 +106,28 @@ for (const letter of "ABCDEF") {
     `Unapproved combined release exposes ${spec.exercise}`);
   }
 }
+// The measured singularity exception is confined to four generator leaves.
+const fLiteral = readAcceptedMotionSnapshot("F");
+const fRef = "full-planche-to-handstand-transition";
+const fPins = load("app/vnext/progression/batchFReviewManifest.ts").batchFReviewManifest.motionFingerprints;
+for (const joint of ["lk", "rk"]) for (const axis of ["x", "y"]) {
+  const kneeNoise = structuredClone(fLiteral);
+  kneeNoise[fRef].poses[175][joint][axis] += 1.5e-6;
+  assert(compareMotionStructures(kneeNoise, fLiteral).equal
+    && hash(kneeNoise[fRef]) !== fPins[fRef], `Reference knee tolerance weakened exact owner approval ${joint}/${axis}`);
+  kneeNoise[fRef].poses[175][joint][axis] += 1e-6;
+  assert(!compareMotionStructures(kneeNoise, fLiteral).equal, `Measured knee bound widened ${joint}/${axis}`);
+  for (const pose of [174, 176]) {
+    const adjacent = structuredClone(fLiteral);
+    adjacent[fRef].poses[pose][joint][axis] += 1e-7;
+    assert(!compareMotionStructures(adjacent, fLiteral).equal, `Knee exception leaked to pose ${pose}/${joint}/${axis}`);
+  }
+}
+const otherJoint = structuredClone(fLiteral);
+otherJoint[fRef].poses[175].la.x += 1e-7;
+assert(!compareMotionStructures(otherJoint, fLiteral).equal, "Knee exception leaked into another joint");
+assert(!compareMotionStructures({x:1e-7,y:0},{x:0,y:0}).equal,
+  "Scoped reference exception weakened ordinary coordinate tolerance");
 assert(totalGuides === 30, "Combined release must retain all thirty A–F guides");
 for (const mutation of [
   { ...release.combinedProgressionAcceptance, ownerDeploymentAuthorization: "pending" },
