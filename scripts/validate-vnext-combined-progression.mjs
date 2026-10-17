@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { loadTypeScriptModule as load } from "./lib/load-typescript.mjs";
+import { acceptedMotionSnapshot, compareMotionStructures } from "./lib/accepted-motion-snapshots.mjs";
 
 createRequire(import.meta.url)("fake-indexeddb/auto");
 const release = load("app/vnext/production/combinedProgressionRelease.ts");
@@ -50,7 +51,8 @@ assert(release.validateCombinedProgressionAcceptance().length === 0, "Combined o
 let totalGuides = 0;
 for (const letter of "ABCDEF") {
   const batch = batches[letter];
-  const guides = batch[`batch${letter}MotionGuides`];
+  const generatedGuides = batch[`batch${letter}MotionGuides`];
+  const guides = letter === "A" ? generatedGuides : acceptedMotionSnapshot(letter, generatedGuides, assert);
   const manifestPath = `app/vnext/progression/batch${letter}ReviewManifest.ts`;
   const review = load(manifestPath)[`batch${letter}ReviewManifest`];
   const actualCandidate = hash({ bundle: batch[`batch${letter}DefinitionBundle`],
@@ -71,6 +73,25 @@ for (const letter of "ABCDEF") {
   const ref = Object.keys(guides)[0];
   const changed = { ...guides, [ref]: { ...guides[ref], duration: guides[ref].duration + .01 } };
   assert(!pinsMatch(changed), `${letter} changed guide escaped actual-content pin check`);
+  if (letter !== "A") {
+    const tinyChange = structuredClone(guides);
+    tinyChange[ref].poses[0].head.x += 5e-11;
+    assert(compareMotionStructures(tinyChange, guides).equal && !pinsMatch(tinyChange),
+      `${letter} generator tolerance weakened exact literal approval`);
+    for (const invalid of [NaN, Infinity, -Infinity]) {
+      const nonfinite = structuredClone(guides);
+      nonfinite[ref].poses[0].head.x = invalid;
+      assert(!compareMotionStructures(nonfinite, guides).equal, `${letter} nonfinite generator leaf accepted`);
+    }
+    const changedMetadata = structuredClone(guides);
+    changedMetadata[ref].label += " changed";
+    const changedShape = structuredClone(guides);
+    delete changedShape[ref].label;
+    assert(!compareMotionStructures(changedMetadata, guides).equal
+      && !compareMotionStructures(changedShape, guides).equal
+      && !compareMotionStructures(changed, guides).equal,
+    `${letter} generator comparison tolerated metadata, key or material number changes`);
+  }
   const playerPath = Object.keys(review.playerSources)[0];
   assert(!pinsMatch(guides, { [playerPath]: `${source(playerPath)}\n/* changed */` }),
     `${letter} changed player source escaped pin check`);
@@ -103,8 +124,10 @@ assert(mediaSource.includes('import "./batchAMedia"') && mediaSource.includes('i
 assert(sourceHash(source("app/vnext/media/candidateMotionFrame.css"))
   === "b8fd8ae322eb8a5aa437d72c33bb4cb270a534305492ce82c1b6a9dedbb171d8",
 "Combined media sizing differs from the owner-accepted F player");
-for (const letter of "BCDEF") assert(mediaSource.includes(`registerMotionGuides(batch${letter}MotionGuides)`),
-  `Combined media entry omits registration ${letter}`);
+for (const letter of "BCDEF") assert(mediaSource.includes(`registerMotionGuides(batch${letter}MotionGuides)`)
+  && mediaSource.includes(`from "./acceptedBatch${letter}Motion.json"`)
+  && !mediaSource.includes(`from "../progression/batch${letter}Motion"`),
+  `Combined media entry omits exact literal registration or retains a generator fallback ${letter}`);
 const productionSource = source("app/vnext/production/VNextProductionApp.tsx");
 assert(productionSource.includes('import "./combinedProgressionMedia"')
   && productionSource.includes("catalogue: combinedProgressionCatalogue")

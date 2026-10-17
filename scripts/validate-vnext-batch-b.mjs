@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 createRequire(import.meta.url)("fake-indexeddb/auto");
 import { readFileSync } from "node:fs";
 import { loadTypeScriptModule as load } from "./lib/load-typescript.mjs";
+import { acceptedMotionSnapshot } from "./lib/accepted-motion-snapshots.mjs";
 const a = load("app/vnext/progression/batchB.ts");
 const prior = load("app/vnext/progression/batchA.ts");
 const d = load("app/vnext/definitions/index.ts");
@@ -19,6 +20,7 @@ const hash = (v) => createHash("sha256").update(json(v)).digest("hex");
 const failures = []; let checks = 0;
 const scenarios = [];
 const assert = (ok, message) => { checks++; if (!ok) failures.push(message); };
+const guides = acceptedMotionSnapshot("B", motion.batchBMotionGuides, assert);
 const bundle = a.batchBDefinitionBundle;
 const old = prior.batchADefinitionBundle;
 const key = (ref) => `${ref.graphId}:${ref.nodeId}`;
@@ -234,7 +236,7 @@ for (const spec of a.batchBSpecs) {
 }
 assert(acceptedA.batchAProductionCatalogue.bundle.catalogueVersion===3, "Candidate activated in production");
 
-const guides=motion.batchBMotionGuides;
+
 const collinear=(a,b,c)=>Math.abs((b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x))<0.001;
 const seconds=(g,from,to)=>g.duration*(g.keyframeTimes[to]-g.keyframeTimes[from]);
 for(const [ref,g] of Object.entries(guides)) {

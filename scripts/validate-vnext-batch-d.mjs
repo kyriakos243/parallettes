@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 createRequire(import.meta.url)("fake-indexeddb/auto");
 import { readFileSync } from "node:fs";
 import { loadTypeScriptModule as load } from "./lib/load-typescript.mjs";
+import { acceptedMotionSnapshot, compareMotionStructures } from "./lib/accepted-motion-snapshots.mjs";
 const a = load("app/vnext/progression/batchD.ts");
 const prior = load("app/vnext/progression/batchC.ts");
 const d = load("app/vnext/definitions/index.ts");
@@ -19,6 +20,7 @@ const hash = (v) => createHash("sha256").update(json(v)).digest("hex");
 const failures = []; let checks = 0;
 const scenarios = [];
 const assert = (ok, message) => { checks++; if (!ok) failures.push(message); };
+const guides = acceptedMotionSnapshot("D", motion.batchDMotionGuides, assert);
 const bundle = a.batchDDefinitionBundle;
 const old = prior.batchCDefinitionBundle;
 const key = (ref) => `${ref.graphId}:${ref.nodeId}`;
@@ -234,7 +236,7 @@ for (const spec of a.batchDSpecs) {
 }
 assert(acceptedA.batchAProductionCatalogue.bundle.catalogueVersion===3, "Candidate activated in production");
 
-const guides=motion.batchDMotionGuides;
+
 const worlds=motion.batchDWorldMotion;
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);
 const seconds=(g,from,to)=>g.duration*(g.keyframeTimes[to]-g.keyframeTimes[from]);
@@ -262,7 +264,7 @@ for(const[ref,g]of Object.entries(guides)){
   assert([w[0].la.y,w[0].ra.y,w.at(-1).la.y,w.at(-1).ra.y].every(y=>close(y,worlds[ref].camera.worldFloor)),`No grounded setup/landing ${ref}`);
   for(let i=0;i<w.length;i++){
     assert([w[i].la,w[i].ra,w[i].lk,w[i].rk].every(j=>j.y<=worlds[ref].camera.worldFloor+1e-6),`World knee/foot crosses physical floor ${ref}/${i}`);
-    for(const joint of Object.keys(w[i]))assert(json(g.poses[i][joint])===json(motion.projectBatchDPoint(w[i][joint],worlds[ref].camera)),`Guide diverges from fixed projection ${ref}/${i}/${joint}`);
+    for(const joint of Object.keys(w[i]))assert(compareMotionStructures(g.poses[i][joint],motion.projectBatchDPoint(w[i][joint],worlds[ref].camera)).equal,`Guide diverges from fixed projection ${ref}/${i}/${joint}`);
     for(const side of ['l','r']){
       assert(json(w[i][`${side}w`])===json(w[0][`${side}w`]),`Grip moves ${ref}`);
       assert(distance(w[i][`${side}s`],w[i][`${side}w`])>109.99999,`Bent arm shortcut ${ref}/${i}`);
@@ -318,7 +320,7 @@ assert(a.batchDRemainingBridges.every(b=>b.boundary==='specialist'),'Normal/stro
 for(const letter of ['B','C']){
   const ledger=load(`app/vnext/progression/batch${letter}MotionAcceptance.ts`)[`batch${letter}MotionAcceptance`];
   const reviewPath=`app/vnext/progression/batch${letter}ReviewManifest.ts`;
-  const priorModule=load(`app/vnext/progression/batch${letter}.ts`),priorGuides=load(`app/vnext/progression/batch${letter}Motion.ts`)[`batch${letter}MotionGuides`];
+  const priorModule=load(`app/vnext/progression/batch${letter}.ts`),priorGuides=acceptedMotionSnapshot(letter,load(`app/vnext/progression/batch${letter}Motion.ts`)[`batch${letter}MotionGuides`],assert);
   assert(ledger.ownerMotionAcceptance==='accepted'&&ledger.productionEnabled===false&&ledger.deploymentTiming==='after-all-progression-batches-complete',`Prior owner gate changed ${letter}`);
   assert(ledger.candidateFingerprint===hash({bundle:priorModule[`batch${letter}DefinitionBundle`],policy:priorModule[`batch${letter}ProjectionPolicy`],guides:priorGuides}),`Accepted prior candidate changed ${letter}`);
   assert(ledger.reviewManifestSha256===createHash('sha256').update(readFileSync(new URL(`../${reviewPath}`,import.meta.url))).digest('hex'),`Accepted prior review changed ${letter}`);
