@@ -402,3 +402,5 @@
   .vnext-experience *::before,
   .vnext-experience *::after { scroll-behavior: auto !important; transition: none !important; }
 }
+
+#vnext-completion-heading { scroll-margin-block-start: 16px; }
