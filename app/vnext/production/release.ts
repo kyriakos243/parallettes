@@ -203,7 +203,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   },
   phase11ReleaseArtifact: {
     status: "frozen",
-    sourceFingerprint: "432c606f09d25faa03aa45477096ce1f5e9d13bc5941902bb234edfe5e17df6e",
+    sourceFingerprint: "e20977b5d3ad8c3aed998a5d51f79d3f182e97423a0242b6c63915c3a8f20a4a",
   },
   preflight: [
     {
@@ -214,12 +214,12 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
     {
       id: "phase11-release-artifact-frozen",
       status: "passed",
-      evidence: "dist-set:432c606f09d25faa03aa45477096ce1f5e9d13bc5941902bb234edfe5e17df6e",
+      evidence: "dist-set:e20977b5d3ad8c3aed998a5d51f79d3f182e97423a0242b6c63915c3a8f20a4a",
     },
     {
       id: "recoverable-production-snapshots-verified",
       status: "passed",
-      evidence: "current-backup:2026-10-17T19:47:15.982950Z;isolated-full-and-accounts-restore:ok;14-invariants-zero;owner-retained;temporary-cli-logged-out",
+      evidence: "current-backup:2026-10-17T20:46:10.812288Z;isolated-full-and-accounts-restore:ok;14-invariants-zero;owner-retained;temporary-cli-logged-out",
     },
     {
       id: "compatible-schema-api-app-worker-order-ready",
@@ -249,7 +249,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   ],
   productionGrant: {
     status: "granted",
-    releaseArtifactFingerprint: "432c606f09d25faa03aa45477096ce1f5e9d13bc5941902bb234edfe5e17df6e",
+    releaseArtifactFingerprint: "e20977b5d3ad8c3aed998a5d51f79d3f182e97423a0242b6c63915c3a8f20a4a",
     authorizations: {
       deployCompatibleRelease: true,
       runIdempotentLiveMigration: true,

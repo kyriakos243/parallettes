@@ -51,6 +51,7 @@ import {
 } from "../persistence";
 import {
   generateVNextSession,
+  generateVNextCustomSession,
   planningTrainabilityRequests,
   type GeneratedSession,
   type PreviousEmphasis,
@@ -99,6 +100,8 @@ export type VNextRuntimeCatalogue = Readonly<{
   bundle: DefinitionBundle;
   history: readonly DefinitionBundle[];
   projectionPolicy: ProjectionPolicy;
+  generateSession?: typeof generateVNextSession;
+  generateCustomSession?: typeof generateVNextCustomSession;
 }>;
 
 /** Frozen RC.3 defaults. Production may select a separately accepted successor. */
@@ -476,7 +479,7 @@ export const createVNextReleaseCandidateRuntime = (
       }
     }
 
-    const generated = generateVNextSession({
+    const generated = (catalogue.generateSession ?? generateVNextSession)({
       createdAt: asOf,
       bundle: vNextDefinitionBundle,
       intent,

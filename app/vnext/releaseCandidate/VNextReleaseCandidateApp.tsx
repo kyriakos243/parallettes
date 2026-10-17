@@ -30,6 +30,8 @@ import { VNextExperience, type VNextRecentSession, type VNextWorkoutReviewFeedba
 import { AssessmentRunner } from "./AssessmentRunner";
 import { GuidedTestRunner, type GuidedTestFormResult } from "./GuidedTestRunner";
 import { CustomSessionBuilder, type VNextCustomSessionRequest } from "./CustomSessionBuilder";
+import { isMixedWorkoutPlan } from "../mixedWorkout";
+import { MixedWorkoutRunner, recoverActiveWorkoutFacts as recoverMixedWorkoutFacts } from "./MixedWorkoutRunner";
 import {
   VNextAccountGate,
   ACCOUNT_SESSION_CHANGED_EVENT,
@@ -73,6 +75,7 @@ const storageKeyPrefix = (
 export type VNextApplicationDeployment = Readonly<{
   kind: "release-candidate" | "production";
   catalogue?: VNextRuntimeCatalogue;
+  workoutGenerators?: Pick<VNextRuntimeCatalogue, "generateSession" | "generateCustomSession">;
   evaluatePlanMedia?: (plan: Parameters<typeof evaluateVNextPlanMediaRelease>[0]) => ReturnType<typeof evaluateVNextPlanMediaRelease>;
   productKicker: string;
   openingMessage: string;
@@ -157,8 +160,9 @@ const rememberCompletedEmphasis = (
   const previous = readPreviousEmphasis(athleteId, namespace);
   if (previous?.lastCountedRecordId === prepared.record.id) return;
   const value: StoredPreviousEmphasis = {
-    generatorPolicyId: generated.generatorPolicyId,
-    generatorPolicyVersion: generated.generatorPolicyVersion,
+    // Execution changes do not reset the unchanged emphasis planner's sample.
+    generatorPolicyId: isMixedWorkoutPlan(generated) ? vNextReleaseCandidateManifest.components.generator.id : generated.generatorPolicyId,
+    generatorPolicyVersion: isMixedWorkoutPlan(generated) ? vNextReleaseCandidateManifest.components.generator.version : generated.generatorPolicyVersion,
     primaryGraphId: emphasis.primary.graphId,
     ...(emphasis.secondary ? { secondaryGraphId: emphasis.secondary.graphId } : {}),
     goalSignature: emphasis.goalSignature,
@@ -307,7 +311,9 @@ const VNextAthleteApplication = ({
   onSignedOut: () => void;
   deployment: VNextApplicationDeployment;
 }>) => {
-  const catalogue = deployment.catalogue ?? vNextReleaseCandidateCatalogue;
+  const catalogue = useMemo(() => deployment.workoutGenerators
+    ? { ...(deployment.catalogue ?? vNextReleaseCandidateCatalogue), ...deployment.workoutGenerators }
+    : deployment.catalogue ?? vNextReleaseCandidateCatalogue, [deployment.catalogue, deployment.workoutGenerators]);
   const { bundle: vNextDefinitionBundle, history: vNextDefinitionBundles, projectionPolicy: vNextProjectionPolicy } = catalogue;
   const evaluatePlanMedia = deployment.evaluatePlanMedia ?? evaluateVNextPlanMediaRelease;
   const bundleFor = (version: DefinitionBundle["catalogueVersion"]) => runtimeDefinitionBundle(catalogue, version);
@@ -337,7 +343,8 @@ const VNextAthleteApplication = ({
     initialWorkoutRecovery?.selections ?? {},
   );
   const [workoutOpen, setWorkoutOpen] = useState(
-    initialWorkoutRecovery?.stage === "active" || initialWorkoutRecovery?.stage === "preview",
+    initialWorkoutRecovery?.stage === "active"
+      || (initialWorkoutRecovery?.stage === "preview" && initialWorkoutRecovery.origin === "today"),
   );
   const [customOpen, setCustomOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -840,7 +847,7 @@ const VNextAthleteApplication = ({
       equipment: request.equipment,
       defaultSessionDemand: request.demand,
     };
-    const generated = generateVNextCustomSession({
+    const generated = (catalogue.generateCustomSession ?? generateVNextCustomSession)({
       createdAt: refreshed.asOf,
       bundle: vNextDefinitionBundle,
       intent,
@@ -871,7 +878,7 @@ const VNextAthleteApplication = ({
     setWorkoutSelections({});
     persistWorkoutRecovery({ version: 1, athleteId, stage: "preview", origin: "custom", generated, selections: {}, swapOptions });
     setCustomOpen(false);
-    setWorkoutOpen(true);
+    setWorkoutOpen(false);
     setMessage(`${request.minutes}-minute vNext Custom Session built from current evidence and safety rules.`);
   });
 
@@ -984,7 +991,7 @@ const VNextAthleteApplication = ({
     const recovery = workoutRecovery;
     const recoveryPlan = recovery?.generated.plan;
     if (!recovery || recovery.stage !== "active" || !recoveryPlan) return;
-    const facts = recoverActiveWorkoutFacts(
+    const facts = (isMixedWorkoutPlan(recoveryPlan) ? recoverMixedWorkoutFacts : recoverActiveWorkoutFacts)(
       recoveryPlan,
       bundleFor(recoveryPlan.catalogueVersion),
       recovery.selections,
@@ -1015,6 +1022,7 @@ const VNextAthleteApplication = ({
   }
 
   if (workoutOpen && plan) {
+    if (isMixedWorkoutPlan(plan)) return <MixedWorkoutRunner plan={plan} bundle={workoutBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} onClose={closeWorkout} onFinish={finishWorkout} />;
     return <WorkoutRunner plan={plan} bundle={workoutBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} onClose={closeWorkout} onFinish={finishWorkout} />;
   }
 
@@ -1029,10 +1037,31 @@ const VNextAthleteApplication = ({
     return <AssessmentRunner draft={assessment.draft} step={assessment.step} bundle={bundleFor(assessment.draft.catalogueVersion)} review={review} busy={busy} onAnswer={answerAssessment} onBack={backAssessment} onCommit={commitAssessment} onClose={() => setAssessment(undefined)} onGuidedTestRequested={openGuidedTestFromReview} />;
   }
 
+  const customPreview = workoutRecovery?.stage === "preview" && workoutRecovery.origin === "custom";
+  const selectPreviewSwap = (planItemId: PlanItemId, selection?: SafeWorkoutSwap): void => {
+    if (!customPreview || !workoutRecovery?.generated.plan?.items.some((item) => item.id === planItemId)) return;
+    const offered = selection && effectiveWorkoutSwapOptions[planItemId]?.find((option) =>
+      option.exerciseId === selection.exerciseId
+      && option.exerciseDefinitionVersion === selection.exerciseDefinitionVersion
+      && option.prescriptionVariantId === selection.prescriptionVariantId);
+    if (selection && !offered) {
+      setError("That alternative is no longer available. Choose one of the listed options.");
+      return;
+    }
+    const selections = { ...workoutRecovery.selections };
+    if (offered) selections[planItemId] = offered;
+    else delete selections[planItemId];
+    try {
+      persistWorkoutRecovery({ ...workoutRecovery, selections });
+      setError(undefined);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The preview change could not be saved. Please try again.");
+    }
+  };
   const workflowLocked = Boolean(workoutRecovery || guidedRecovery);
   const todayPresentation = workoutRecovery
-    ? buildTodayWorkoutPresentation({ bundle: workoutBundle, generated: workoutRecovery.generated })
-    : snapshot.presentations.today;
+    ? buildTodayWorkoutPresentation({ bundle: workoutBundle, generated: workoutRecovery.generated }, workoutRecovery.selections)
+    : buildTodayWorkoutPresentation({ bundle: vNextDefinitionBundle, generated: snapshot.generated }, workoutSelections);
   const completionPresentation = executionFacts && workoutRecovery
     ? buildWorkoutCompletionPresentation({
       bundle: workoutBundle,
@@ -1081,7 +1110,7 @@ const VNextAthleteApplication = ({
           : undefined}
         workoutSwapOptions={!workflowLocked ? workoutSwapOptions : effectiveWorkoutSwapOptions}
         workoutSelections={!workflowLocked ? workoutSelections : workoutRecovery?.selections}
-        onWorkoutSwap={!workflowLocked && !busy ? (planItemId, selection) => setWorkoutSelections((current) => {
+        onWorkoutSwap={!busy && customPreview ? selectPreviewSwap : !workflowLocked && !busy ? (planItemId, selection) => setWorkoutSelections((current) => {
           const next = { ...current };
           if (selection) next[planItemId] = selection;
           else delete next[planItemId];

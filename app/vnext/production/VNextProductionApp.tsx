@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import "./combinedProgressionMedia";
 import { combinedProgressionCatalogue, evaluateCombinedProgressionPlanMedia } from "./combinedProgressionRelease";
+import { generateMixedVNextSession, generateMixedVNextCustomSession } from "../planning/mixed";
 import { isStableId, parseStableId, type VNextShadowStore } from "../index";
 import {
   VNextAccountGate,
@@ -167,6 +168,7 @@ const prepareProductionAthlete = async ({
 const PRODUCTION_DEPLOYMENT: VNextApplicationDeployment = {
   kind: "production",
   catalogue: combinedProgressionCatalogue,
+  workoutGenerators: { generateSession: generateMixedVNextSession, generateCustomSession: generateMixedVNextCustomSession },
   evaluatePlanMedia: evaluateCombinedProgressionPlanMedia,
   productKicker: "Parallette25",
   openingMessage: "Opening your evidence-led training…",
