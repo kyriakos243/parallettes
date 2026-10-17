@@ -173,13 +173,13 @@ const ownerMediaApprovals = Object.entries(VNEXT_PHASE10_OWNER_APPROVED_MEDIA_FI
  * 520c65f9-2d89-4044-9481-b9ba05911363. Its private evidence proves the
  * retained v1 deployment, recoverable D1 snapshot, exact additive schema,
  * coherent Worker authority switch and active rollback controls.
- * The owner authorised completion-feedback and landscape corrections plus
- * deployment after checks on 2026-10-17. Their distinct frontend artifact is
- * frozen below; schema/authority and training evidence contracts are unchanged.
- * The current encrypted backup was restore-verified on 2026-10-15; the missing
- * original archive is an owner-accepted historical exception. The previous
- * frozen frontend artifact is retained for code rollback. Historical migration
- * authorisations below are not instructions to repeat migration or cutover.
+ * The owner accepted all five Batch A animations and authorised deployment
+ * after final checks on 2026-10-17. Their separate approval ledger binds the
+ * exact catalogue-v3 candidate and five guide fingerprints. The fresh full and
+ * accounts backup passed isolated restore and all 14 invariants; FileVault is
+ * on and temporary CLI access is logged out. Worker/schema/authority remain
+ * unchanged. Historical migration authorisations below do not instruct a new
+ * migration/cutover. Preserve original catalogues and all observation data.
  */
 export const vNextPhase11ProductionReleaseContract = deepFreeze({
   schemaVersion: VNEXT_PHASE11_PRODUCTION_RELEASE_CONTRACT_VERSION,
@@ -203,7 +203,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   },
   phase11ReleaseArtifact: {
     status: "frozen",
-    sourceFingerprint: "89e3ac3a5b8f2e82471eedb5e5e8463d8986ed273fb9a376f9f3540406831ebf",
+    sourceFingerprint: "d241037371556344d387cfaef8eeca02472e9c0db70542da02bce919bbbc6b3c",
   },
   preflight: [
     {
@@ -214,7 +214,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
     {
       id: "phase11-release-artifact-frozen",
       status: "passed",
-      evidence: "dist-set:89e3ac3a5b8f2e82471eedb5e5e8463d8986ed273fb9a376f9f3540406831ebf",
+      evidence: "dist-set:d241037371556344d387cfaef8eeca02472e9c0db70542da02bce919bbbc6b3c",
     },
     {
       id: "recoverable-production-snapshots-verified",
@@ -249,7 +249,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   ],
   productionGrant: {
     status: "granted",
-    releaseArtifactFingerprint: "89e3ac3a5b8f2e82471eedb5e5e8463d8986ed273fb9a376f9f3540406831ebf",
+    releaseArtifactFingerprint: "d241037371556344d387cfaef8eeca02472e9c0db70542da02bce919bbbc6b3c",
     authorizations: {
       deployCompatibleRelease: true,
       runIdempotentLiveMigration: true,

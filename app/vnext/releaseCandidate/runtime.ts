@@ -3,6 +3,8 @@ import {
   parseStableId,
   type AthleteId,
   type AthleteIntent,
+  type DefinitionBundle,
+  type DefinitionVersion,
   type EquipmentId,
   type IsoTimestamp,
   type SessionDemand,
@@ -80,6 +82,7 @@ import {
   projectAthleteState,
   vNextProjectionPolicy,
   type ProjectionIssue,
+  type ProjectionPolicy,
 } from "../projection";
 
 export type VNextRuntimeIdKind = "assessment-draft" | "session-record";
@@ -91,8 +94,29 @@ export type VNextRuntimeIdContext = Readonly<{
   planId?: SessionPlan["id"];
 }>;
 
+/** One coherent definition/history/policy selection per mounted application. */
+export type VNextRuntimeCatalogue = Readonly<{
+  bundle: DefinitionBundle;
+  history: readonly DefinitionBundle[];
+  projectionPolicy: ProjectionPolicy;
+}>;
+
+/** Frozen RC.3 defaults. Production may select a separately accepted successor. */
+export const vNextReleaseCandidateCatalogue: VNextRuntimeCatalogue = {
+  bundle: vNextDefinitionBundle,
+  history: vNextDefinitionBundles,
+  projectionPolicy: vNextProjectionPolicy,
+};
+
+export const runtimeDefinitionBundle = (catalogue: VNextRuntimeCatalogue, version: DefinitionVersion): DefinitionBundle => {
+  const bundle = catalogue.history.find((candidate) => candidate.catalogueVersion === version);
+  if (!bundle) throw new TypeError(`Definition catalogue ${version} is unavailable`);
+  return bundle;
+};
+
 export type VNextRuntimeDependencies = Readonly<{
   store: VNextShadowStore;
+  catalogue?: VNextRuntimeCatalogue;
   clock?: () => IsoTimestamp;
   idFactory?: (context: VNextRuntimeIdContext) => string;
 }>;
@@ -367,6 +391,12 @@ export const createVNextReleaseCandidateRuntime = (
   dependencies: VNextRuntimeDependencies,
 ): VNextRuntime => {
   const { store } = dependencies;
+  const catalogue = dependencies.catalogue ?? vNextReleaseCandidateCatalogue;
+  const { bundle: vNextDefinitionBundle, history: vNextDefinitionBundles, projectionPolicy: vNextProjectionPolicy } = catalogue;
+  if (vNextDefinitionBundles.at(-1) !== vNextDefinitionBundle) {
+    throw new TypeError("Runtime current definitions must be the final immutable history entry");
+  }
+  const bundleFor = (version: DefinitionVersion) => runtimeDefinitionBundle(catalogue, version);
   const clock = dependencies.clock ?? defaultClock;
   const idFactory = dependencies.idFactory ?? defaultIdFactory;
 
@@ -462,9 +492,8 @@ export const createVNextReleaseCandidateRuntime = (
     });
     const assessmentDraft = await store.readAssessmentDraft(input.athleteId) ?? undefined;
     const assessmentReview = assessmentDraft
-      && assessmentDraft.catalogueVersion === vNextDefinitionBundle.catalogueVersion
-      && isAssessmentAtReview(assessmentDraft, vNextDefinitionBundle)
-      ? buildAssessmentReview(assessmentDraft, vNextDefinitionBundle, state)
+      && isAssessmentAtReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion))
+      ? buildAssessmentReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state)
       : undefined;
     const progressInput = {
       bundle: vNextDefinitionBundle,
@@ -635,6 +664,7 @@ export const createVNextReleaseCandidateRuntime = (
   };
 
   const answerAssessment: VNextRuntime["answerAssessment"] = async (input) => {
+    const assessmentBundle = bundleFor(input.draft.catalogueVersion);
     const answeredAt = strictlyAfterTimestamp(
       input.answeredAt ?? clock(),
       input.draft.updatedAt,
@@ -644,44 +674,46 @@ export const createVNextReleaseCandidateRuntime = (
       input.draft,
       input.answer,
       answeredAt,
-      vNextDefinitionBundle,
+      assessmentBundle,
     );
     await store.saveAssessmentDraft(draft);
-    const atReview = isAssessmentAtReview(draft, vNextDefinitionBundle);
+    const atReview = isAssessmentAtReview(draft, assessmentBundle);
     const reviewState = atReview
       ? (await refresh({ athleteId: draft.athleteId, asOf: answeredAt })).state
       : undefined;
     return {
       draft,
-      step: nextAssessmentStep(draft, vNextDefinitionBundle),
+      step: nextAssessmentStep(draft, assessmentBundle),
       ...(reviewState ? {
-        review: buildAssessmentReview(draft, vNextDefinitionBundle, reviewState),
+        review: buildAssessmentReview(draft, assessmentBundle, reviewState),
       } : {}),
     };
   };
 
   const backAssessment: VNextRuntime["backAssessment"] = async (input) => {
+    const assessmentBundle = bundleFor(input.draft.catalogueVersion);
     const updatedAt = strictlyAfterTimestamp(
       input.updatedAt ?? clock(),
       input.draft.updatedAt,
       "Assessment back-navigation time",
     );
-    const draft = goBackAssessment(input.draft, updatedAt, vNextDefinitionBundle);
+    const draft = goBackAssessment(input.draft, updatedAt, assessmentBundle);
     await store.saveAssessmentDraft(draft);
-    const atReview = isAssessmentAtReview(draft, vNextDefinitionBundle);
+    const atReview = isAssessmentAtReview(draft, assessmentBundle);
     const reviewState = atReview
       ? (await refresh({ athleteId: draft.athleteId, asOf: updatedAt })).state
       : undefined;
     return {
       draft,
-      step: nextAssessmentStep(draft, vNextDefinitionBundle),
+      step: nextAssessmentStep(draft, assessmentBundle),
       ...(reviewState ? {
-        review: buildAssessmentReview(draft, vNextDefinitionBundle, reviewState),
+        review: buildAssessmentReview(draft, assessmentBundle, reviewState),
       } : {}),
     };
   };
 
   const commitAssessment: VNextRuntime["commitAssessment"] = async (input) => {
+    const assessmentBundle = bundleFor(input.draft.catalogueVersion);
     if (input.athleteId !== input.draft.athleteId) {
       throw new TypeError("Assessment commit belongs to another athlete");
     }
@@ -690,8 +722,8 @@ export const createVNextReleaseCandidateRuntime = (
       athleteId: input.draft.athleteId,
       asOf: atLeastTimestamp(input.asOf ?? clock(), input.draft.updatedAt, "Assessment commit cutoff"),
     });
-    const review = buildAssessmentReview(input.draft, vNextDefinitionBundle, before.state);
-    const committed = await persistAssessmentCommit(store, input.draft, vNextDefinitionBundle);
+    const review = buildAssessmentReview(input.draft, assessmentBundle, before.state);
+    const committed = await persistAssessmentCommit(store, input.draft, assessmentBundle);
     const safetyAnswer = input.draft.answers.find(
       (answer) => answer.value.kind === "safety",
     );
@@ -718,7 +750,7 @@ export const createVNextReleaseCandidateRuntime = (
         athleteId: input.draft.athleteId,
         occurredAt: safetyAnswer!.answeredAt,
         recordedAt: input.draft.updatedAt,
-        catalogueVersion: vNextDefinitionBundle.catalogueVersion,
+        catalogueVersion: assessmentBundle.catalogueVersion,
         restrictionEventId: report.id,
         notes: "Targeted reconfirmation reported no current symptoms or loading restriction.",
       });
@@ -737,6 +769,7 @@ export const createVNextReleaseCandidateRuntime = (
   };
 
   const commitGuidedTest: VNextRuntime["commitGuidedTest"] = async (input) => {
+    const assessmentBundle = bundleFor(input.draft.catalogueVersion);
     if (input.athleteId !== input.draft.athleteId) {
       throw new TypeError("Guided-test commit belongs to another athlete");
     }
@@ -747,7 +780,7 @@ export const createVNextReleaseCandidateRuntime = (
     });
     const event = createGuidedTestEvidence(
       input.draft,
-      vNextDefinitionBundle,
+      assessmentBundle,
       before.state,
       input.result,
     );
@@ -804,7 +837,7 @@ export const createVNextReleaseCandidateRuntime = (
       completedAt,
       "Workout recording time",
     );
-    const record = createSessionRecordFromWorkoutReview(plan, vNextDefinitionBundle, {
+    const record = createSessionRecordFromWorkoutReview(plan, bundleFor(plan.catalogueVersion), {
       recordId: input.recordId ?? initialSessionRecordId(plan.id),
       startedAt: assertTimestamp(input.startedAt, "Workout start time"),
       completedAt,

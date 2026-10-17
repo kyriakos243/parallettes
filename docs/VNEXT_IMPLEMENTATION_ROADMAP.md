@@ -288,7 +288,7 @@ The owner then found a genuine lifecycle defect: building Custom marked an unsta
 
 ## Post-release task — iPhone usability and remaining progression plan
 
-**Status (2026-10-17):** The owner authorised an iPhone usability pass followed by preparation of this content plan. Phase 11 remains closed with its accepted historical archive exception. The owner subsequently authorised the named completion-feedback and landscape corrections, followed by deployment once checks pass. Those fixes are deployed as build `b8449f390b94cb9cee17` through workflow `39039910603`; exact source, public-file verification and live health are recorded in release runbook Section 13. Physical iPhone confirmation remains pending. Progression content, changed safety gates and legacy cleanup remain unapproved. Proposed content batches below need explicit owner approval before implementation.
+**Status (2026-10-17):** The owner authorised an iPhone usability pass followed by preparation of this content plan. Phase 11 remains closed with its accepted historical archive exception. The completion-feedback and landscape corrections were deployed as build `b8449f390b94cb9cee17` through workflow `39039910603` and accepted on the owner's iPhone. The owner then authorised Batch A, accepted its five animations and authorised its deployment after checks. Batch A is live as build `71bef225371de61db7a6` through workflow `39044314733`; release evidence is canonical in runbook Section 14. Physical iPhone confirmation of Batch A remains pending. Batches B–F, changed safety gates and legacy cleanup remain unapproved.
 
 ### iPhone review scope and evidence
 
@@ -341,9 +341,9 @@ The canonical current bundle has **30 missing nodes in 21 bridge groups: 1 autom
 | F — Optional specialist dynamic work | 5 | Planche eccentric/concentric, 90-degree pressing and high-load connections after their respective A/B/C prerequisites. |
 | **Total** | **30** | **20 automatic/stronger-gated nodes, then 10 separately opted-in specialist nodes.** |
 
-#### Proposed batch A — Advanced foundations (5 nodes)
+#### Approved batch A — Advanced foundations (5 nodes; candidate review pending)
 
-Author the high-dependency balance anchor first, then the independent Planche, V-sit and forward-loaded pushing outcomes. Each currently has content-backed prerequisites. “Content-backed” does not mean an athlete has demonstrated them.
+Approved by the owner on 2026-10-17 after physical acceptance of the completion/landscape corrections. Author the high-dependency balance anchor first, then the independent Planche, V-sit and forward-loaded pushing outcomes. Each currently has content-backed prerequisites. “Content-backed” does not mean an athlete has demonstrated them.
 
 | Stable node ID | Existing milestone | Existing boundary |
 |---|---|---|
@@ -422,4 +422,4 @@ Separate opt-in approval is required. Planche eccentric requires full Planche pl
 5. **Verify the affected paths.** Run focused references/DAG/protocol and generator-frontier checks, positive/negative eligibility cases, symptom/equipment/freshness and Challenge/no-bypass cases, counterpart progression boundaries, historical replay, owned-media integrity and affected phone/UI checks. Run type checking and a production build when source changes. Use broader checks only when the affected scope warrants them.
 6. **Review and release separately.** Present the complete batch in isolation and obtain explicit owner acceptance. Deployment needs an exact approved artifact, fresh release health and retained rollback. Complete a fresh encrypted export and restore check if data/migration/release contracts require it; the Phase 11 historical archive exception does not waive future retention. Stop at the batch checkpoint before starting another unapproved batch.
 
-**Recommended next decision:** collect the physical iPhone results for the deployed completion-form/landscape corrections, then consider Batch A. Further implementation needs a new owner-approved scope. This plan does not activate any of the 30 missing nodes. Equipment/population expansion, manna/stalder breadth beyond the existing nodes, legacy deletion and rollback retirement remain separate scope decisions.
+**Current checkpoint:** **Batch A delivered on 2026-10-17** after the owner accepted its five animations and authorised deployment. Version-coherent production integration, 1,635 focused content/upgrade checks, full checks, fresh backup/restore and exact artifact gates passed. All 22 live files match; API health and authenticated v2 recovery/v3 save-sync-export checks pass. Batch A coverage is 78 backed / 25 missing nodes. Await the owner's physical iPhone feedback; Batches B–F remain proposals requiring separate approval. Equipment/population expansion, manna/stalder breadth beyond the existing nodes, legacy deletion and rollback retirement remain separate scope decisions.

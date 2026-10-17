@@ -1,8 +1,8 @@
 # Parallette25 vNext Skill Architecture
 
-**Status:** APPROVED FOUNDATION — PHASE 11 COMPLETE; SKILL ARCHITECTURE FROZEN
+**Status:** APPROVED FOUNDATION — PHASE 11 COMPLETE; BATCH A ACCEPTED; RELEASE AUTHORISED
 
-**Implementation authorised:** PLANNING ONLY for remaining content; no architecture or content implementation. Proposed delivery order is in the roadmap’s post-release section.
+**Implementation authorised:** Batch A’s five named stronger-gated milestones only, approved 2026-10-17. Production release and later batches require their separate gates. Graph topology, population and apparatus boundaries remain frozen.
 
 This is the canonical detailed reference for vNext skill graphs, shared capacities, benchmark relationships, exercise roles, catalogue coverage and the advanced/specialist boundary. Read it for graph, benchmark, exercise-content, progression-content or advanced-scope work; most other tasks should use the compact [project map](../MASTER_PLAN.md) instead.
 
@@ -80,6 +80,27 @@ The existing entry–balance–exit chain now supports two distinct current prot
 - Capacity-contributor links use audited movement sets rather than name/focus shortcuts: wrist drills do not become tall support, mobility/conditioning does not become hollow control, and pike or overhead scapular work does not become forward Planche load. Hand-supported pike drills retain their real wrist demand.
 
 ---
+
+
+## Batch A catalogue-v3 delivery — 2026-10-17
+
+The owner authorised Batch A after accepting the deployed iPhone completion/landscape fixes. The isolated [candidate overlay](../app/vnext/progression/batchA.ts) and [owned motion](../app/vnext/progression/batchAMotion.ts) are canonical for exact definitions. The owner accepted all five animations and authorised deployment after final checks on 2026-10-17. Batch A is live as build `71bef225371de61db7a6`; release evidence is in runbook Section 14. Production selects the overlay through its explicit deployment configuration; historical RC.3 and default exports stay at v2. Both older bundles and fingerprints are unchanged.
+
+The candidate contains 230 exercises, 99 protocols and 78 content-backed nodes. Twenty-five nodes remain missing in 16 groups: one automatic, 14 stronger-gated and ten specialist. All five new nodes retain their stronger-gated classification and exact existing prerequisites. Availability of stable straddle content does not implement the still-missing assisted/full Planche branch.
+
+| Candidate node | Exact benchmark policy | Confirmation / freshness | Authored regression |
+|---|---|---|---|
+| `stable-longer-parallette-balance` | At least 3 of 5 settled, unassisted 20-second straight two-arm balances, each followed by a planned side exit; accepted attempts include both exit sides. | 3 distinct occasions / 30 days | Repeatable parallette balance |
+| `one-leg-planche` | 4 attempts, 2 per side; at least one accepted unassisted 5-second horizontal extended-leg hold on each side, without knee support; controlled return/landing. | 3 distinct occasions / 60 days | Assisted one-leg Planche |
+| `stable-straddle-planche` | Unassisted 8-second horizontal straddle, straight knees/locked elbows, protraction, symmetric comfortable width and controlled tuck/landing. | 3 distinct occasions / 60 days | Assisted straddle Planche |
+| `stable-v-sit` | Unassisted 8-second straight-leg V at least 60° above horizontal, tall support, upright torso, no recoil and controlled lower. | 2 distinct occasions / 60 days | Partial V-sit |
+| `advanced-forward-loaded-push-up` | 4 controlled reps, grounded toes on fixed marks, shoulders at least one athlete hand-length ahead of grip centres throughout, ≥3-second descent to elbow-height shoulders and full lockout. No added deficit is required. | 2 distinct occasions / 60 days | Pseudo-planche push-up |
+
+Each new definition owns one exact standard protocol plus a sub-benchmark technique prescription. Practice targets specify one attempt per set for balance/one-leg work, rather than squeezing a whole multi-attempt test into one short interval. A shorter ordinary practice block need not contain the complete guided benchmark. Reduced-dose practice and ordinary balance-attempt reviews cannot manufacture exact benchmark success. Demand ratings remain conservative at the reduced dose; true regressions return to the authored earlier exercise. Capacity links support relevant planning without adding new prerequisite edges. Focused prerequisite-only straddle and forward-loaded pushing profiles retain the existing explicit 12–13-minute safety exception when no additional safe relevant block is available; the candidate does not force extra high-load volume to reach 25 minutes. The original registry’s proposed forward-loaded exercise ID is retained; “deep” does not introduce a below-elbow deficit requirement absent from the graph.
+
+Projection policy v3 adds explicit v1→v3 and v2→v3 compatibility only for already-backed unchanged subjects, retaining v1→v2. New Batch A subjects receive no historical credit. Historical replay continues to use the original bundles; new graphs only change the five availability/protocol mappings and enclosing version. No new protocol-reuse or mechanical-predecessor implication is added.
+
+Five owned guides use the existing renderer and exact workout player. They show complete entries, holds/reps, both sides where required and controlled exits. Their hold/rep timings match the demonstration; inter-attempt rest is explicitly abbreviated in the guide. All use forward-only playback with a reset, never a reversed exit. The exact moving guides are **owner accepted on 2026-10-17**, bound by the separate [Batch A acceptance ledger](../app/vnext/production/batchARelease.ts). Historical Phase 10 approvals grant the new media no authority. The original review manifest remains unchanged as the prepared review record; its pending state is resolved by the separate acceptance ledger. Use `pnpm review:vnext-batch-a` to build the standalone review and `pnpm validate:vnext-batch-a` for the focused safety, compatibility and media checks.
 
 ## 1. Skill-definition model
 
@@ -305,4 +326,4 @@ The definition architecture may represent specialist nodes without requiring all
 
 Normal vNext assumes healthy adults using parallettes, floor and wall, with rope retained only as optional conditioning. Bands, boxes, pull-up bars or rings are explicit scope expansions, not silent prerequisites. Supporting minors, clinical rehabilitation or return-to-sport decisions would require a different screening, consent, load and safety design.
 
-Phase 2 fixed this boundary in the versioned node definitions: automatic work may be planned only after ordinary prerequisites; stronger-gated nodes require the projector/planner’s fresh safety and capability checks; specialist nodes require explicit opt-in. Phase 7 implemented only the planner-proven automatic gate. Stronger-gated and specialist content remains absent, and the one automatic assisted-full-Planche node stays honestly unavailable because its stable-straddle prerequisite is stronger-gated and still content-free.
+Phase 2 fixed this boundary in the versioned node definitions: automatic work may be planned only after ordinary prerequisites; stronger-gated nodes require the projector/planner’s fresh safety and capability checks; specialist nodes require explicit opt-in. Phase 7 implemented only the planner-proven automatic gate. Immutable catalogue v2 retains those gaps. Production catalogue v3 adds only Batch A's five approved stronger-gated nodes; assisted full Planche and all specialist content remain unavailable.

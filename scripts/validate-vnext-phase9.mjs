@@ -921,7 +921,7 @@ assert(profileStoreReferences.length >= 3
   && !/profileStore[\s\S]{0,300}\b(?:saveProfile|resetProfileTraining|syncProfile|deleteProfile)\b/u.test(releaseAppSource),
 "Isolated vNext root reaches profileStore through anything except the narrow authenticated shadow-sync adapter");
 assert(/createVNextShadowStore\(deployment\.shadowDatabaseName/u.test(releaseAppSource)
-  && /createVNextReleaseCandidateRuntime\(\{\s*store\s*\}\)/u.test(releaseAppSource)
+  && /createVNextReleaseCandidateRuntime\(\{\s*store,\s*catalogue\s*\}\)/u.test(releaseAppSource)
   && !/store\.(?:appendEvidenceEvent|appendSession|putAthleteIntent|applyProgressReset|rollbackMigrationRun|clearAthlete)\s*\(/u.test(releaseAppSource),
 "RC root bypasses the coherent vNext coordinator for evidence, session, intent, reset or rollback authority");
 assert(/store\.exportBundle\s*\(/u.test(releaseAppSource)

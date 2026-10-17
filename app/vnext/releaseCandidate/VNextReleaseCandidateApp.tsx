@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import {
-  VNEXT_CATALOGUE_VERSION,
-  VNEXT_PHASE2_CATALOGUE_VERSION,
   buildAssessmentReview,
   buildTodayWorkoutPresentation,
   buildWorkoutCompletionPresentation,
@@ -10,13 +8,11 @@ import {
   isStableId,
   nextAssessmentStep,
   sha256,
-  vNextDefinitionBundle,
-  vNextDefinitionBundles,
-  vNextProjectionPolicy,
   type AssessmentAnswerValue,
   type AssessmentDraft,
   type AssessmentEntryAction,
   type GeneratedSession,
+  type DefinitionBundle,
   type GuidedTestOffer,
   type GuidedTestResultInput,
   type IsoTimestamp,
@@ -56,6 +52,9 @@ import {
   type VNextRuntime,
   type VNextRuntimeAssessmentState,
   type VNextRuntimeSnapshot,
+  type VNextRuntimeCatalogue,
+  vNextReleaseCandidateCatalogue,
+  runtimeDefinitionBundle,
 } from "./runtime";
 import {
   clearActiveWorkoutDraft,
@@ -73,6 +72,8 @@ const storageKeyPrefix = (
 
 export type VNextApplicationDeployment = Readonly<{
   kind: "release-candidate" | "production";
+  catalogue?: VNextRuntimeCatalogue;
+  evaluatePlanMedia?: (plan: Parameters<typeof evaluateVNextPlanMediaRelease>[0]) => ReturnType<typeof evaluateVNextPlanMediaRelease>;
   productKicker: string;
   openingMessage: string;
   bannerTitle: string;
@@ -271,7 +272,7 @@ const completionStatus = (
   return "complete";
 };
 
-const recentSessionPresentation = (snapshot: VNextRuntimeSnapshot): readonly VNextRecentSession[] => {
+const recentSessionPresentation = (snapshot: VNextRuntimeSnapshot, vNextDefinitionBundle: DefinitionBundle): readonly VNextRecentSession[] => {
   const plans = new Map(snapshot.sources.sessionPlans.map((plan) => [plan.id, plan] as const));
   return [...snapshot.sources.sessionRecords]
     .sort((left, right) => Date.parse(right.completedAt) - Date.parse(left.completedAt)
@@ -306,6 +307,10 @@ const VNextAthleteApplication = ({
   onSignedOut: () => void;
   deployment: VNextApplicationDeployment;
 }>) => {
+  const catalogue = deployment.catalogue ?? vNextReleaseCandidateCatalogue;
+  const { bundle: vNextDefinitionBundle, history: vNextDefinitionBundles, projectionPolicy: vNextProjectionPolicy } = catalogue;
+  const evaluatePlanMedia = deployment.evaluatePlanMedia ?? evaluateVNextPlanMediaRelease;
+  const bundleFor = (version: DefinitionBundle["catalogueVersion"]) => runtimeDefinitionBundle(catalogue, version);
   const athleteId = identity.athleteId;
   const storageNamespace = deployment.storageNamespace ?? VNEXT_RC_STORAGE_NAMESPACE;
   const store = useMemo(
@@ -314,7 +319,7 @@ const VNextAthleteApplication = ({
       : {}),
     [deployment.shadowDatabaseName],
   );
-  const runtime = useMemo(() => createVNextReleaseCandidateRuntime({ store }), [store]);
+  const runtime = useMemo(() => createVNextReleaseCandidateRuntime({ store, catalogue }), [store, catalogue]);
   const initialWorkoutRecovery = useMemo(
     () => readWorkoutRecovery(athleteId, storageNamespace),
     [athleteId, storageNamespace],
@@ -419,7 +424,7 @@ const VNextAthleteApplication = ({
         const draft = result.snapshot.assessmentDraft;
         setAssessment({
           draft,
-          step: nextAssessmentStep(draft, vNextDefinitionBundle),
+          step: nextAssessmentStep(draft, bundleFor(draft.catalogueVersion)),
           ...(result.snapshot.assessmentReview ? { review: result.snapshot.assessmentReview } : {}),
         });
         setMessage("Your saved placement check is ready to resume.");
@@ -502,21 +507,22 @@ const VNextAthleteApplication = ({
 
   const displayedGenerated = workoutRecovery?.generated ?? snapshot?.generated;
   const plan = displayedGenerated?.plan;
+  const workoutBundle = plan ? bundleFor(plan.catalogueVersion) : vNextDefinitionBundle;
   const workoutSwapOptions = useMemo(() => !plan || !snapshot ? {} : Object.fromEntries(
     plan.items.map((item) => [item.id, safeWorkoutSwaps({
       plan,
       item,
-      bundle: vNextDefinitionBundle,
+      bundle: workoutBundle,
       state: snapshot.state,
       intent: snapshot.intent,
       projectionPolicy: vNextProjectionPolicy,
     })]),
-  ) as Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>, [plan, snapshot]);
+  ) as Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>, [plan, snapshot, workoutBundle]);
   const effectiveWorkoutSwapOptions = workoutRecovery?.swapOptions ?? workoutSwapOptions;
-  const mediaEvaluation = useMemo(() => plan ? evaluateVNextPlanMediaRelease(plan) : undefined, [plan]);
+  const mediaEvaluation = useMemo(() => plan ? evaluatePlanMedia(plan) : undefined, [plan]);
   const unrenderableItems = useMemo(() => plan
-    ? unresolvedRenderablePlanItems(plan, vNextDefinitionBundle)
-    : [], [plan]);
+    ? unresolvedRenderablePlanItems(plan, workoutBundle)
+    : [], [plan, workoutBundle]);
   const mediaBlocked = Boolean(plan && (
     !mediaEvaluation?.releaseAllowed || unrenderableItems.length > 0
   ));
@@ -772,7 +778,7 @@ const VNextAthleteApplication = ({
     const definitionFingerprint = await sha256(vNextDefinitionBundles);
     const bundle = await store.exportBundle(athleteId, {
       exportedAt: now(),
-      catalogueVersions: [VNEXT_PHASE2_CATALOGUE_VERSION, VNEXT_CATALOGUE_VERSION],
+      catalogueVersions: vNextDefinitionBundles.map((bundle) => bundle.catalogueVersion),
       projectionVersions: [vNextProjectionPolicy.version],
       definitionFingerprints: [definitionFingerprint],
       policyVersions: [{ id: vNextProjectionPolicy.id, version: vNextProjectionPolicy.version }],
@@ -849,7 +855,7 @@ const VNextAthleteApplication = ({
     if (!generated.ok || !generated.plan) {
       throw new Error("No safe short session is available for that focus and equipment today.");
     }
-    const media = evaluateVNextPlanMediaRelease(generated.plan);
+    const media = evaluatePlanMedia(generated.plan);
     const unresolved = unresolvedRenderablePlanItems(generated.plan, vNextDefinitionBundle);
     if (!media.releaseAllowed || unresolved.length > 0) {
       throw new Error("This short session is blocked because an exact owned movement guide is unavailable.");
@@ -886,7 +892,7 @@ const VNextAthleteApplication = ({
       setSnapshot(refreshed);
       const generated = refreshed.generated;
       if (!generated.ok || !generated.plan) throw new Error("Today's safe workout is not currently available.");
-      const media = evaluateVNextPlanMediaRelease(generated.plan);
+      const media = evaluatePlanMedia(generated.plan);
       const unresolved = unresolvedRenderablePlanItems(generated.plan, vNextDefinitionBundle);
       if (!media.releaseAllowed || unresolved.length > 0) {
         throw new Error("This workout is blocked because an exact owned movement guide is unavailable.");
@@ -980,7 +986,7 @@ const VNextAthleteApplication = ({
     if (!recovery || recovery.stage !== "active" || !recoveryPlan) return;
     const facts = recoverActiveWorkoutFacts(
       recoveryPlan,
-      vNextDefinitionBundle,
+      bundleFor(recoveryPlan.catalogueVersion),
       recovery.selections,
       effectiveWorkoutSwapOptions,
     );
@@ -1009,27 +1015,27 @@ const VNextAthleteApplication = ({
   }
 
   if (workoutOpen && plan) {
-    return <WorkoutRunner plan={plan} bundle={vNextDefinitionBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} onClose={closeWorkout} onFinish={finishWorkout} />;
+    return <WorkoutRunner plan={plan} bundle={workoutBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} onClose={closeWorkout} onFinish={finishWorkout} />;
   }
 
   if (guidedOffer) {
-    return <GuidedTestRunner offer={guidedOffer} bundle={vNextDefinitionBundle} busy={busy} error={error} retryingExactObservation={Boolean(guidedRecovery)} onClose={() => setGuidedOffer(undefined)} onCommit={commitGuidedTest} />;
+    return <GuidedTestRunner offer={guidedOffer} bundle={bundleFor((guidedRecovery?.draft ?? snapshot.assessmentDraft)?.catalogueVersion ?? vNextDefinitionBundle.catalogueVersion)} busy={busy} error={error} retryingExactObservation={Boolean(guidedRecovery)} onClose={() => setGuidedOffer(undefined)} onCommit={commitGuidedTest} />;
   }
 
   if (assessment) {
-    const review = assessment.review ?? (isAssessmentAtReview(assessment.draft, vNextDefinitionBundle)
-      ? buildAssessmentReview(assessment.draft, vNextDefinitionBundle, snapshot.state)
+    const review = assessment.review ?? (isAssessmentAtReview(assessment.draft, bundleFor(assessment.draft.catalogueVersion))
+      ? buildAssessmentReview(assessment.draft, bundleFor(assessment.draft.catalogueVersion), snapshot.state)
       : undefined);
-    return <AssessmentRunner draft={assessment.draft} step={assessment.step} bundle={vNextDefinitionBundle} review={review} busy={busy} onAnswer={answerAssessment} onBack={backAssessment} onCommit={commitAssessment} onClose={() => setAssessment(undefined)} onGuidedTestRequested={openGuidedTestFromReview} />;
+    return <AssessmentRunner draft={assessment.draft} step={assessment.step} bundle={bundleFor(assessment.draft.catalogueVersion)} review={review} busy={busy} onAnswer={answerAssessment} onBack={backAssessment} onCommit={commitAssessment} onClose={() => setAssessment(undefined)} onGuidedTestRequested={openGuidedTestFromReview} />;
   }
 
   const workflowLocked = Boolean(workoutRecovery || guidedRecovery);
   const todayPresentation = workoutRecovery
-    ? buildTodayWorkoutPresentation({ bundle: vNextDefinitionBundle, generated: workoutRecovery.generated })
+    ? buildTodayWorkoutPresentation({ bundle: workoutBundle, generated: workoutRecovery.generated })
     : snapshot.presentations.today;
   const completionPresentation = executionFacts && workoutRecovery
     ? buildWorkoutCompletionPresentation({
-      bundle: vNextDefinitionBundle,
+      bundle: workoutBundle,
       generated: workoutRecovery.generated,
       participationSecondsByPlanItem: executionFacts.participationSeconds,
       performedByPlanItem: executionFacts.performedByPlanItem,
@@ -1065,7 +1071,7 @@ const VNextAthleteApplication = ({
         goals={snapshot.presentations.goals}
         assessment={snapshot.presentations.assessment}
         restrictions={snapshot.presentations.restrictions}
-        recentSessions={recentSessionPresentation(snapshot)}
+        recentSessions={recentSessionPresentation(snapshot, vNextDefinitionBundle)}
         completion={completionPresentation}
         busy={busy}
         workoutStartBlocker={workoutStartBlocker}

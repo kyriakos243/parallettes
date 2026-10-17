@@ -36,10 +36,12 @@
     "validate:vnext-phase11:ux": "node scripts/validate-vnext-phase11-ux.mjs",
     "render:vnext-phase10-media-review": "node scripts/render-vnext-phase10-media-review.mjs",
     "review:vnext-phase10-motion": "node scripts/build-vnext-phase10-motion-review.mjs",
-    "validate": "node scripts/validate-program.mjs && node scripts/validate-progression.mjs && node scripts/validate-assessment.mjs && node scripts/validate-custom.mjs && node scripts/validate-motion-guides.mjs && node scripts/validate-profile.mjs && node scripts/validate-profile-worker.mjs && node scripts/validate-vnext-domain.mjs && node scripts/validate-vnext-phase2.mjs && node scripts/validate-vnext-phase3.mjs && node scripts/validate-vnext-phase4.mjs && node scripts/validate-vnext-phase5.mjs && node scripts/validate-vnext-phase6.mjs && node scripts/validate-vnext-phase7.mjs && node scripts/validate-vnext-phase8.mjs && node scripts/validate-vnext-phase9.mjs && pnpm validate:vnext-phase10 && pnpm validate:vnext-phase11",
+    "validate": "node scripts/validate-program.mjs && node scripts/validate-progression.mjs && node scripts/validate-assessment.mjs && node scripts/validate-custom.mjs && node scripts/validate-motion-guides.mjs && node scripts/validate-profile.mjs && node scripts/validate-profile-worker.mjs && node scripts/validate-vnext-domain.mjs && node scripts/validate-vnext-phase2.mjs && node scripts/validate-vnext-phase3.mjs && node scripts/validate-vnext-phase4.mjs && node scripts/validate-vnext-phase5.mjs && node scripts/validate-vnext-phase6.mjs && node scripts/validate-vnext-phase7.mjs && node scripts/validate-vnext-phase8.mjs && node scripts/validate-vnext-phase9.mjs && pnpm validate:vnext-phase10 && pnpm validate:vnext-phase11 && pnpm validate:vnext-batch-a",
     "typecheck": "tsc --noEmit",
     "check": "pnpm validate && pnpm typecheck",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "validate:vnext-batch-a": "node scripts/validate-vnext-batch-a.mjs",
+    "review:vnext-batch-a": "node scripts/build-vnext-batch-a-review.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.28.0",
