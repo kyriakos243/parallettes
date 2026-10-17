@@ -4,7 +4,7 @@
 
 **Status:** APPROVED FOUNDATION — RESEARCH BASIS UNCHANGED
 
-**Implementation authorised:** All A–F content is delivered and owner accepted. The owner approved the mixed set structure discussed below and its deployment after checks. This is an authored programming choice within the existing evidence/safety boundaries, not a new scientific claim.
+**Implementation authorised:** NO FURTHER IMPLEMENTATION — all A–F content and the approved mixed set structure are delivered. The rationale below remains an authored programming choice within existing evidence/safety boundaries, not a new scientific claim. MASTER_PLAN.md owns current state.
 
 This is the canonical detailed source for the research and training-science rationale behind the proposed vNext architecture. Read it only for work that changes training logic, benchmark design, progression ordering, load policy, safety assumptions or advanced content. The compact project-wide decisions remain in `MASTER_PLAN.md`.
 
