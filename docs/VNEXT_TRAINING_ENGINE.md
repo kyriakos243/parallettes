@@ -4,7 +4,7 @@
 
 **Status:** APPROVED FOUNDATION — PHASE 11 COMPLETE; ENGINE/UX ARCHITECTURE FROZEN
 
-**Implementation authorised:** NO FURTHER IMPLEMENTATION — timer/background reliability is deployed and live verified on 2026-10-18; physical iPhone acceptance is pending. MASTER_PLAN.md owns current project state.
+**Implementation authorised:** NO FURTHER IMPLEMENTATION — timer/background reliability is deployed, live verified and owner accepted on iPhone 17 (all four requested checks, 2026-10-18). MASTER_PLAN.md owns current project state.
 
 This is the canonical detailed source for adaptive placement, capability/readiness interpretation, progression policy, long-term emphasis, workout composition and the user surfaces that expose them. Read it for assessment, projection-policy, generator, Progress & Goals, Today or workout-review work. Data ownership/migration lives in [Data & Migration](VNEXT_DATA_MIGRATION.md); graph content lives in [Skill Architecture](VNEXT_SKILL_ARCHITECTURE.md).
 
@@ -272,4 +272,4 @@ The owner authorised timer/background reliability and deployment after checks. D
 
 Leaving the page, locking the screen or a page-hide event pauses immediately and synchronously saves the latest measured local draft. Return and reload remain paused until explicit Resume. A short status explains an automatic pause. The app requests screen wake lock only while visible and running; denial, low-power release or lack of support never blocks timing or recovery. Late lock grants are released after pause/unmount. This is foreground training with explicit interruption recovery, not a promise of background execution or audio.
 
-The shared reliability layer serves mixed plans and native exercise-by-exercise production recovery. The exact historical runner remains frozen for its accepted media/source evidence. Definitions, prescription/rest budgets, plan identities, mixed group locks, measured-only feedback and one-record completion remain unchanged. Pause reason is optional advisory draft UI state only; no Session Plan/Record field or Worker/schema change is introduced. Physical iPhone lock/app-switch/auto-lock behavior remains a release-follow-up check.
+The shared reliability layer serves mixed plans and native exercise-by-exercise production recovery. The exact historical runner remains frozen for its accepted media/source evidence. Definitions, prescription/rest budgets, plan identities, mixed group locks, measured-only feedback and one-record completion remain unchanged. Pause reason is optional advisory draft UI state only; no Session Plan/Record field or Worker/schema change is introduced. On 2026-10-18 the owner accepted all four iPhone checks: app switching, work/rest screen lock, visible screen-awake behavior and Save & close/reopen/resume/completion with exactly one History entry. Separate Safari/Home Screen parity, audio, enlarged text and offline behavior are not inferred from that acceptance.

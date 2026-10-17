@@ -2,7 +2,7 @@
 
 **STATUS: ARCHITECTURE APPROVED — PHASES 1–11 COMPLETE; HISTORICAL ARCHIVE EXCEPTION ACCEPTED**
 
-- Implementation authorised: **NO FURTHER IMPLEMENTATION — timer/background reliability delivered; owner iPhone acceptance pending**
+- Implementation authorised: **NO FURTHER IMPLEMENTATION — timer/background reliability delivered and iPhone accepted; await a new owner-approved task**
 - Required implementation baseline: Parallette25 v1.2.0 release commit `61b0876`, or a verified successor containing it
 - Authoritative project map and current state: [`../MASTER_PLAN.md`](../MASTER_PLAN.md)
 
@@ -429,6 +429,6 @@ The owner explicitly authorised F on 2026-10-17 after accepting E, retaining the
 
 The owner authorised this task and deployment after passing checks on 2026-10-18. Operational behavior belongs in Training Engine §6.7, draft compatibility in Data & Migration §5.10 and release evidence in runbook §17. Implemented shared foreground elapsed-time sampling, explicit auto-pause on hide/pagehide/suspension, synchronous measured checkpoints, explicit Resume and best-effort screen wake lock for both mixed and native-order production workouts. The frozen historical player/media pins remain intact. No training, authority or database schema change.
 
-Full checks/type checking pass, with 31 actual runner/hook/controller scenarios covering drift, suspension, hide-before-render, boundary/queued-callback races, v1/v2/v3 recovery, native/mixed order, wake-lock rejection/release/late grants and one completion. The local browser preserves rest at 00:46 elapsed / 00:14 remaining across leave/back/reload, resumes explicitly, and saves one preparation-only Partial record. Portrait 402×874 and landscape 874×402 fit without overflow. The owner still needs to test actual iPhone app switching, screen lock, automatic screen-awake behavior and resumed completion after deployment. No unrelated task is authorised.
+Full checks/type checking pass, with 31 actual runner/hook/controller scenarios covering drift, suspension, hide-before-render, boundary/queued-callback races, v1/v2/v3 recovery, native/mixed order, wake-lock rejection/release/late grants and one completion. The local browser preserves rest at 00:46 elapsed / 00:14 remaining across leave/back/reload, resumes explicitly, and saves one preparation-only Partial record. Portrait 402×874 and landscape 874×402 fit without overflow. On 2026-10-18 the owner reports all four iPhone checks pass: app switching, screen lock during work/rest, visible screen-awake behavior and Save & close/reopen/resume/completion with exactly one History entry. No unrelated task is authorised.
 
-**Release checkpoint:** Workflow 39070805835 deployed exact source `013f4946a7daae39d21f3c0e808fd8ef3c74b7ce`; all 23 live files, API health and test-account interruption/reload/resume/save/export checks pass. PR #27 records the delivered change. Await owner physical iPhone acceptance; no unrelated task or merge is authorised.
+**Release checkpoint:** Workflow 39070805835 deployed exact source `013f4946a7daae39d21f3c0e808fd8ef3c74b7ce`; all 23 live files, API health and test-account interruption/reload/resume/save/export checks pass. PR #27 records the delivered change. The owner accepted all four iPhone checks and explicitly approved merging PR #27 on 2026-10-18. No unrelated task is authorised.
