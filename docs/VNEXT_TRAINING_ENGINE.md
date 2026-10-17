@@ -4,7 +4,7 @@
 
 **Status:** APPROVED FOUNDATION — PHASE 11 COMPLETE; ENGINE/UX ARCHITECTURE FROZEN
 
-**Implementation authorised:** Timer/background reliability and controlled deployment are owner approved on 2026-10-18. The mixed workout/Custom-preview release is delivered and iPhone accepted. MASTER_PLAN.md owns current project state.
+**Implementation authorised:** NO FURTHER IMPLEMENTATION — timer/background reliability is deployed and live verified on 2026-10-18; physical iPhone acceptance is pending. MASTER_PLAN.md owns current project state.
 
 This is the canonical detailed source for adaptive placement, capability/readiness interpretation, progression policy, long-term emphasis, workout composition and the user surfaces that expose them. Read it for assessment, projection-policy, generator, Progress & Goals, Today or workout-review work. Data ownership/migration lives in [Data & Migration](VNEXT_DATA_MIGRATION.md); graph content lives in [Skill Architecture](VNEXT_SKILL_ARCHITECTURE.md).
 
