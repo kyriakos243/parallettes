@@ -161,6 +161,12 @@ After accepting all B–F animations, the owner authorised their combined checks
 
 Combined safeguards replay native v1–v8 workflows and mixed export/import, invalidate old caches, bind all 30 accepted guides/player sources and the exact F sizing stylesheet, and preserve specialist opt-in/exact-goal gates. After any v8 facts, a bare A/v3 frontend is not a safe repair: retain all v1–v8 readers or use the separately controlled retained-v1 authority rollback, preserving observations. Never restore a pre-release database over newer facts. Fresh full/accounts encrypted exports, isolated restore and all 14 invariants pass; temporary CLI access is logged out. Final artifact/deployment evidence belongs in release runbook Section 15.
 
+### 5.9 Mixed workout execution compatibility — 2026-10-17
+
+The owner-approved mixed structure uses new generator-policy identities with unchanged catalogue/projection v8 and unchanged Session Plan/Record wire fields. Policy-specific execution derives from native ordered items, purposes, definitions and safe selections. The current client and current Worker validators accept the new plans and completion pairs without a Worker/schema deployment. Original plan IDs/bytes, readers and timing remain immutable; only newly generated adapted plans receive new semantic IDs. History/export/import/sync retain the generator identity in each plan, and the projection-policy metadata retains its existing meaning. Exact retry still saves one authoritative record.
+
+Local mixed timer drafts are version 3 and retain group locks, exact cursor/countdown and measured per-item facts; old v1/v2 drafts use their original runner. Recovered completion selects the native policy reader. A repair after mixed workouts exist must retain both old and mixed-policy execution readers plus all v1–v8 definition readers; the prior combined-release frontend alone is not a valid active-workout downgrade. No historical observation rewrite, new migration, schema/API deployment, reset or data deletion is included.
+
 ## 6. Target Persistence and Sync
 
 ### 6.1 Static versioned definitions

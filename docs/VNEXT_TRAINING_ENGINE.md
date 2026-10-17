@@ -4,7 +4,7 @@
 
 **Status:** APPROVED FOUNDATION — PHASE 11 COMPLETE; ENGINE/UX ARCHITECTURE FROZEN
 
-**Implementation authorised:** NO FURTHER IMPLEMENTATION — the approved completion-feedback and landscape corrections are deployed. Physical iPhone review is pending; engine, training-policy and progression-content changes remain unapproved. Review evidence and the phone checklist are in the roadmap’s post-release section.
+**Implementation authorised:** The owner approved the mixed workout structure and Custom animated preview, with controlled deployment once checks pass. The combined progression release and three core iPhone checks are already accepted. Background timer policy and broader programming remain unchanged. Current state is authoritative in MASTER_PLAN.md.
 
 This is the canonical detailed source for adaptive placement, capability/readiness interpretation, progression policy, long-term emphasis, workout composition and the user surfaces that expose them. Read it for assessment, projection-policy, generator, Progress & Goals, Today or workout-review work. Data ownership/migration lives in [Data & Migration](VNEXT_DATA_MIGRATION.md); graph content lives in [Skill Architecture](VNEXT_SKILL_ARCHITECTURE.md).
 
@@ -236,6 +236,8 @@ Custom Session is a secondary 5/10/15/20-minute route with general, core/body-li
 
 An unstarted Today or Custom plan is a **preview**, not an interrupted workout and not evidence. Cancelling an unstarted Custom preview removes only that advisory plan and immediately restores the normal Today recommendation. The recovery lock begins only when the athlete starts the timer; after that, the exact timer draft offers Resume, End and review completed work, or explicit discard. This prevents Custom cancellation from trapping Today while preserving genuine offline recovery.
 
+The owner-requested Custom preview correction reuses the full animated plan surface before entering the timer player: every block shows its owned guide, prescription, sets/rest and available safe swaps. Pre-start swaps are retained with the advisory preview across reload and passed to its native player; only an offered native-catalogue alternative can be selected. Preview cancellation creates no Session Record. Historical plans retain exercise-by-exercise execution; the separately approved new-plan structure is defined in Section 6.6.
+
 The parity surface also keeps practical non-authority features from v1.2: a branded athlete shell, an at-a-glance session timeline, timer sound cues, total-session progress, the next exact motion shown during rest, phone-sticky workout controls and Recent Sessions. History is projected from immutable Session Records and matched Session Plans; migrated v1.2 entries remain labelled and retain their sparse-evidence limitations. None of these affordances changes planning, evidence or Session Record authority.
 
 ### 6.5 Approved post-release interaction corrections — 2026-10-17
@@ -243,6 +245,16 @@ The parity surface also keeps practical non-authority features from v1.2: a bran
 Workout completion is presented before the plan preview, with programmatic heading focus and scrolling when review first opens or is recovered. Answering a prompt preserves input focus; performed-only questions, symptom validation, immutable save/retry and recommendation rebuilding keep their existing authority.
 
 Short landscape viewports use the compact player layout with the guide beside readable coaching and timer/controls. Portrait retains coaching below the guide. Safe-area spacing, minimum touch targets, full safety text and enlarged-text scrolling remain. Exact release evidence is in the production runbook Section 13. No training-content, timer-policy or persistence contract changed.
+
+### 6.6 Owner-approved mixed workout structure — 2026-10-17
+
+New production plans use `vnext-mixed-workout-generator@1`; capacity-focused Custom plans use `vnext-mixed-capacity-workout-generator@1`. The frozen generator and native catalogue/projection v8 stay intact. The adapter preserves every selected development/technical prescription and budget. Preparation distributes existing complete work/rest cycles between the original movement and another independently trainable, owned, low-load allowlisted movement; 180 seconds becomes 120 + 60, 120 becomes 60 + 60, and a single 60-second cycle stays intact. This preserves both work and recovery totals. Reset budgets of at least 60 seconds can flow through two low-load movements without adding time.
+
+Execution derives from immutable ordered items, purpose, native definitions and validated selections; it never relies on advisory explanations or positional rationale. Technique/safety, inversion, outcome milestones, guided tests, high upper-limb demand and the first non-technical primary requirement retain focused sets. Later contiguous capacity accessories may alternate complete work/rest cycles when loaded upper-limb domains do not overlap. Capacity-only Custom work can rotate from its first compatible accessory. Shared moderate trunk demand is allowed; loaded wrist/shoulder overlap, high demand or technical work prevents rotation. Ineligible pairs remain focused. A shorter Custom plan may have too few compatible movements to rotate.
+
+Group boundaries are fixed from the native plan. A safe future swap can disable rotation within its group but cannot merge backward or move the current cursor. Once any group starts, its members cannot be swapped, including after rewind/reload; untouched future groups remain changeable. The new player uses a version-3 local draft with durable group locks. Every original interval appears once, set/rest order and per-item budgets are exact, and completion requires the final occurrence plus sufficient measured work. Skip/previous/early finish cannot manufacture participation or complete an unreached later round. Completion still uses performed-only review and one immutable Session Record. The unchanged emphasis planner retains its existing continuity sample.
+
+The old runner, timing helper and plan objects remain intact. Saved workouts route by their native generator policy, including recovered completion. No Session Plan/Record field, schema, Worker, catalogue, protocol, readiness gate or background timer policy changes. Deployment status and exact artifact evidence belong in the release runbook.
 
 ## 7. Feature-Isolation Rule
 

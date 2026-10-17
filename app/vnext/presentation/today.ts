@@ -6,7 +6,9 @@ import type {
   TodayWorkoutPresentation,
 } from "./contracts";
 import { presentationFamilyLabel } from "./progress";
-import { structureWorkoutItem } from "../workoutUx";
+import { structureWorkoutItem, type WorkoutExerciseSelection } from "../workoutUx";
+import type { PlanItemId } from "../contracts";
+import { isMixedWorkoutPlan, workoutExecutionGroups } from "../mixedWorkout";
 
 const demandPresentation = (
   demand: SessionDemand,
@@ -125,6 +127,7 @@ const simpleIntensityReason = (
 
 export const buildTodayWorkoutPresentation = (
   input: TodayPresentationInput,
+  selections: Readonly<Partial<Record<PlanItemId, WorkoutExerciseSelection>>> = {},
 ): TodayWorkoutPresentation => {
   const { generated, bundle } = input;
   const demand = demandPresentation(generated.sessionDemand);
@@ -145,25 +148,32 @@ export const buildTodayWorkoutPresentation = (
   const maintenance = generated.emphasis.maintenance.map((focus) =>
     focusPresentation(focus, "maintenance", bundle));
   const explanationByItem = new Map(generated.itemExplanations.map((item) => [item.planItemId, item]));
+  const groups = isMixedWorkoutPlan(generated.plan) ? workoutExecutionGroups(generated.plan, bundle, selections) : [];
   const blocks = generated.plan.items.map((item) => {
     const exercise = bundle.exercises.find((candidate) => candidate.id === item.exerciseId
       && candidate.definitionVersion === item.exerciseDefinitionVersion);
     const explanation = explanationByItem.get(item.id);
     const structured = structureWorkoutItem(item, bundle);
+    const group = groups.find((entry) => entry.items.some((movement) => movement.planItemId === item.id));
+    const rotation = group?.mode === "rounds";
+    const orderReason = rotation
+      ? ` Alternate sets with ${group.items.filter((movement) => movement.planItemId !== item.id).map((movement) => movement.exercise.name).join(" and ")}, keeping the planned rest after each set.`
+      : group?.mode === "flow" ? " Continue through the gentle reset movements in order."
+        : groups.length ? " Finish these focused sets before moving on." : "";
     const media = exercise?.media[0];
     return {
       planItemId: item.id,
       exerciseId: item.exerciseId,
       exerciseName: exercise?.name ?? "Planned movement",
-      blockLabel: blockLabel(explanation?.block ?? "supplemental"),
+      blockLabel: rotation ? item.purpose === "preparation" ? "Preparation rounds" : "Supporting rounds" : blockLabel(explanation?.block ?? "supplemental"),
       plannedMinutes: Math.round(item.plannedSeconds / 6) / 10,
       prescriptionLabel: structured.targetLabel,
       setStructureLabel: structured.structureLabel,
       plannedRestSeconds: structured.plannedRestSeconds,
       mediaReference: media?.kind === "motion" ? media.reference : "",
-      reason: explanation
+      reason: (explanation
         ? simpleExerciseReason(explanation)
-        : "Supports today’s safe, goal-directed session.",
+        : "Supports today’s safe, goal-directed session.") + orderReason,
       intensity: explanation
         ? simpleIntensityReason(generated, explanation)
         : demand.message,
