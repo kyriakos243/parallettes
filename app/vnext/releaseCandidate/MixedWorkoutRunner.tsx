@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Volume2, VolumeX, X } from "lucide-react";
+import { useWorkoutClock, type WorkoutPauseReason } from "./useWorkoutClock";
 import type {
   DefinitionBundle,
   IsoTimestamp,
@@ -31,6 +32,7 @@ type ActiveWorkoutDraft = Readonly<{
   intervalIndex: number;
   intervalElapsedSeconds: number;
   elapsedSeconds: number;
+  pauseReason?: WorkoutPauseReason;
   participationSeconds: Readonly<Record<string, number>>;
   selections: Readonly<Partial<Record<PlanItemId, WorkoutExerciseSelection>>>;
   completedPlanItemIds: readonly PlanItemId[];
@@ -109,6 +111,7 @@ const parseActiveDraft = (
       intervalIndex: parsedV3.intervalIndex!,
       intervalElapsedSeconds: parsedV3.intervalElapsedSeconds!,
       elapsedSeconds: parsed.elapsedSeconds!,
+      pauseReason: parsed.pauseReason === "hidden" || parsed.pauseReason === "interrupted" ? parsed.pauseReason : undefined,
       participationSeconds: parsed.participationSeconds,
       selections,
       completedPlanItemIds: (parsedV3.completedPlanItemIds ?? []).filter((id) => allowed.has(id)),
@@ -196,6 +199,7 @@ export const MixedWorkoutRunner = ({
   );
   const [lockedPlanItemIds, setLockedPlanItemIds] = useState<readonly PlanItemId[]>(restored?.lockedPlanItemIds ?? []);
   const [running, setRunning] = useState(false);
+  const [pauseReason, setPauseReason] = useState<WorkoutPauseReason | undefined>(restored?.pauseReason);
   const [soundOn, setSoundOn] = useState(() => typeof localStorage === "undefined"
     || localStorage.getItem("parallette25-vnext-timer-sound-v1") !== "off");
   const [swapPlanItemId, setSwapPlanItemId] = useState<PlanItemId>();
@@ -221,8 +225,65 @@ export const MixedWorkoutRunner = ({
   const progressPercent = totalSeconds > 0 ? Math.min(100, Math.round((elapsedSeconds / totalSeconds) * 100)) : 0;
   const completionRef = useRef(false);
 
+  const draft: ActiveWorkoutDraft | undefined = startedAt ? {
+    version: 3,
+    athleteId: plan.athleteId,
+    planId: plan.id,
+    startedAt,
+    intervalIndex,
+    intervalElapsedSeconds,
+    elapsedSeconds,
+    pauseReason,
+    participationSeconds: participation,
+    selections,
+    completedPlanItemIds,
+    lockedPlanItemIds,
+  } : undefined;
+
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const persistDraft = (): void => {
+    if (!completionRef.current && draftRef.current) {
+      localStorage.setItem(activeKey(plan.athleteId), JSON.stringify(draftRef.current));
+    }
+  };
+  const clock = useWorkoutClock({
+    running,
+    intervalKey: intervalIndex,
+    onSeconds: (seconds) => {
+      const current = draftRef.current;
+      if (!current || completionRef.current) return;
+      const credited = Math.min(seconds, Math.max(0, currentInterval.durationSeconds - current.intervalElapsedSeconds));
+      if (!credited) return;
+      const next = { ...current,
+        elapsedSeconds: current.elapsedSeconds + credited,
+        intervalElapsedSeconds: current.intervalElapsedSeconds + credited,
+        participationSeconds: currentInterval.kind === "work" ? {
+          ...current.participationSeconds,
+          [currentItem.id]: Math.min(currentItem.plannedSeconds, (current.participationSeconds[currentItem.id] ?? 0) + credited),
+        } : current.participationSeconds,
+      };
+      draftRef.current = next;
+      setElapsedSeconds(next.elapsedSeconds);
+      setIntervalElapsedSeconds(next.intervalElapsedSeconds);
+      setParticipation(next.participationSeconds);
+      persistDraft();
+    },
+    onAutoPause: (reason) => {
+      setRunning(false);
+      setPauseReason(reason);
+      if (draftRef.current) draftRef.current = { ...draftRef.current, pauseReason: reason };
+      persistDraft();
+    },
+  });
+  const pauseWorkout = (): void => {
+    clock.stop();
+    setRunning(false);
+    persistDraft();
+  };
+
   const playCue = useCallback((frequency = 760, duration = .07): void => {
-    if (!soundOn) return;
+    if (!soundOn || document.visibilityState !== "visible") return;
     try {
       const AudioContextConstructor = window.AudioContext
         ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -246,13 +307,15 @@ export const MixedWorkoutRunner = ({
 
   const finish = useCallback((completeCurrent = false): void => {
     if (completionRef.current) return;
+    clock.stop();
     setRunning(false);
+    const measured = draftRef.current?.participationSeconds ?? participation;
     const completedAt = new Date().toISOString() as IsoTimestamp;
     const facts = {
       startedAt: startedAt ?? completedAt,
       completedAt,
-      participationSeconds: Object.fromEntries(plan.items.map((item) => [item.id, participation[item.id] ?? 0])),
-      completedPlanItemIds: completeCurrent && hasFinishedWorkoutItem(currentItem.id, intervalIndex, timeline, participation[currentItem.id] ?? 0)
+      participationSeconds: Object.fromEntries(plan.items.map((item) => [item.id, measured[item.id] ?? 0])),
+      completedPlanItemIds: completeCurrent && hasFinishedWorkoutItem(currentItem.id, intervalIndex, timeline, measured[currentItem.id] ?? 0)
         ? [...new Set([...completedPlanItemIds, currentItem.id])]
         : completedPlanItemIds,
       performedByPlanItem: selections,
@@ -278,20 +341,7 @@ export const MixedWorkoutRunner = ({
   }, [currentItem.id, groups, running]);
 
   useEffect(() => {
-    if (!running) return undefined;
-    const timer = window.setInterval(() => {
-      setElapsedSeconds((value) => value + 1);
-      setIntervalElapsedSeconds((value) => Math.min(currentInterval.durationSeconds, value + 1));
-      if (currentInterval.kind === "work") setParticipation((value) => ({
-          ...value,
-          [currentItem.id]: Math.min(currentItem.plannedSeconds, (value[currentItem.id] ?? 0) + 1),
-        }));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [currentInterval.durationSeconds, currentInterval.kind, currentItem.id, currentItem.plannedSeconds, running]);
-
-  useEffect(() => {
-    if (!running || remaining > 0) return;
+    if (!running || !clock.isActive() || remaining > 0) return;
     playCue(currentInterval.kind === "rest" ? 880 : 660, .1);
     if (intervalIndex < timeline.length - 1) {
       if (hasFinishedWorkoutItem(currentItem.id, intervalIndex, timeline, participation[currentItem.id] ?? 0)) {
@@ -305,29 +355,13 @@ export const MixedWorkoutRunner = ({
   }, [currentInterval.kind, finish, intervalIndex, playCue, remaining, running, timeline, participation, currentItem.id]);
 
   useEffect(() => {
-    if (running && remaining > 0 && remaining <= 3) playCue(560 + ((4 - remaining) * 90), .05);
+    if (running && clock.isActive() && remaining > 0 && remaining <= 3) playCue(560 + ((4 - remaining) * 90), .05);
   }, [playCue, remaining, running]);
 
-  useEffect(() => {
-    if (typeof localStorage === "undefined" || completionRef.current || !startedAt) return;
-    const draft: ActiveWorkoutDraft = {
-      version: 3,
-      athleteId: plan.athleteId,
-      planId: plan.id,
-      startedAt,
-      intervalIndex,
-      intervalElapsedSeconds,
-      elapsedSeconds,
-      participationSeconds: participation,
-      selections,
-      completedPlanItemIds,
-      lockedPlanItemIds,
-    };
-    localStorage.setItem(activeKey(plan.athleteId), JSON.stringify(draft));
-  }, [completedPlanItemIds, elapsedSeconds, intervalElapsedSeconds, intervalIndex, participation, plan.athleteId, plan.id, selections, startedAt, lockedPlanItemIds]);
+  useEffect(() => { persistDraft(); }, [completedPlanItemIds, elapsedSeconds, intervalElapsedSeconds, intervalIndex, participation, plan.athleteId, plan.id, selections, startedAt, pauseReason, lockedPlanItemIds]);
 
   const move = (offset: -1 | 1): void => {
-    setRunning(false);
+    pauseWorkout();
     setIntervalIndex((value) => Math.max(0, Math.min(timeline.length - 1, value + offset)));
     setIntervalElapsedSeconds(0);
   };
@@ -356,12 +390,15 @@ export const MixedWorkoutRunner = ({
       : "Back to Today";
 
   const toggleWorkout = (): void => {
+    if (running) { pauseWorkout(); return; }
+    if (document.visibilityState !== "visible") return;
+    setPauseReason(undefined);
     if (!startedAt) {
       if (onStart() === false) return;
       setStartedAt(new Date().toISOString() as IsoTimestamp);
       playCue(880, .1);
     }
-    setRunning((value) => !value);
+    setRunning(true);
   };
 
   return (
@@ -388,7 +425,7 @@ export const MixedWorkoutRunner = ({
                 })}
               >{soundOn ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
                 <span>{soundOn ? "Sound on" : "Sound off"}</span></button>
-              <button type="button" className="vnext-action" data-kind="secondary" aria-label={closeLabel} onClick={() => { setRunning(false); onClose(Boolean(startedAt)); }}><X className="vnext-rc-close-icon" aria-hidden="true" /><span>{closeLabel}</span></button>
+              <button type="button" className="vnext-action" data-kind="secondary" aria-label={closeLabel} onClick={() => { pauseWorkout(); onClose(Boolean(startedAt)); }}><X className="vnext-rc-close-icon" aria-hidden="true" /><span>{closeLabel}</span></button>
             </div>
           </header>
 
@@ -423,11 +460,12 @@ export const MixedWorkoutRunner = ({
             <section className="vnext-rc-timer" aria-label="Workout timer">
               <span>{currentInterval.kind === "work" ? "Work" : "Rest"}</span>
               <strong aria-live="off">{displayTime(remaining)}</strong>
-              <small>{displayTime(elapsedSeconds)} elapsed • next interval starts automatically</small>
+              <small>{displayTime(elapsedSeconds)} elapsed • {running ? (clock.screenAwake ? "Screen staying on" : "Keep this screen open") : startedAt ? "Paused · tap Resume" : "Pauses when you leave the app"}</small>
+              {pauseReason && !running && <small role="status">{pauseReason === "hidden" ? "Paused when you left the app." : "Timer interrupted. Your place is saved."}</small>}
             </section>
 
             <div className="vnext-rc-player-actions">
-              <button type="button" className="vnext-action" disabled={!motionPreset} onClick={toggleWorkout}>{running ? "Pause" : elapsedSeconds > 0 ? "Resume" : "Start workout"}</button>
+              <button type="button" className="vnext-action" disabled={!motionPreset} onClick={toggleWorkout}>{running ? "Pause" : startedAt ? "Resume" : "Start workout"}</button>
               <button type="button" className="vnext-action" data-kind="secondary" disabled={intervalIndex === 0} onClick={() => move(-1)}>Previous interval</button>
               <button type="button" className="vnext-action" data-kind="secondary" onClick={() => intervalIndex < timeline.length - 1 ? move(1) : finish()}>{intervalIndex < timeline.length - 1 ? "Skip interval" : "Finish workout"}</button>
               <button type="button" className="vnext-action" data-kind="secondary" disabled={elapsedSeconds === 0} onClick={() => finish()}>Finish early</button>
@@ -446,7 +484,7 @@ export const MixedWorkoutRunner = ({
                 <li key={item.planItemId} data-current={item.planItemId === currentItem.id}>
                   <div><strong>{index + 1}. {item.exercise.name}</strong><span>{item.structureLabel}</span></div>
                   {canChange && (swapOptions[item.planItemId]?.length ?? 0) > 0 && (
-                    <button type="button" onClick={() => { setRunning(false); setSwapPlanItemId(item.planItemId); setSwapDirection("similar"); }}>Change</button>
+                    <button type="button" onClick={() => { pauseWorkout(); setSwapPlanItemId(item.planItemId); setSwapDirection("similar"); }}>Change</button>
                   )}
                 </li>
               );

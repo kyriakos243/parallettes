@@ -4,7 +4,7 @@
 
 **Status:** APPROVED FOUNDATION — PHASE 11 COMPLETE; ENGINE/UX ARCHITECTURE FROZEN
 
-**Implementation authorised:** NO FURTHER IMPLEMENTATION — the mixed workout/Custom-preview release is deployed, checked and owner accepted on iPhone 17 (all three requested checks, 2026-10-18). Await a new owner-approved task. Background timer policy and broader programming remain unchanged. MASTER_PLAN.md owns current project state.
+**Implementation authorised:** NO FURTHER IMPLEMENTATION — timer/background reliability is deployed, live verified and owner accepted on iPhone 17 (all four requested checks, 2026-10-18). MASTER_PLAN.md owns current project state.
 
 This is the canonical detailed source for adaptive placement, capability/readiness interpretation, progression policy, long-term emphasis, workout composition and the user surfaces that expose them. Read it for assessment, projection-policy, generator, Progress & Goals, Today or workout-review work. Data ownership/migration lives in [Data & Migration](VNEXT_DATA_MIGRATION.md); graph content lives in [Skill Architecture](VNEXT_SKILL_ARCHITECTURE.md).
 
@@ -264,3 +264,12 @@ Until the explicitly approved Phase 11 cutover, every cohort must use one cohere
 - isolated vNext flows capture observations and consume vNext projections;
 - any dual-write adapter has one authority per fact, is nonduplicative and idempotent;
 - never capture vNext-only evidence while showing a recommendation path that cannot consume it.
+
+
+### 6.7 Foreground timer and interruption policy — 2026-10-18
+
+The owner authorised timer/background reliability and deployment after checks. During visible running work, elapsed monotonic time drives whole-second countdown and participation, retaining fractional time between timer samples. Each interval caps credited time at its own boundary; a delayed callback cannot consume the next interval. A callback gap of five seconds or more, or a two-second discrepancy between monotonic and wall clocks, pauses conservatively without crediting that uncertain gap. Wall time is a suspension cross-check, not evidence of work performed.
+
+Leaving the page, locking the screen or a page-hide event pauses immediately and synchronously saves the latest measured local draft. Return and reload remain paused until explicit Resume. A short status explains an automatic pause. The app requests screen wake lock only while visible and running; denial, low-power release or lack of support never blocks timing or recovery. Late lock grants are released after pause/unmount. This is foreground training with explicit interruption recovery, not a promise of background execution or audio.
+
+The shared reliability layer serves mixed plans and native exercise-by-exercise production recovery. The exact historical runner remains frozen for its accepted media/source evidence. Definitions, prescription/rest budgets, plan identities, mixed group locks, measured-only feedback and one-record completion remain unchanged. Pause reason is optional advisory draft UI state only; no Session Plan/Record field or Worker/schema change is introduced. On 2026-10-18 the owner accepted all four iPhone checks: app switching, work/rest screen lock, visible screen-awake behavior and Save & close/reopen/resume/completion with exactly one History entry. Separate Safari/Home Screen parity, audio, enlarged text and offline behavior are not inferred from that acceptance.

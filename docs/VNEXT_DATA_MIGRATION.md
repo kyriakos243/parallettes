@@ -167,6 +167,10 @@ The owner-approved mixed structure uses new generator-policy identities with unc
 
 Local mixed timer drafts are version 3 and retain group locks, exact cursor/countdown and measured per-item facts; old v1/v2 drafts use their original runner. Recovered completion selects the native policy reader. A repair after mixed workouts exist must retain both old and mixed-policy execution readers plus all v1–v8 definition readers; the prior combined-release frontend alone is not a valid active-workout downgrade. No historical observation rewrite, new migration, schema/API deployment, reset or data deletion is included.
 
+### 5.10 Timer reliability compatibility — 2026-10-18
+
+The foreground clock changes no immutable plans, records, evidence or sync fields. Local v2 native-order and v3 mixed drafts gain only an optional validated pause reason; existing drafts and the v1 conversion remain readable and reopen paused. Timer deliveries update the measured checkpoint synchronously before persistence; page-hide saves it without crediting hidden time. The production native-order player retains the original v1/v2 parsing and ordering contract while the SHA-pinned historical runner stays untouched. Repair must retain both native and mixed execution and v1–v8 definitions. No production SQL mutation, migration, reset or rollback retirement is included.
+
 ## 6. Target Persistence and Sync
 
 ### 6.1 Static versioned definitions
