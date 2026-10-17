@@ -4,7 +4,7 @@
 
 **Status:** APPROVED FOUNDATION — PHASE 11 COMPLETE; ENGINE/UX ARCHITECTURE FROZEN
 
-**Implementation authorised:** The owner approved completion-feedback and landscape corrections plus deployment after checks. No engine, training-policy or progression-content changes are authorised. Review evidence and the physical-phone checklist are in the roadmap’s post-release section.
+**Implementation authorised:** NO FURTHER IMPLEMENTATION — the approved completion-feedback and landscape corrections are deployed. Physical iPhone review is pending; engine, training-policy and progression-content changes remain unapproved. Review evidence and the phone checklist are in the roadmap’s post-release section.
 
 This is the canonical detailed source for adaptive placement, capability/readiness interpretation, progression policy, long-term emphasis, workout composition and the user surfaces that expose them. Read it for assessment, projection-policy, generator, Progress & Goals, Today or workout-review work. Data ownership/migration lives in [Data & Migration](VNEXT_DATA_MIGRATION.md); graph content lives in [Skill Architecture](VNEXT_SKILL_ARCHITECTURE.md).
 
