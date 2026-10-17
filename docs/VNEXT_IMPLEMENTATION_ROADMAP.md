@@ -288,7 +288,7 @@ The owner then found a genuine lifecycle defect: building Custom marked an unsta
 
 ## Post-release task — iPhone usability and remaining progression plan
 
-**Status (2026-10-17):** Completion/landscape fixes and Batch A are live and physically accepted on the owner’s iPhone. The owner accepted all B–F animations and explicitly authorised combined checks and deployment after they pass. Combined catalogue/projection v8 completes the agreed 30-step inventory. Release gates and final live status belong in runbook Section 15. Phase 11 remains closed; no broader scope or cleanup is authorised.
+**Status (2026-10-17):** The combined A–F progression update is delivered. The owner accepted all animations and authorised deployment after checks. Controlled workflow39065166577 published exact sourcef008107 as buildf636d83a464a940fe927; all23 live files, health and bounded test-account recovery/save/export pass. All30 agreed additions are content-backed under the unchanged safety/specialist gates; immutable nativev1–v8 history is retained. Completion/landscape fixes and A were physically accepted; the owner’s full-update iPhone test is pending. Release evidence is canonical in runbook Section15. Phase11 remains closed; no further implementation, broader scope or cleanup is authorised.
 
 ### iPhone review scope and evidence
 
@@ -353,7 +353,7 @@ Approved by the owner on 2026-10-17 after physical acceptance of the completion/
 | `stable-v-sit` | Stable V-sit | stronger-gated |
 | `advanced-forward-loaded-push-up` | Advanced forward-loaded push-up | stronger-gated |
 
-#### Accepted batch B — Full Planche and unassisted presses (5 nodes; deployment deferred)
+#### Accepted batch B — Full Planche and unassisted presses (5 nodes; included in the combined v8 release)
 
 The owner authorised this batch on 2026-10-17 after accepting Batch A on their iPhone. Its additive v4 definitions and exact-player review passed the candidate checks; the owner accepted all five animations on 2026-10-17. The separate motion-acceptance ledger binds the exact reviewed package. Deployment is held until all batches are finished. Stable straddle Planche from A precedes assisted full Planche, which precedes full Planche. The three press branches use their existing assisted/negative prerequisites independently; bent-arm press never becomes a prerequisite for straight-arm press.
 
@@ -365,9 +365,9 @@ The owner authorised this batch on 2026-10-17 after accepting Batch A on their i
 | `full-straddle-press` | Full straight-arm straddle press | stronger-gated |
 | `full-pike-press` | Full straight-arm pike press | stronger-gated |
 
-#### Accepted batch C — Freestanding control and HSPU (6 nodes; deployment deferred)
+#### Accepted batch C — Freestanding control and HSPU (6 nodes; included in the combined v8 release)
 
-The owner authorised Batch C and accepted all six animations on 2026-10-17. A separate acceptance ledger binds the exact v5 candidate, guides and historical prepared manifest; production remains disabled. Deployment stays held until all batches are finished. A’s stable longer balance unlocks the content dependency for transfer and freestanding HSPU. Deliver transfer before one-hand-light balance, and eccentric → partial → full → deficit pressing. Retain the existing standard/deeper exit and wall-strength prerequisites; eccentric evidence never proves concentric strength.
+The owner authorised Batch C and accepted all six animations on 2026-10-17. A separate acceptance ledger binds the exact v5 candidate, guides and historical prepared manifest; production activation is provided only by the separately approved combined v8 gate. The combined deployment proceeded after all batches were accepted. A’s stable longer balance unlocks the content dependency for transfer and freestanding HSPU. Deliver transfer before one-hand-light balance, and eccentric → partial → full → deficit pressing. Retain the existing standard/deeper exit and wall-strength prerequisites; eccentric evidence never proves concentric strength.
 
 | Stable node ID | Existing milestone | Existing boundary |
 |---|---|---|
@@ -378,9 +378,9 @@ The owner authorised Batch C and accepted all six animations on 2026-10-17. A se
 | `full-freestanding-hspu` | Full freestanding HSPU | stronger-gated |
 | `deficit-freestanding-hspu` | Deficit freestanding HSPU | stronger-gated |
 
-#### Accepted batch D — Advanced transitions (4 nodes; deployment deferred)
+#### Accepted batch D — Advanced transitions (4 nodes; included in the combined v8 release)
 
-The owner authorised Batch D on 2026-10-17 after accepting C, retaining the combined-release hold. The owner accepted its four animations on 2026-10-17; a separate ledger binds the exact v6 candidate, guides and historical prepared manifest. Production remains disabled. Use the exact A/B endpoints plus each transition’s existing independent benchmark and safety prerequisites. The negative remains a one-way controlled lower. Endpoint achievements alone never demonstrate a transition.
+The owner authorised Batch D on 2026-10-17 after accepting C, retaining the combined-release hold. The owner accepted its four animations on 2026-10-17; a separate ledger binds the exact v6 candidate, guides and historical prepared manifest. Production activation is provided only by the separately approved combined v8 gate. Use the exact A/B endpoints plus each transition’s existing independent benchmark and safety prerequisites. The negative remains a one-way controlled lower. Endpoint achievements alone never demonstrate a transition.
 
 | Stable node ID | Existing milestone | Existing boundary |
 |---|---|---|
@@ -389,9 +389,9 @@ The owner authorised Batch D on 2026-10-17 after accepting C, retaining the comb
 | `handstand-to-l-sit-negative` | Handstand to L-sit negative | stronger-gated |
 | `straddle-planche-to-handstand-press` | Straddle planche to handstand press | stronger-gated |
 
-#### Accepted batch E — Optional specialist holds, balance and repeated presses (5 nodes; deployment deferred)
+#### Accepted batch E — Optional specialist holds, balance and repeated presses (5 nodes; included in the combined v8 release)
 
-The owner explicitly authorised E on 2026-10-17 after accepting D, retaining the deployment hold. The owner accepted all five E animations on 2026-10-17; a separate ledger binds the exact v7 candidate, guides and unchanged prepared manifest. Production remains disabled. Athlete specialist opt-in and the exact selected goal remain required. Extended V follows A’s stable V; assisted one-arm follows C’s one-hand-light balance and precedes unassisted one-arm; repeated presses follow their respective B press outcome. Assess each pathway independently rather than requiring unrelated specialist skills.
+The owner explicitly authorised E on 2026-10-17 after accepting D, retaining the deployment hold. The owner accepted all five E animations on 2026-10-17; a separate ledger binds the exact v7 candidate, guides and unchanged prepared manifest. Production activation is provided only by the separately approved combined v8 gate. Athlete specialist opt-in and the exact selected goal remain required. Extended V follows A’s stable V; assisted one-arm follows C’s one-hand-light balance and precedes unassisted one-arm; repeated presses follow their respective B press outcome. Assess each pathway independently rather than requiring unrelated specialist skills.
 
 | Stable node ID | Existing milestone | Existing boundary |
 |---|---|---|
@@ -422,4 +422,4 @@ The owner explicitly authorised F on 2026-10-17 after accepting E, retaining the
 5. **Verify the affected paths.** Run focused references/DAG/protocol and generator-frontier checks, positive/negative eligibility cases, symptom/equipment/freshness and Challenge/no-bypass cases, counterpart progression boundaries, historical replay, owned-media integrity and affected phone/UI checks. Run type checking and a production build when source changes. Use broader checks only when the affected scope warrants them.
 6. **Review each batch; release together after completion.** Present every batch in isolation and obtain explicit owner animation acceptance. Per the owner’s 2026-10-17 instruction, hold deployment until all remaining progression batches are finished; do not publish Batch B individually. This changes release timing, not approval for later batches. Final deployment still needs an exact approved artifact, fresh release health and retained rollback. Complete a fresh encrypted export and restore check if data/migration/release contracts require it; the Phase 11 historical archive exception does not waive future retention. Stop at the batch checkpoint before starting another unapproved batch.
 
-**Current checkpoint:** All A–F packages and animations are accepted. A is live/iPhone accepted. The owner authorised combined B–F checks and deployment after they pass. The v8 release completes 255 exercises, 124 protocols, all 103 frozen nodes and zero gaps. Native v1–v8 history, historical approvals and specialist safety gates stay intact. Current release evidence and deployment status are canonical in runbook Section 15; physical iPhone follow-up remains the owner’s next checkpoint.
+**Current checkpoint:** All A–F animations are owner accepted and the combined v8 release is live. All30 additions,255 exercises,124 protocols and103 frozen graph nodes are backed, with zero gaps; content availability does not grant readiness. Exact guide/source approvals, literal accepted media, F sizing CSS and nativev1–v8 history/export readers remain intact. Full checks,394 combined checks,90 phone layouts, fresh encrypted backup/restore and controlled exact-artifact/live account verification pass. Runbook Section15 contains final identity and evidence. Await the owner’s full-update iPhone test; do not start another unapproved task.
