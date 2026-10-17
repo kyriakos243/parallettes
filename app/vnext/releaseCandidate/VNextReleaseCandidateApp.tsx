@@ -31,6 +31,7 @@ import { AssessmentRunner } from "./AssessmentRunner";
 import { GuidedTestRunner, type GuidedTestFormResult } from "./GuidedTestRunner";
 import { CustomSessionBuilder, type VNextCustomSessionRequest } from "./CustomSessionBuilder";
 import { isMixedWorkoutPlan } from "../mixedWorkout";
+import { ReliableWorkoutRunner } from "./ReliableWorkoutRunner";
 import { MixedWorkoutRunner, recoverActiveWorkoutFacts as recoverMixedWorkoutFacts } from "./MixedWorkoutRunner";
 import {
   VNextAccountGate,
@@ -62,7 +63,7 @@ import {
   clearActiveWorkoutDraft,
   hasActiveWorkoutDraft,
   recoverActiveWorkoutFacts,
-  WorkoutRunner,
+  WorkoutRunner as FrozenWorkoutRunner,
   type WorkoutExecutionFacts,
   unresolvedRenderablePlanItems,
 } from "./WorkoutRunner";
@@ -311,6 +312,7 @@ const VNextAthleteApplication = ({
   onSignedOut: () => void;
   deployment: VNextApplicationDeployment;
 }>) => {
+  const WorkoutRunner = deployment.kind === "production" ? ReliableWorkoutRunner : FrozenWorkoutRunner;
   const catalogue = useMemo(() => deployment.workoutGenerators
     ? { ...(deployment.catalogue ?? vNextReleaseCandidateCatalogue), ...deployment.workoutGenerators }
     : deployment.catalogue ?? vNextReleaseCandidateCatalogue, [deployment.catalogue, deployment.workoutGenerators]);

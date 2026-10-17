@@ -73,7 +73,7 @@ assert(candidate.vNextReleaseCandidateManifest.phase10Readiness.ownerReleaseAppr
   "The historical RC manifest was rewritten instead of recording later owner approval separately");
 assert(contract.phase11ReleaseArtifact.status === "frozen"
   && contract.phase11ReleaseArtifact.sourceFingerprint
-    === "e20977b5d3ad8c3aed998a5d51f79d3f182e97423a0242b6c63915c3a8f20a4a"
+    === "cdb86cd2ae4eff0c2b1afdad7c86f8b6ef49851a461db9e8ea3a9cac8a262379"
   && contract.phase11ReleaseArtifact.sourceFingerprint
     !== production.VNEXT_PHASE10_ACCEPTED_RC_SOURCE_FINGERPRINT,
 "Phase 11 is not bound to its distinct corrected production artifact");

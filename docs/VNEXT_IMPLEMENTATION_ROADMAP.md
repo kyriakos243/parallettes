@@ -2,7 +2,7 @@
 
 **STATUS: ARCHITECTURE APPROVED — PHASES 1–11 COMPLETE; HISTORICAL ARCHIVE EXCEPTION ACCEPTED**
 
-- Implementation authorised: **NO FURTHER IMPLEMENTATION — mixed workout/Custom-preview update delivered and iPhone accepted; await a new owner-approved task**
+- Implementation authorised: **YES — owner-approved timer/background reliability and deployment after checks**
 - Required implementation baseline: Parallette25 v1.2.0 release commit `61b0876`, or a verified successor containing it
 - Authoritative project map and current state: [`../MASTER_PLAN.md`](../MASTER_PLAN.md)
 
@@ -423,3 +423,10 @@ The owner explicitly authorised F on 2026-10-17 after accepting E, retaining the
 6. **Review each batch; release together after completion.** Present every batch in isolation and obtain explicit owner animation acceptance. Per the owner’s 2026-10-17 instruction, hold deployment until all remaining progression batches are finished; do not publish Batch B individually. This changes release timing, not approval for later batches. Final deployment still needs an exact approved artifact, fresh release health and retained rollback. Complete a fresh encrypted export and restore check if data/migration/release contracts require it; the Phase 11 historical archive exception does not waive future retention. Stop at the batch checkpoint before starting another unapproved batch.
 
 **Current checkpoint:** The approved mixed workout/Custom-preview update is live and verified. All previous A–F content/media acceptance remains intact. Full checks include 394 combined cases, 50 mixed-plan cases and seven actual-player lifecycle cases; exact work/rest, protected primary/technical work, durable group locks and one-record partial saving pass. Fresh encrypted backup/restore has all 14 invariants zero. All 23 served files match the checked build; live account preview, swap/reload, paused recovery, phone layouts, one synced 14-second Partial record and unchanged earlier history pass. See runbook Section 16 for identity/evidence. The owner accepted all three latest-update iPhone checks on 2026-10-18 and approved PR #26 integration. No next implementation task, cleanup or rollback retirement is authorised.
+
+
+## Post-release task — timer and background reliability
+
+The owner authorised this task and deployment after passing checks on 2026-10-18. Operational behavior belongs in Training Engine §6.7, draft compatibility in Data & Migration §5.10 and release evidence in runbook §17. Implemented shared foreground elapsed-time sampling, explicit auto-pause on hide/pagehide/suspension, synchronous measured checkpoints, explicit Resume and best-effort screen wake lock for both mixed and native-order production workouts. The frozen historical player/media pins remain intact. No training, authority or database schema change.
+
+Full checks/type checking pass, with 31 actual runner/hook/controller scenarios covering drift, suspension, hide-before-render, boundary/queued-callback races, v1/v2/v3 recovery, native/mixed order, wake-lock rejection/release/late grants and one completion. The local browser preserves rest at 00:46 elapsed / 00:14 remaining across leave/back/reload, resumes explicitly, and saves one preparation-only Partial record. Portrait 402×874 and landscape 874×402 fit without overflow. The owner still needs to test actual iPhone app switching, screen lock, automatic screen-awake behavior and resumed completion after deployment. No unrelated task is authorised.
