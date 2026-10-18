@@ -1,0 +1,20 @@
+.vnext-session-card { border: 1px solid var(--vnext-line); border-radius: 18px; background: #fff; overflow: hidden; }
+.vnext-session-card > summary { cursor: pointer; padding: 16px; min-height: 44px; list-style-position: inside; }
+.vnext-history-title { font-size: 17px; font-weight: 800; }
+.vnext-history-date { display: block; margin-top: 6px; color: var(--vnext-muted); font-size: 13px; }
+.vnext-session-card .vnext-history-meta { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.vnext-history-detail-label { display: block; margin-top: 12px; color: var(--vnext-teal); font-size: 14px; font-weight: 750; }
+.vnext-session-details { padding: 0 16px 16px; }
+.vnext-history-movements { list-style: none; padding: 0; margin: 12px 0 0; }
+.vnext-history-movements li { padding: 14px 0; border-top: 1px solid var(--vnext-line); overflow-wrap: anywhere; }
+.vnext-history-movements h4 { margin: 0 0 8px; font-size: 16px; }
+.vnext-history-movements p { margin: 6px 0 0; font-size: 14px; line-height: 1.5; }
+.vnext-history-outcome { color: var(--vnext-teal); font-weight: 650; }
+.vnext-saved-summary { padding: 18px; margin-top: 16px; background: #edf7f3; border: 1px solid #bad9cf; border-radius: 20px; scroll-margin-top: 18px; }
+.vnext-saved-summary h2 { font-size: 28px; margin: 4px 0 8px; scroll-margin-top: 20px; }
+.vnext-saved-summary > p { line-height: 1.5; }
+.vnext-saved-summary .vnext-actions > button { min-height: 44px; }
+.vnext-sync-status { font-size: 12px; color: var(--vnext-muted); margin: 0; padding: 4px 16px; overflow-wrap: anywhere; }
+.vnext-sync-status[data-state="error"] { color: #9f342b; }
+.vnext-session-card summary:focus-visible, .vnext-history-list article:focus-visible { outline: 3px solid var(--vnext-teal); outline-offset: 3px; }
+@media (max-width: 440px) { .vnext-saved-summary { padding: 14px; } .vnext-session-card > summary, .vnext-session-details { padding-left: 12px; padding-right: 12px; } }

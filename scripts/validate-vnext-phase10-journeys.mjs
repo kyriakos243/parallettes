@@ -939,7 +939,8 @@ assert(uiSource.includes('aria-label="Training sections"')
   && uiSource.includes("<fieldset>")
   && uiSource.includes("<legend>"),
 "User surface: basic navigation/status/form accessibility semantics regressed");
-assert(appSource.includes("one immutable Session Record")
+assert(appSource.includes("runtime.prepareWorkoutCompletion")
+  && appSource.includes("runtime.commitWorkoutCompletion")
   && !/store\.(?:appendEvidenceEvent|appendSession|putAthleteIntent|applyProgressReset)\s*\(/u.test(appSource),
 "RC surface: UI bypasses the coordinator or obscures single-record workout authority");
 
