@@ -225,8 +225,8 @@ export const buildAssessmentReview = (
     guidedTests,
     restrictionReported,
     completionMessage: draft.mode === "targeted-reconfirmation"
-      ? "Only the existing findings that need a current check are shown. Your achievement history is unchanged."
-      : "These are provisional starting points. Training or a guided benchmark must confirm achievements.",
+      ? "Only the skills that need a fresh check are shown. Your achievements are kept."
+      : "These are starting estimates. Guided checks and qualifying training confirm your skills.",
   };
 };
 
@@ -290,14 +290,31 @@ export const buildAssessmentEvidence = async (
 
 export const buildAssessmentIntent = (draft: AssessmentDraft): AthleteIntent => {
   const graphIds = selectedAssessmentGoals(draft);
+  const modernGoals = draft.goalSelectionVersion === 2;
+  const hasGoalAnswer = draft.answers.some((answer) => answer.value.kind === "goals");
+  // Unmarked drafts retain their original mapping for exact partial-commit retry.
+  const selected: AthleteIntent["goals"] = modernGoals && !hasGoalAnswer ? draft.intentSeed.goals
+    : graphIds.map((graphId, index) => {
+      const existing = modernGoals ? draft.intentSeed.goals.find((goal) => goal.graphId === graphId) : undefined;
+      return {
+        graphId,
+        ...(existing?.targetNodeId ? { targetNodeId: existing.targetNodeId } : {}),
+        priority: index === 0 ? "primary" : index === 1 || modernGoals ? "secondary" : "interest",
+      };
+    });
+  const goals: AthleteIntent["goals"] = modernGoals && hasGoalAnswer
+    ? [...selected, ...draft.intentSeed.goals.filter((goal) => goal.priority === "interest"
+      && !selected.some((item) => item.graphId === goal.graphId))]
+    : selected;
+  const focus = modernGoals ? draft.intentSeed.emphasisOverride : undefined;
+  const focusStillSelected = focus && goals.some((goal) => goal.graphId === focus.primaryGraphId)
+    && (!focus.secondaryGraphId || goals.some((goal) => goal.graphId === focus.secondaryGraphId));
   return {
     schemaVersion: DOMAIN_SCHEMA_VERSION,
     athleteId: draft.athleteId,
     updatedAt: draft.updatedAt,
-    goals: graphIds.map((graphId, index) => ({
-      graphId,
-      priority: index === 0 ? "primary" : index === 1 ? "secondary" : "interest",
-    })),
+    goals,
+    ...(focusStillSelected ? { emphasisOverride: focus } : {}),
     equipment: selectedAssessmentEquipment(draft),
     defaultSessionDemand: draft.intentSeed.defaultSessionDemand,
     preferences: draft.intentSeed.preferences,
@@ -321,6 +338,7 @@ export const commitAssessment = async (
   for (const event of evidenceEvents) await store.appendEvidenceEvent(event);
   const committed: AssessmentDraft = draft.status === "committed" ? draft : {
     ...draft,
+    revisitAnswers: [],
     status: "committed",
     committedAt: draft.updatedAt,
     revision: draft.revision + 1,

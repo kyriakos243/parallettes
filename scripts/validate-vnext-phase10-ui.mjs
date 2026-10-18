@@ -50,15 +50,20 @@ includesAll(sources.experience, [
   '<nav className="vnext-nav" aria-label="vNext training sections">',
   'role="status" aria-live="polite"',
   'Today’s focus',
-  'Primary goal',
+  'Main focus',
+  'Supporting focus',
   'Secondary',
   'Maintenance',
   'Progress &amp; Goals',
   'Evidence, not claims',
   'Why not yet:',
   'Previously demonstrated in this family',
-  'Choose one primary goal and up to two secondary goals',
-  'Safe progression still comes from current evidence.',
+  'Choose one main goal and up to two supporting goals.',
+  'Edit goals',
+  'Choose goals',
+  'aria-expanded={editing}',
+  'Temporary training focus',
+  'await onGoalSelectionChange(selection)',
   'workoutRecoveryStage === "active"',
   'Resume ${workoutOrigin === "custom" ? "Custom Session" : "today’s workout"}',
   'Build a 5–20 minute session',
@@ -70,6 +75,9 @@ includesAll(sources.experience, [
   '<legend',
   'role="alert"',
 ], "vNext athlete experience");
+assert(sources.experience.indexOf('<GoalControls presentation={goals}') < sources.experience.indexOf('<SkillRoadmap roadmaps={progress.roadmaps}'),
+  "Goal editing is buried below the full roadmap");
+assert(!sources.experience.includes('announce("Goals saved.'), "Goal editor announces success before the async save is confirmed");
 assert(!/(?:global athlete level|readiness score|capacity score|fatigue score|manual(?:ly)? claim)/iu.test(sources.experience),
   "The final athlete surface exposes a forbidden global score or manual-claim affordance");
 assert(!/<(?:div|span|article|section|li)\b[^>]*\bonClick=/u.test(sources.experience),
@@ -87,7 +95,7 @@ for (const [label, source] of Object.entries({
   assert(!/<(?:div|span|article|section|li)\b[^>]*\bonClick=/u.test(source),
     `${label} flow uses a pointer-only non-interactive click target`);
 }
-includesAll(sources.assessment, ["<fieldset", "<legend", "type=\"radio\"", "type=\"checkbox\"", "Save &amp; close"], "adaptive placement");
+includesAll(sources.assessment, ["<fieldset", "<legend", "type=\"radio\"", "type=\"checkbox\"", "Finish later"], "adaptive placement");
 includesAll(sources.guided, ["Exact test", "Target", "Equipment", "Assistance:", "Range:", "Observed outcome", "quality criteria", "safety criteria", "role=\"alert\""], "guided confirmation");
 includesAll(sources.workout, ["aria-label=\"Workout timer\"", "Save & close", "Finish early", "role=\"alert\"", "Up next:", "vnext-rc-session-progress"], "workout execution");
 includesAll(sources.custom, [
@@ -162,7 +170,7 @@ for (const [foreground, background, label] of [
 
 // Feature isolation, lazy expensive media and PWA lane safety.
 includesAll(sources.rcApp, [
-  "No skill was manually unlocked.",
+  "Goals saved. Your next workout will use these priorities.",
   "ordinary v1.2 authority is unchanged",
   "The exact prepared record is retained for retry.",
   "Session Record",

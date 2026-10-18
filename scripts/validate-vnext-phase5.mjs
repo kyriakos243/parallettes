@@ -245,6 +245,25 @@ navigationDraft = assessment.goBackAssessment(navigationDraft, at(7), bundle);
 assert(assessment.nextAssessmentStep(navigationDraft, bundle).kind === "equipment",
   "Back navigation did not restore the preceding step");
 await navigationStore.saveAssessmentDraft(navigationDraft);
+let backReloaded = await navigationStore.readAssessmentDraft(navigationId);
+assert(backReloaded.revisitAnswers[0].value.kind === "equipment"
+  && persistence.canonicalJson(backReloaded.revisitAnswers[0].value.equipment) === persistence.canonicalJson(equipment),
+  "Back/reload lost the previous equipment selection");
+backReloaded = assessment.goBackAssessment(backReloaded, at(8), bundle);
+assert(backReloaded.revisitAnswers.length === 2 && backReloaded.revisitAnswers[0].value.kind === "goals",
+  "Repeated Back did not retain previous choices separately from active answers");
+const unchangedGoals = backReloaded.revisitAnswers[0].value;
+backReloaded = assessment.answerAssessmentStep(backReloaded, unchangedGoals, at(9), bundle);
+assert(backReloaded.revisitAnswers.length === 1 && backReloaded.revisitAnswers[0].value.kind === "equipment",
+  "Reconfirming an unchanged choice discarded a later choice");
+backReloaded = assessment.goBackAssessment(backReloaded, at(10), bundle);
+backReloaded = assessment.answerAssessmentStep(backReloaded, { kind: "goals", graphIds: [definitions.graphIds.planche] }, at(11), bundle);
+assert(backReloaded.revisitAnswers.length === 0,
+  "Changing goals retained obsolete later choices");
+assert(!backReloaded.answers.some((answer) => answer.value.kind === "equipment"),
+  "Back choices became routing answers before explicit reconfirmation");
+await assertRejects(async () => assessment.assertAssessmentDraft({ ...backReloaded, revisitAnswers: [{ stepId: "context-safety", answeredAt: at(1), value: { kind: "safety", severity: "none" } }] }, bundle),
+  /Duplicate/u, "Draft accepted a previous choice that overlaps an active answer");
 navigationStore.close();
 
 // 7. Commit is idempotent, self-assessment remains provisional, and no gate is bypassed.
@@ -258,6 +277,19 @@ assert(committedDraft?.status === "committed", "Committed draft status was not p
 assert(committedSources.evidenceEvents.length === firstCommit.evidenceEvents.length,
   "Repeated commit duplicated assessment observations");
 assert(committedSources.intent?.goals.length === 3, "Assessment goals did not persist as Athlete Intent");
+assert(committedSources.intent.goals.filter((goal) => goal.priority === "primary").length === 1
+  && committedSources.intent.goals.filter((goal) => goal.priority === "secondary").length === 2,
+  "Setup did not persist one main and two supporting goals");
+assert(persistence.canonicalJson(assessment.buildAssessmentIntent(firstCommit.draft).goals)
+  === persistence.canonicalJson(committedSources.intent.goals), "Retry changed the newly committed goal mapping");
+const { goalSelectionVersion: _newGoalMapping, ...oldCommittedDraft } = firstCommit.draft;
+assert(assessment.buildAssessmentIntent(oldCommittedDraft).goals[2].priority === "interest",
+  "An old committed draft retry silently changed its original third goal");
+const oldPending = { ...oldCommittedDraft, status: "in-progress", committedAt: undefined };
+assert(assessment.buildAssessmentIntent(oldPending).goals[2].priority === "interest",
+  "An unfinished old setup changed its native goal mapping before explicit reconfirmation");
+assert(firstCommit.draft.revisitAnswers.length === 0,
+  "Committed draft retained unconfirmed Back choices");
 const provisionalProjection = projection.projectAthleteState({
   athleteId: experiencedId,
   asOf: at(30),

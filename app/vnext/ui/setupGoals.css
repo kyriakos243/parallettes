@@ -1,0 +1,30 @@
+/* Setup and goal controls only. Approved workout/media styles remain unchanged. */
+.vnext-goals select { font: inherit; }
+.vnext-goals select:focus-visible,
+.vnext-rc-followup select:focus-visible { outline: 3px solid rgba(17, 121, 111, .36); outline-offset: 3px; }
+.vnext-rc-saved-setup { box-sizing: border-box; width: min(calc(100% - 32px), 1160px); margin: 16px auto; }
+.vnext-rc-followup select { width: 100%; min-width: 0; min-height: 44px; padding: 8px 11px; border: 1px solid #dce5e0; border-radius: 10px; color: #10231f; background: white; font: inherit; font-size: 16px; }
+
+.vnext-goals-heading { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+.vnext-goals-heading h2 { margin: 0; font-size: 24px; letter-spacing: -.035em; }
+.vnext-goal-summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin: 0; }
+.vnext-goal-summary > div { display: grid; gap: 4px; min-width: 0; }
+.vnext-goal-summary dt { color: var(--vnext-muted); font-size: 12px; }
+.vnext-goal-summary dd { margin: 0; font-size: 15px; font-weight: 800; line-height: 1.4; overflow-wrap: anywhere; }
+.vnext-goal-editor { display: grid; gap: 16px; padding-top: 16px; border-top: 1px solid var(--vnext-line); }
+.vnext-main-goal { display: grid; gap: 8px; font-size: 15px; font-weight: 850; }
+.vnext-main-goal select { width: 100%; min-width: 0; min-height: 48px; padding: 10px 12px; border: 1px solid #b8d3cb; border-radius: 10px; color: var(--vnext-ink); background: white; font-size: 16px; }
+.vnext-goals .vnext-goal-grid { margin-top: 10px; }
+.vnext-supporting-goal { min-height: 60px; display: flex; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--vnext-line); border-radius: 13px; cursor: pointer; }
+.vnext-supporting-goal:has(input:checked) { border-color: var(--vnext-teal); background: var(--vnext-teal-soft); }
+.vnext-supporting-goal:has(input:disabled) { cursor: not-allowed; }
+.vnext-supporting-goal input { flex: 0 0 20px; width: 20px; height: 20px; margin: 0; accent-color: var(--vnext-teal); }
+.vnext-supporting-goal strong { display: block; font-size: 14px; }
+.vnext-supporting-goal small { display: block; margin-top: 3px; color: var(--vnext-muted); line-height: 1.4; }
+.vnext-goal-emphasis { padding: 0 12px 12px; border: 1px solid var(--vnext-line); border-radius: 12px; }
+.vnext-goal-emphasis summary { min-height: 44px; padding: 12px 0; color: var(--vnext-forest); font-size: 13px; font-weight: 800; cursor: pointer; }
+.vnext-goal-emphasis summary span { color: var(--vnext-muted); font-weight: 500; }
+.vnext-goal-emphasis .vnext-chip { margin-top: 10px; }
+@media (max-width: 760px) {
+  .vnext-goal-summary { grid-template-columns: minmax(0, 1fr); }
+}

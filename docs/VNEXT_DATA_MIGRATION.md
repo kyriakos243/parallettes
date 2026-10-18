@@ -4,7 +4,7 @@
 
 **Status:** APPROVED FOUNDATION — PHASE 11 COMPLETE; HISTORICAL ARCHIVE EXCEPTION ACCEPTED
 
-**Implementation authorised:** NO — completed scope; await a new owner-approved task
+**Implementation authority:** MASTER_PLAN.md owns the current owner-approved task and implementation state.
 
 This is the canonical detailed source for vNext data ownership, persistence, sync, legacy conversion, rollback and compatibility. Read it for domain contracts, evidence persistence, profile/sync work, migration rehearsal, release cutover or any change that could reinterpret or lose athlete history. Skill topology belongs in [Skill Architecture](VNEXT_SKILL_ARCHITECTURE.md); phase execution belongs in the [Implementation Roadmap](VNEXT_IMPLEMENTATION_ROADMAP.md).
 
@@ -170,6 +170,12 @@ Local mixed timer drafts are version 3 and retain group locks, exact cursor/coun
 ### 5.10 Timer reliability compatibility — 2026-10-18
 
 The foreground clock changes no immutable plans, records, evidence or sync fields. Local v2 native-order and v3 mixed drafts gain only an optional validated pause reason; existing drafts and the v1 conversion remain readable and reopen paused. Timer deliveries update the measured checkpoint synchronously before persistence; page-hide saves it without crediting hidden time. The production native-order player retains the original v1/v2 parsing and ordering contract while the SHA-pinned historical runner stays untouched. Repair must retain both native and mixed execution and v1–v8 definitions. No production SQL mutation, migration, reset or rollback retirement is included.
+
+### 5.11 Setup and goal local compatibility — 2026-10-18
+
+Assessment drafts add optional validated local-only `revisitAnswers` and `goalSelectionVersion: 2`. Revisit answers are UI prefills, disjoint from active answers, and never influence routing, projection or committed evidence until explicitly confirmed. New drafts and explicitly reconfirmed goal answers use the modern main/up-to-two-supporting interpretation; unmarked old drafts retain their original mapping for byte-compatible retry of partially saved observations. Committed drafts clear revisit hints. Native assessment definitions and old readers remain available; there is no storage database-version bump or observation/API/schema change.
+
+Explicit Progress goal changes reconcile a paused draft's intent seed and answered goal selection before saving Athlete Intent. Earlier safety/context answers remain; downstream answers that depended on the previous goals are discarded. Unanswered/targeted drafts retain their existing route/targets and receive the updated seed. Seed data includes existing target IDs, interests and valid emphasis. Draft-first persistence prevents a newly saved intent from coexisting with an obsolete goal answer. If the subsequent intent write fails, the local draft retains the user's explicit requested choice, the UI reports failure, and retry is supported. Focused fault-injection tests cover both write boundaries and exact native partial-commit recovery. This introduces no migration, production data rewrite or reset.
 
 ## 6. Target Persistence and Sync
 

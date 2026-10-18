@@ -153,8 +153,8 @@ export const buildAssessmentEntryPoints = (
     kind: "reassessment",
     label: hasExistingFinding ? "Review my current starting point" : "Find my starting point",
     description: hasExistingFinding
-      ? "Review goals, restrictions and only the findings that need a current check."
-      : "Answer a short adaptive placement flow before your first goal-directed session.",
+      ? "Update your restrictions and check the skills that need attention."
+      : "Answer a few questions to help choose suitable exercises. You can finish later.",
     mode: hasExistingFinding ? "targeted-reconfirmation" : "new-placement",
     protocolIds: [],
     availability: "available",
@@ -167,10 +167,10 @@ export const buildAssessmentEntryPoints = (
   return {
     title: "Check or update my starting point",
     intro: hasExistingFinding
-      ? "Use a focused check when evidence is stale, uncertain or affected by a recent restriction."
-      : "Placement estimates where to begin; guided evidence confirms achievements later.",
+      ? "Check a skill again after time away, uncertainty or a change in restrictions."
+      : "Find a starting point, then build confidence through practice and guided checks.",
     actions: [baseAction, ...offers, ...reconfirmations, ...(postRestriction ? [postRestriction] : [])],
     canManuallyClaimSkills: false,
-    authorityNotice: "Selecting a goal or answering a self-report never awards a skill. Approved confirmation rules still apply.",
+    authorityNotice: "Your answers help choose suitable practice. Guided checks and qualifying training confirm skills.",
   };
 };

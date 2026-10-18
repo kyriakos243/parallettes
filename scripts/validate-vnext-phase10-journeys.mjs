@@ -927,7 +927,8 @@ assert(uiSource.includes("Today’s focus")
   && uiSource.includes("Progress &amp; Goals")
   && uiSource.includes("Every block has a reason")
   && uiSource.includes("Previously demonstrated in this family")
-  && uiSource.includes("Goals saved. Safe progression still comes from current evidence."),
+  && uiSource.includes("await onGoalSelectionChange(selection)")
+  && appSource.includes("Goals saved. Your next workout will use these priorities."),
 "User surface: required Today, progress, trust or safe-goal language is missing");
 assert(!/(?:Set|Mark|Claim)\s+(?:skill|achievement)\s+(?:as\s+)?(?:complete|achieved|demonstrated)/iu.test(uiSource),
   "User surface: a manual skill/achievement control is visible");

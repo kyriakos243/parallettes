@@ -606,6 +606,39 @@ rejectsGoalSelection([
   { graphId: definitions.graphIds.verticalPushHspu, priority: "secondary" },
 ], "Goal controls allowed more than the approved three goal families");
 assertPlainAthleteCopy(goalControls, "goal controls");
+// Editing main/supporting goals must not erase or silently promote legacy interests.
+const legacyInterest = { graphId: definitions.graphIds.lSitVSit, priority: "interest", targetNodeId: "full-l-sit" };
+const intentWithInterest = { ...mixedIntent, goals: [
+  { graphId: definitions.graphIds.planche, priority: "primary" }, legacyInterest,
+] };
+const interestBefore = JSON.stringify(intentWithInterest);
+const retainedInterest = presentation.applyGoalControlSelection({
+  bundle, intent: intentWithInterest,
+  selection: { goals: [{ graphId: definitions.graphIds.handstandBalance, priority: "primary" }] },
+  updatedAt: "2026-08-24T09:06:00.000Z",
+});
+assert(JSON.stringify(retainedInterest.goals.find((goal) => goal.graphId === legacyInterest.graphId)) === JSON.stringify(legacyInterest),
+  "Goal editing dropped or changed an untouched interest/target");
+assert(presentation.buildGoalControls(bundle, retainedInterest).secondaryGraphIds.length === 0,
+  "An existing interest was silently promoted to a supporting goal");
+const threeGoals = presentation.applyGoalControlSelection({
+  bundle, intent: intentWithInterest,
+  selection: { goals: [
+    { graphId: definitions.graphIds.handstandBalance, priority: "primary" },
+    { graphId: definitions.graphIds.planche, priority: "secondary" },
+    { graphId: legacyInterest.graphId, priority: "secondary" },
+  ] },
+  updatedAt: "2026-08-24T09:06:00.000Z",
+});
+const threeGoalControls = presentation.buildGoalControls(bundle, threeGoals);
+assert(threeGoalControls.primaryGraphId === definitions.graphIds.handstandBalance
+  && threeGoalControls.secondaryGraphIds.length === 2,
+  "One main and two supporting goals did not survive saving and presentation");
+assert(threeGoals.goals.filter((goal) => goal.graphId === legacyInterest.graphId).length === 1
+  && threeGoals.goals.find((goal) => goal.graphId === legacyInterest.graphId)?.targetNodeId === "full-l-sit",
+  "Explicitly selecting an interest duplicated the goal or lost its exact target");
+assert(JSON.stringify(intentWithInterest) === interestBefore, "Goal editing mutated the original Athlete Intent");
+
 
 // 6. Today maps generator focus/item roles to plain explanations and keeps
 // Technique/Standard/Challenge as workload choices, not unlock controls.
@@ -740,9 +773,10 @@ assert(/<button\b[^>]*type=["']button["']/.test(uiSources), "vNext actions are n
 assert(/<fieldset\b/.test(uiSources) && /<legend\b/.test(uiSources),
   "Goal controls are not grouped by fieldset and legend");
 assert(/aria-live=["']polite["']/.test(uiSources), "vNext changing status lacks a polite live region");
-assert(/Set \$\{option\.label\} as primary goal/.test(uiSources)
-  && /Add \$\{option\.label\} as secondary goal/.test(uiSources),
-"Per-family goal buttons do not have distinct accessible names");
+assert(uiSources.includes('<label className="vnext-main-goal">Main goal')
+  && uiSources.includes('<label className="vnext-supporting-goal"')
+  && uiSources.includes('<strong>{option.label}</strong>'),
+"Main and supporting goal controls lack native labels");
 assert(!/<(?:div|span|article|li)\b[^>]*\bonClick=/.test(uiSources),
   "vNext surface uses a non-native click target");
 // Negative tabindex allows programmatic heading focus without changing the

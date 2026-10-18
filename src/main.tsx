@@ -66,6 +66,7 @@ const mountReleaseCandidate = async (): Promise<void> => {
     import("../app/vnext/ui/phase8.css"),
     import("../app/vnext/releaseCandidate/phase9.css"),
   ]);
+  await import("../app/vnext/ui/setupGoals.css");
   root.render(<StrictMode><VNextReleaseCandidateApp /></StrictMode>);
 };
 
@@ -95,6 +96,7 @@ const mountProductionApplication = async (): Promise<void> => {
     import("../app/vnext/ui/phase8.css"),
     import("../app/vnext/releaseCandidate/phase9.css"),
   ]);
+  await import("../app/vnext/ui/setupGoals.css");
   root.render(<StrictMode><VNextProductionApp /></StrictMode>);
 };
 

@@ -173,9 +173,9 @@ const ownerMediaApprovals = Object.entries(VNEXT_PHASE10_OWNER_APPROVED_MEDIA_FI
  * 520c65f9-2d89-4044-9481-b9ba05911363. Its private evidence proves the
  * retained v1 deployment, recoverable D1 snapshot, exact additive schema,
  * coherent Worker authority switch and active rollback controls.
- * The owner accepted the goal skill roadmap and authorised deployment after
- * final checks on 2026-10-18. The exact artifact below includes only the
- * approved presentation changes. Fresh full and accounts backups passed
+ * The owner authorised setup resume/Back, consistent goal selection and
+ * easier Progress editing, with deployment after checks on 2026-10-18.
+ * The exact artifact below includes only these approved corrections. Fresh full and accounts backups passed
  * isolated restore and all 14 invariants; FileVault is on and temporary CLI
  * access is logged out. Worker/schema/authority remain unchanged. Historical
  * migration authorisations below do not instruct a new migration/cutover.
@@ -203,7 +203,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   },
   phase11ReleaseArtifact: {
     status: "frozen",
-    sourceFingerprint: "b9efeb4d6631be85840ec0a31edc7a5e6f1bfc773b0772d134f5112296fffc3f",
+    sourceFingerprint: "6264d042cb0397efbef20762572545065d9a146008b4f1d983593d0af818abc4",
   },
   preflight: [
     {
@@ -214,12 +214,12 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
     {
       id: "phase11-release-artifact-frozen",
       status: "passed",
-      evidence: "dist-set:b9efeb4d6631be85840ec0a31edc7a5e6f1bfc773b0772d134f5112296fffc3f",
+      evidence: "dist-set:6264d042cb0397efbef20762572545065d9a146008b4f1d983593d0af818abc4",
     },
     {
       id: "recoverable-production-snapshots-verified",
       status: "passed",
-      evidence: "current-backup:2026-10-18T08:46:07.143290Z;isolated-full-and-accounts-restore:ok;14-invariants-zero;owner-retained;temporary-cli-logged-out",
+      evidence: "current-backup:2026-10-18T10:24:55.095664Z;isolated-full-and-accounts-restore:ok;14-invariants-zero;owner-retained;temporary-cli-logged-out",
     },
     {
       id: "compatible-schema-api-app-worker-order-ready",
@@ -249,7 +249,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   ],
   productionGrant: {
     status: "granted",
-    releaseArtifactFingerprint: "b9efeb4d6631be85840ec0a31edc7a5e6f1bfc773b0772d134f5112296fffc3f",
+    releaseArtifactFingerprint: "6264d042cb0397efbef20762572545065d9a146008b4f1d983593d0af818abc4",
     authorizations: {
       deployCompatibleRelease: true,
       runIdempotentLiveMigration: true,

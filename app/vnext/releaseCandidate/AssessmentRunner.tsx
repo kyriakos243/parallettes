@@ -60,6 +60,7 @@ export type AssessmentRunnerProps = Readonly<{
   bundle: DefinitionBundle;
   review?: AssessmentReview;
   busy?: boolean;
+  error?: string;
   onAnswer: (answer: AssessmentAnswerValue) => void;
   onBack: () => void;
   onCommit: () => void;
@@ -74,18 +75,22 @@ const AnswerStep = ({
   busy,
   onAnswer,
 }: Pick<AssessmentRunnerProps, "draft" | "step" | "bundle" | "busy" | "onAnswer">) => {
-  const [safety, setSafety] = useState<"none" | "modify" | "block">("none");
-  const [domains, setDomains] = useState<readonly DemandDomain[]>([]);
-  const [bodyRegion, setBodyRegion] = useState("");
-  const [experience, setExperience] = useState<"new" | "some" | "experienced">("new");
-  const [inactivity, setInactivity] = useState<"active" | "one-to-six-months" | "over-six-months">("active");
-  const [goals, setGoals] = useState<readonly GraphId[]>([]);
+  const previous = draft.revisitAnswers?.find((answer) => answer.stepId === step.id)?.value;
+  const [safety, setSafety] = useState<"none" | "modify" | "block">(previous?.kind === "safety" ? previous.severity : "none");
+  const [domains, setDomains] = useState<readonly DemandDomain[]>(previous?.kind === "safety" ? previous.demandDomains ?? [] : []);
+  const [bodyRegion, setBodyRegion] = useState(previous?.kind === "safety" ? previous.bodyRegions?.join(", ") ?? "" : "");
+  const [experience, setExperience] = useState<"new" | "some" | "experienced">(previous?.kind === "experience" ? previous.experience : "new");
+  const [inactivity, setInactivity] = useState<"active" | "one-to-six-months" | "over-six-months">(previous?.kind === "inactivity" ? previous.inactivity : "active");
+  const [goals, setGoals] = useState<readonly GraphId[]>(previous?.kind === "goals" ? previous.graphIds : [
+    ...draft.intentSeed.goals.filter((goal) => goal.priority === "primary"),
+    ...draft.intentSeed.goals.filter((goal) => goal.priority === "secondary"),
+  ].map((goal) => goal.graphId));
   const availableEquipment = useMemo(() => [...new Set(bundle.exercises.flatMap((exercise) => exercise.equipment))]
     .sort() as readonly EquipmentId[], [bundle]);
-  const [equipment, setEquipment] = useState<readonly EquipmentId[]>(draft.intentSeed.equipment);
-  const [inversion, setInversion] = useState<"none" | "supported" | "freestanding">("none");
-  const [placement, setPlacement] = useState<PlacementResponse>("not-sure");
-  const [anchorBodyRegion, setAnchorBodyRegion] = useState("");
+  const [equipment, setEquipment] = useState<readonly EquipmentId[]>(previous?.kind === "equipment" ? previous.equipment : draft.intentSeed.equipment);
+  const [inversion, setInversion] = useState<"none" | "supported" | "freestanding">(previous?.kind === "inversion" ? previous.familiarity : "none");
+  const [placement, setPlacement] = useState<PlacementResponse>(previous?.kind === "anchor" ? previous.response : "not-sure");
+  const [anchorBodyRegion, setAnchorBodyRegion] = useState(previous?.kind === "anchor" ? previous.bodyRegions?.join(", ") ?? "" : "");
 
   const submit = (): void => {
     if (step.kind === "safety") {
@@ -166,22 +171,34 @@ const AnswerStep = ({
       )}
 
       {step.kind === "goals" && (
-        <fieldset className="vnext-rc-followup">
-          <legend>Choose one primary direction, then up to two supporting goals</legend>
-          <div className="vnext-rc-answer-grid">
-            {step.options.map((option) => (
-              <label className="vnext-rc-choice" key={option.graphId}>
-                <input
-                  type="checkbox"
-                  checked={goals.includes(option.graphId)}
-                  disabled={!goals.includes(option.graphId) && goals.length >= 3}
-                  onChange={() => setGoals(toggle(goals, option.graphId))}
-                />
-                <span><strong>{option.label}</strong><small>{option.description}</small></span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
+        <div className="vnext-rc-followup">
+          <label>
+            <span>Main goal</span>
+            <select value={goals[0] ?? ""} onChange={(event) => {
+              const main = event.target.value as GraphId;
+              setGoals(main ? [main, ...goals.slice(1).filter((goal) => goal !== main)] : []);
+            }}>
+              <option value="" disabled>Choose your main goal</option>
+              {step.options.map((option) => <option key={option.graphId} value={option.graphId}>{option.label}</option>)}
+            </select>
+          </label>
+          <fieldset>
+            <legend>Supporting goals · choose up to two</legend>
+            <div className="vnext-rc-answer-grid">
+              {step.options.filter((option) => option.graphId !== goals[0]).map((option) => (
+                <label className="vnext-rc-choice" key={option.graphId}>
+                  <input
+                    type="checkbox"
+                    checked={goals.slice(1).includes(option.graphId)}
+                    disabled={!goals[0] || (!goals.includes(option.graphId) && goals.length >= 3)}
+                    onChange={() => setGoals([goals[0]!, ...toggle(goals.slice(1), option.graphId)])}
+                  />
+                  <span><strong>{option.label}</strong><small>{option.description}</small></span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </div>
       )}
 
       {step.kind === "equipment" && (
@@ -197,7 +214,7 @@ const AnswerStep = ({
 
       {step.kind === "inversion" && (
         <div className="vnext-rc-answer-grid">
-          <Choice name="inversion" checked={inversion === "none"} label="No familiar inversion exposure" onChange={() => setInversion("none")} />
+          <Choice name="inversion" checked={inversion === "none"} label="Not used to being upside down" onChange={() => setInversion("none")} />
           <Choice name="inversion" checked={inversion === "supported"} label="Supported or wall-assisted" onChange={() => setInversion("supported")} />
           <Choice name="inversion" checked={inversion === "freestanding"} label="Freestanding practice feels familiar" onChange={() => setInversion("freestanding")} />
         </div>
@@ -233,7 +250,7 @@ const AnswerStep = ({
             {placement === "symptom" && (
               <label><span>Affected area</span><input value={anchorBodyRegion} onChange={(event) => setAnchorBodyRegion(event.target.value)} placeholder="For example: right shoulder" /></label>
             )}
-            <p className="vnext-authority">This answer creates a provisional placement observation only. It cannot award an achievement.</p>
+            <p className="vnext-authority">This helps choose your starting point. A guided check or qualifying training confirms a skill later.</p>
           </div>
         );
       })()}
@@ -249,6 +266,7 @@ export const AssessmentRunner = ({
   bundle,
   review,
   busy = false,
+  error,
   onAnswer,
   onBack,
   onCommit,
@@ -259,23 +277,35 @@ export const AssessmentRunner = ({
     <section className="vnext-rc-modal">
       <div className="vnext-rc-modal-header">
         <div>
-          <p className="vnext-kicker">Adaptive placement</p>
+          <p className="vnext-kicker">Find your starting point</p>
           <h1 id="vnext-assessment-runner-title">{step.title}</h1>
           <p>{step.prompt}</p>
         </div>
-        <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onClose}>Save &amp; close</button>
+        <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onClose}>Finish later</button>
       </div>
 
+      {error && <p className="vnext-rc-message is-error" role="alert">{error}</p>}
       {step.kind === "review" ? (
         <div className="vnext-rc-review">
+          {(() => {
+            const answer = draft.answers.find((item) => item.value.kind === "goals")?.value;
+            const selected = answer?.kind === "goals" ? answer.graphIds : [
+              ...draft.intentSeed.goals.filter((goal) => goal.priority === "primary"),
+              ...draft.intentSeed.goals.filter((goal) => goal.priority === "secondary"),
+            ].map((goal) => goal.graphId);
+            const label = (id: GraphId) => bundle.graphs.find((graph) => graph.id === id)?.label ?? labelFromId(id);
+            const legacyInterest = answer?.kind === "goals" && draft.goalSelectionVersion !== 2 ? selected[2] : undefined;
+            return selected.length > 0 ? <div className="vnext-rc-followup">
+              <p><strong>Main goal:</strong> {label(selected[0]!)}</p>
+              <p><strong>Supporting goals:</strong> {selected.slice(1, legacyInterest ? 2 : undefined).map(label).join(", ") || "None selected"}</p>
+              {legacyInterest && <p><strong>Saved interest:</strong> {label(legacyInterest)}. This setup was started in an earlier version. After saving, use Edit goals in Progress to make it a supporting goal.</p>}
+            </div> : null;
+          })()}
           <p><strong>{review?.promptCount ?? draft.answers.length} answers</strong> · about {review?.estimatedMinutes ?? 1} minutes completed</p>
           <p>{review?.completionMessage ?? "Your starting points are ready to save."}</p>
-          {(review?.provisional.length ?? 0) > 0 && (
-            <p className="vnext-authority">These are placement estimates until the benchmark policy confirms them.</p>
-          )}
           {(review?.guidedTests.length ?? 0) > 0 && (
             <section>
-              <h2>Optional guided confirmation</h2>
+              <h2>Optional skill checks</h2>
               <div className="vnext-assessment-list">
                 {review!.guidedTests.map((offer) => {
                   const test = guidedTestPresentation(offer, bundle);
@@ -285,15 +315,15 @@ export const AssessmentRunner = ({
                       <div className="vnext-assessment-action-motion" aria-label={`${test.exercise.name} movement demonstration`}>
                         <VNextMotionGuide preset={mediaReference} />
                       </div>
-                      <div><strong>{test.exercise.name}</strong><span>{labelFromId(offer.reason)}</span>{offer.blockers.map((blocker) => <span key={blocker}>{blocker}</span>)}</div>
-                      <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || offer.availability === "blocked" || !onGuidedTestRequested} onClick={() => onGuidedTestRequested?.(offer)}>{offer.availability === "blocked" ? "Unavailable today" : "Save placement & open test"}</button>
+                      <div><strong>{test.exercise.name}</strong><span>{offer.reason === "reconfirm-existing" ? "Check this skill again" : offer.reason === "resolve-uncertainty" ? "Find a clearer starting point" : "Confirm your starting point"}</span>{offer.blockers.map((blocker) => <span key={blocker}>{blocker}</span>)}</div>
+                      <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || offer.availability === "blocked" || !onGuidedTestRequested} onClick={() => onGuidedTestRequested?.(offer)}>{offer.availability === "blocked" ? "Unavailable today" : "Save & open check"}</button>
                     </article>
                   );
                 })}
               </div>
             </section>
           )}
-          <button type="button" className="vnext-submit" disabled={busy} onClick={onCommit}>Save placement</button>
+          <button type="button" className="vnext-submit" disabled={busy} onClick={onCommit}>Save starting points</button>
         </div>
       ) : (
         <AnswerStep key={`${draft.id}:${draft.revision}:${step.id}`} draft={draft} step={step} bundle={bundle} busy={busy} onAnswer={onAnswer} />
@@ -301,7 +331,7 @@ export const AssessmentRunner = ({
 
       <div className="vnext-actions">
         <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || draft.answers.length === 0} onClick={onBack}>Back</button>
-        <span className="vnext-help">Your progress is saved on this device after every answer.</span>
+        <span className="vnext-help">Answers are saved on this device when you tap Continue.</span>
       </div>
     </section>
   </main>

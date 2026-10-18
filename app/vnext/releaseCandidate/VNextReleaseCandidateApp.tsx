@@ -338,6 +338,8 @@ const VNextAthleteApplication = ({
   );
   const [snapshot, setSnapshot] = useState<VNextRuntimeSnapshot>();
   const [assessment, setAssessment] = useState<VNextRuntimeAssessmentState>();
+  const [restartSetupOpen, setRestartSetupOpen] = useState(false);
+  const [restartForRestrictions, setRestartForRestrictions] = useState(false);
   const [guidedOffer, setGuidedOffer] = useState<GuidedTestOffer | undefined>(initialGuidedRecovery?.offer);
   const [guidedRecovery, setGuidedRecovery] = useState<GuidedRecovery | undefined>(initialGuidedRecovery);
   const [workoutRecovery, setWorkoutRecovery] = useState<WorkoutRecovery | undefined>(initialWorkoutRecovery);
@@ -430,18 +432,12 @@ const VNextAthleteApplication = ({
       } else if (initialGuidedRecovery) {
         setMessage("The exact guided observation was recovered and is ready for idempotent retry.");
       } else if (result.snapshot.assessmentDraft?.status === "in-progress") {
-        const draft = result.snapshot.assessmentDraft;
-        setAssessment({
-          draft,
-          step: nextAssessmentStep(draft, bundleFor(draft.catalogueVersion)),
-          ...(result.snapshot.assessmentReview ? { review: result.snapshot.assessmentReview } : {}),
-        });
-        setMessage("Your saved placement check is ready to resume.");
+        setMessage("Your starting-point check is saved. Resume it whenever you’re ready.");
       } else if (result.createdDefaultIntent) {
         const started = await runtime.startAssessment({ ...refreshInput(), mode: "new-placement" });
         setSnapshot(started.snapshot);
         setAssessment(started.assessment);
-        setMessage("A short adaptive placement will create your provisional starting points.");
+        setMessage("A few questions will help choose your starting point. You can finish later.");
       } else {
         setMessage(preparation?.message ?? "vNext observations rebuilt successfully on this device.");
       }
@@ -541,7 +537,26 @@ const VNextAthleteApplication = ({
     ? "This workout cannot start because at least one movement guide has not completed owned technical and owner review. No substitute will be used."
     : undefined;
 
-  const startAssessment = (action?: AssessmentEntryAction): void => runCommand(async () => {
+  const startAssessment = (action?: AssessmentEntryAction, restart = false): void => runCommand(async () => {
+    const current = await runtime.refresh(refreshInput());
+    if (!restart && current.assessmentDraft?.status === "in-progress") {
+      const draft = current.assessmentDraft;
+      if (!action) {
+        setRestartForRestrictions(true);
+        setRestartSetupOpen(true);
+        return;
+      }
+      setSnapshot({ ...current, assessmentDraft: draft });
+      setAssessment({
+        draft,
+        step: nextAssessmentStep(draft, bundleFor(draft.catalogueVersion)),
+        ...(isAssessmentAtReview(draft, bundleFor(draft.catalogueVersion))
+          ? { review: buildAssessmentReview(draft, bundleFor(draft.catalogueVersion), current.state) } : {}),
+      });
+      setRestartSetupOpen(false);
+      setMessage("Continue from your saved answers. You can go Back to change them.");
+      return;
+    }
     if (action && action.kind !== "reassessment" && snapshot?.assessmentDraft && snapshot.assessmentReview) {
       const offer = snapshot.assessmentReview.guidedTests.find((candidate) =>
         action.protocolIds.includes(candidate.protocolId) && candidate.availability === "available");
@@ -553,13 +568,14 @@ const VNextAthleteApplication = ({
     }
     const started = await runtime.startAssessment({
       ...refreshInput(),
-      ...(action ? { mode: action.mode } : { mode: "targeted-reconfirmation" as const }),
+      ...(restart && current.assessmentDraft && !restartForRestrictions ? { mode: current.assessmentDraft.mode } : action ? { mode: action.mode } : { mode: "targeted-reconfirmation" as const }),
     });
     setSnapshot(started.snapshot);
     setAssessment(started.assessment);
+    setRestartSetupOpen(false);
     setMessage(action?.mode === "new-placement"
-      ? "Placement restarted with current context."
-      : "Only the relevant current starting points will be checked.");
+      ? "Let’s find your starting point."
+      : "We’ll check the areas that need an update.");
   });
 
   const answerAssessment = (answer: AssessmentAnswerValue): void => {
@@ -576,7 +592,7 @@ const VNextAthleteApplication = ({
     runCommand(async () => {
       const updated = await runtime.backAssessment({ draft: assessment.draft });
       setAssessment(updated);
-      setMessage("Previous answer reopened. Later branch answers were safely removed from the draft only.");
+      setMessage("Your previous answer is ready to review. Changing it may change the questions that follow.");
     });
   };
 
@@ -590,8 +606,8 @@ const VNextAthleteApplication = ({
       setSnapshot(committed.snapshot);
       setAssessment(undefined);
       setMessage(committed.clearedRestrictions > 0
-        ? "Placement saved and current restriction feedback cleared. Achievement history remains intact; reconfirmation rules still apply."
-        : "Placement saved as provisional evidence. Achievements still require the approved confirmation policy.");
+        ? "Starting points saved and restrictions updated. Your achievements are kept; some skills may need a fresh check."
+        : "Starting points saved. Guided checks and qualifying training will confirm your skills.");
     });
   };
 
@@ -1032,11 +1048,29 @@ const VNextAthleteApplication = ({
     return <GuidedTestRunner offer={guidedOffer} bundle={bundleFor((guidedRecovery?.draft ?? snapshot.assessmentDraft)?.catalogueVersion ?? vNextDefinitionBundle.catalogueVersion)} busy={busy} error={error} retryingExactObservation={Boolean(guidedRecovery)} onClose={() => setGuidedOffer(undefined)} onCommit={commitGuidedTest} />;
   }
 
+  if (restartSetupOpen) {
+    return <main className="vnext-experience vnext-rc-overlay" aria-labelledby="vnext-restart-title">
+      <section className="vnext-rc-modal">
+        <h1 id="vnext-restart-title">{restartForRestrictions ? "Update your comfort and restrictions?" : "Start setup again?"}</h1>
+        <p>{restartForRestrictions ? "This starts a fresh comfort check and replaces your unfinished setup answers on this device." : "This replaces your unfinished setup answers on this device."} Saved workouts and achievements are kept.</p>
+        {error && <p className="vnext-rc-message is-error" role="alert">{error}</p>}
+        <div className="vnext-actions">
+          <button type="button" className="vnext-action" autoFocus disabled={busy} onClick={() => startAssessment(undefined, true)}>{restartForRestrictions ? "Start comfort check" : "Start setup again"}</button>
+          <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => setRestartSetupOpen(false)}>Keep my answers</button>
+        </div>
+      </section>
+    </main>;
+  }
+
   if (assessment) {
     const review = assessment.review ?? (isAssessmentAtReview(assessment.draft, bundleFor(assessment.draft.catalogueVersion))
       ? buildAssessmentReview(assessment.draft, bundleFor(assessment.draft.catalogueVersion), snapshot.state)
       : undefined);
-    return <AssessmentRunner draft={assessment.draft} step={assessment.step} bundle={bundleFor(assessment.draft.catalogueVersion)} review={review} busy={busy} onAnswer={answerAssessment} onBack={backAssessment} onCommit={commitAssessment} onClose={() => setAssessment(undefined)} onGuidedTestRequested={openGuidedTestFromReview} />;
+    return <AssessmentRunner draft={assessment.draft} step={assessment.step} bundle={bundleFor(assessment.draft.catalogueVersion)} review={review} busy={busy} error={error} onAnswer={answerAssessment} onBack={backAssessment} onCommit={commitAssessment} onClose={() => runCommand(async () => {
+      setSnapshot(await runtime.refresh(refreshInput()));
+      setAssessment(undefined);
+      setMessage("Your answers are saved on this device. Resume setup whenever you’re ready.");
+    })} onGuidedTestRequested={openGuidedTestFromReview} />;
   }
 
   const customPreview = workoutRecovery?.stage === "preview" && workoutRecovery.origin === "custom";
@@ -1094,8 +1128,17 @@ const VNextAthleteApplication = ({
       {(message || error) && <p className={`vnext-rc-message${error ? " is-error" : ""}`} role={error ? "alert" : "status"}>{error ?? message}{pendingPrepared && error ? " The exact prepared record is retained for retry." : ""}</p>}
       {pendingPrepared && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={retryPreparedCompletion}>Retry the same Session Record</button>}
       {guidedRecovery && !guidedOffer && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={() => commitExactGuidedRecovery(guidedRecovery)}>Retry the same guided observation</button>}
+      {!workflowLocked && snapshot.assessmentDraft?.status === "in-progress" && (
+        <section className="vnext-panel vnext-rc-saved-setup" aria-label="Saved setup">
+          <strong>Your starting-point check is saved</strong>
+          <p>Continue when you’re ready. Your saved answers will be there.</p>
+          <div className="vnext-actions">
+            <button type="button" className="vnext-action" disabled={busy} onClick={() => startAssessment(snapshot.presentations.assessment.actions.find((action) => action.kind === "reassessment"))}>Resume setup</button>
+            <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => { setRestartForRestrictions(false); setRestartSetupOpen(true); }}>Start over</button>
+          </div>
+        </section>
+      )}
       <VNextExperience
-        key={snapshot.intent.updatedAt}
         progress={snapshot.presentations.progress}
         skillDetails={snapshot.presentations.skillDetails}
         today={todayPresentation}
@@ -1120,7 +1163,20 @@ const VNextAthleteApplication = ({
         }) : undefined}
         onCustomSessionRequested={!workflowLocked && !busy ? () => setCustomOpen(true) : undefined}
         onDemandChange={!workflowLocked && !busy ? (demand) => runCommand(async () => { const updated = await runtime.selectDailyDemand({ ...refreshInput(), sessionDemand: demand }); setWorkoutSelections({}); setSnapshot(updated); setMessage(`${demand === "technique" ? "Easier / Technique" : demand === "challenge" ? "Challenge" : "Standard"} changes today’s dose only; the safe frontier was preserved.`); }) : undefined}
-        onGoalSelectionChange={!workflowLocked && !busy ? (selection) => runCommand(async () => { const updated = await runtime.updateGoals({ ...refreshInput(), selection }); setWorkoutSelections({}); setSnapshot(updated); setMessage("Goals saved as Athlete Intent. No skill was manually unlocked."); }) : undefined}
+        onGoalSelectionChange={!workflowLocked && !busy ? (selection) => new Promise<void>((resolve, reject) => {
+          runCommand(async () => {
+            try {
+              const updated = await runtime.updateGoals({ ...refreshInput(), selection });
+              setWorkoutSelections({});
+              setSnapshot(updated);
+              setMessage("Goals saved. Your next workout will use these priorities.");
+              resolve();
+            } catch (reason) {
+              reject(reason);
+              throw reason;
+            }
+          });
+        }) : undefined}
         onAssessmentRequested={!workflowLocked && !busy ? startAssessment : undefined}
         onStartWorkout={!busy && plan && ((workoutRecovery?.stage === "active" || workoutRecovery?.stage === "preview") || (!workoutRecovery && snapshot.generated.ok && !mediaBlocked)) ? startOrResumeWorkout : undefined}
         onDiscardWorkout={!busy && (workoutRecovery?.stage === "preview" || workoutRecovery?.stage === "active") ? discardWorkout : undefined}

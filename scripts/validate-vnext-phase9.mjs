@@ -54,6 +54,7 @@ const definitions = loadTypeScriptModule("app/vnext/definitions/index.ts");
 const persistence = loadTypeScriptModule("app/vnext/persistence/index.ts");
 const planning = loadTypeScriptModule("app/vnext/planning/index.ts");
 const projection = loadTypeScriptModule("app/vnext/projection/index.ts");
+const assessmentModule = loadTypeScriptModule("app/vnext/assessment/index.ts");
 const legacyMigration = loadTypeScriptModule("app/vnext/persistence/legacyMigration.ts");
 const entry = loadTypeScriptModule("app/vnext/releaseCandidate/entry.ts");
 const media = loadTypeScriptModule("app/vnext/releaseCandidate/mediaRelease.ts");
@@ -210,6 +211,157 @@ const completeAssessment = async (label, scenario) => {
   });
   return { store, athleteId, runtime, committed };
 };
+
+// Progress goal edits must remain compatible with a paused local setup.
+const goalEditStore = makeStore("paused-goal-edit");
+const goalEditAthlete = athlete("paused-goal-edit");
+const goalEditRuntime = runtimeModule.createVNextReleaseCandidateRuntime({ store: goalEditStore });
+const goalEditInitial = await goalEditRuntime.bootstrap({ athleteId: goalEditAthlete, asOf: instant(0), initialEquipment: equipment });
+await goalEditStore.putAthleteIntent({ ...goalEditInitial.snapshot.intent, updatedAt: instant(1), goals: [
+  { graphId: definitions.graphIds.planche, priority: "primary" },
+  { graphId: definitions.graphIds.lSitVSit, priority: "interest", targetNodeId: "full-l-sit" },
+  { graphId: definitions.graphIds.pressToHandstand, priority: "interest" },
+] });
+const goalEditStarted = await goalEditRuntime.startAssessment({
+  athleteId: goalEditAthlete, createdAt: instant(0), asOf: instant(0),
+  mode: "new-placement", initialEquipment: equipment, draftId: "paused-goal-edit",
+});
+let goalEditDraft = goalEditStarted.assessment;
+const oldGoalScenario = { goals: [definitions.graphIds.planche], experience: "new", anchor: "not-yet", inversion: "none" };
+for (let index = 1; index <= 5; index += 1) {
+  goalEditDraft = await goalEditRuntime.answerAssessment({ draft: goalEditDraft.draft, answer: answerFor(goalEditDraft.step, oldGoalScenario), answeredAt: instant(index) });
+}
+const contextBeforeGoalEdit = canonical(goalEditDraft.draft.answers.slice(0, 3));
+const editedGoalSelection = { goals: [
+  { graphId: definitions.graphIds.handstandBalance, priority: "primary" },
+  { graphId: definitions.graphIds.lSitVSit, priority: "secondary" },
+  { graphId: definitions.graphIds.parallettePushing, priority: "secondary" },
+], emphasis: { primaryGraphId: definitions.graphIds.handstandBalance, secondaryGraphId: definitions.graphIds.lSitVSit } };
+const savedGoals = await goalEditRuntime.updateGoals({ athleteId: goalEditAthlete, selection: editedGoalSelection, updatedAt: instant(6), asOf: instant(6) });
+let resumedGoalDraft = await goalEditStore.readAssessmentDraft(goalEditAthlete);
+assert(canonical(resumedGoalDraft.intentSeed.goals) === canonical(savedGoals.intent.goals),
+  "Progress goals did not update the paused setup seed");
+assert(canonical(resumedGoalDraft.answers.slice(0, 3)) === contextBeforeGoalEdit,
+  "Progress goal edit removed previously answered safety or context");
+assert(resumedGoalDraft.answers.at(-1).value.kind === "goals"
+  && canonical(resumedGoalDraft.answers.at(-1).value.graphIds) === canonical(editedGoalSelection.goals.map((goal) => goal.graphId))
+  && resumedGoalDraft.answers.length === 4 && resumedGoalDraft.revisitAnswers.length === 0,
+  "Progress goal edit retained an obsolete downstream setup route");
+let resumedStep = assessmentModule.nextAssessmentStep(resumedGoalDraft, bundle);
+for (let minute = 7; resumedStep.kind !== "review" && minute < 45; minute += 1) {
+  const updated = await goalEditRuntime.answerAssessment({ draft: resumedGoalDraft, answer: answerFor(resumedStep, { ...oldGoalScenario, goals: editedGoalSelection.goals.map((goal) => goal.graphId) }), answeredAt: instant(minute) });
+  resumedGoalDraft = updated.draft;
+  resumedStep = updated.step;
+}
+const goalEditCommitted = await goalEditRuntime.commitAssessment({ athleteId: goalEditAthlete, draft: resumedGoalDraft, asOf: instant(50) });
+assert(canonical(goalEditCommitted.snapshot.intent.goals) === canonical(savedGoals.intent.goals)
+  && canonical(goalEditCommitted.snapshot.intent.emphasisOverride) === canonical(savedGoals.intent.emphasisOverride),
+  "Completing paused setup overwrote goals, targets, interests or temporary focus saved in Progress");
+
+// Targeted checks without a goal answer retain their targets and all context.
+const targetedGoalStarted = await goalEditRuntime.startAssessment({ athleteId: goalEditAthlete, mode: "targeted-reconfirmation", draftId: "targeted-goal-edit", createdAt: instant(51), asOf: instant(51) });
+const targetedGoalAnswered = await goalEditRuntime.answerAssessment({ draft: targetedGoalStarted.assessment.draft, answer: { kind: "safety", severity: "none" }, answeredAt: instant(52) });
+const nextGoalSelection = { goals: [{ graphId: definitions.graphIds.parallettePushing, priority: "primary" }] };
+const targetedGoalSaved = await goalEditRuntime.updateGoals({ athleteId: goalEditAthlete, selection: nextGoalSelection, updatedAt: instant(53), asOf: instant(53) });
+const targetedGoalDraft = await goalEditStore.readAssessmentDraft(goalEditAthlete);
+assert(canonical(targetedGoalDraft.answers) === canonical(targetedGoalAnswered.draft.answers)
+  && canonical(targetedGoalDraft.targetedProtocolIds) === canonical(targetedGoalAnswered.draft.targetedProtocolIds)
+  && canonical(targetedGoalDraft.intentSeed.goals) === canonical(targetedGoalSaved.intent.goals)
+  && targetedGoalDraft.mode === "targeted-reconfirmation"
+  && targetedGoalDraft.intentSeed.emphasisOverride === undefined,
+  "Goal edit changed targeted check context/targets or kept its stale seed/focus");
+
+// Separate local writes deliberately update the draft before saved goals.
+const beforeGoalFailure = await goalEditStore.readProjectionSources(goalEditAthlete);
+let failGoalWrite = "draft";
+const failureStore = new Proxy(goalEditStore, { get(target, property) {
+  if (property === "saveAssessmentDraft") return async (...args) => {
+    if (failGoalWrite === "draft") throw new Error("fixture-draft-write-failed");
+    return target.saveAssessmentDraft(...args);
+  };
+  if (property === "putAthleteIntent") return async (...args) => {
+    if (failGoalWrite === "intent") throw new Error("fixture-intent-write-failed");
+    return target.putAthleteIntent(...args);
+  };
+  const value = target[property];
+  return typeof value === "function" ? value.bind(target) : value;
+} });
+const goalFailureRuntime = runtimeModule.createVNextReleaseCandidateRuntime({ store: failureStore });
+const retryGoalSelection = { goals: [{ graphId: definitions.graphIds.lSitVSit, priority: "primary" }] };
+await assertRejects(() => goalFailureRuntime.updateGoals({ athleteId: goalEditAthlete, selection: retryGoalSelection, updatedAt: instant(54), asOf: instant(54) }), /fixture-draft-write-failed/u,
+  "Goal edit did not report a failed draft write");
+assert(canonical((await goalEditStore.readProjectionSources(goalEditAthlete)).intent) === canonical(beforeGoalFailure.intent),
+  "Goals changed before the paused draft was safely updated");
+failGoalWrite = "intent";
+await assertRejects(() => goalFailureRuntime.updateGoals({ athleteId: goalEditAthlete, selection: retryGoalSelection, updatedAt: instant(54), asOf: instant(54) }), /fixture-intent-write-failed/u,
+  "Goal edit did not report a failed intent write");
+assert(canonical((await goalEditStore.readAssessmentDraft(goalEditAthlete)).intentSeed.goals.filter((goal) => goal.priority !== "interest")) === canonical(retryGoalSelection.goals)
+  && canonical((await goalEditStore.readProjectionSources(goalEditAthlete)).intent) === canonical(beforeGoalFailure.intent),
+  "Interrupted goal edit did not preserve a coherent retry boundary");
+failGoalWrite = "none";
+const retriedGoals = await goalFailureRuntime.updateGoals({ athleteId: goalEditAthlete, selection: retryGoalSelection, updatedAt: instant(54), asOf: instant(54) });
+assert(canonical(retriedGoals.intent.goals.filter((goal) => goal.priority !== "interest")) === canonical(retryGoalSelection.goals),
+  "Retry after a partial goal edit did not save the requested goals");
+goalEditStore.close();
+
+// Every goal editable in Progress must remain representable when setup resumes.
+const goalPresentationModule = loadTypeScriptModule("app/vnext/presentation/goals.ts");
+const editableGraphs = goalPresentationModule.buildGoalControls(bundle, savedGoals.intent).options.map((option) => option.graphId).sort();
+const setupGraphs = assessmentModule.vNextAssessmentPolicy.goalOptions.map((option) => option.graphId).sort();
+assert(canonical(setupGraphs) === canonical(editableGraphs),
+  "Setup cannot represent every main/supporting goal editable in Progress");
+const transitionStore = makeStore("transition-goal-edit");
+const transitionAthlete = athlete("transition-goal-edit");
+const transitionRuntime = runtimeModule.createVNextReleaseCandidateRuntime({ store: transitionStore });
+const transitionStarted = await transitionRuntime.startAssessment({ athleteId: transitionAthlete, draftId: "transition-goal-edit", mode: "new-placement", createdAt: instant(0), asOf: instant(0), initialEquipment: equipment });
+let transitionState = transitionStarted.assessment;
+for (let minute = 1; minute <= 5; minute += 1) {
+  transitionState = await transitionRuntime.answerAssessment({ draft: transitionState.draft, answer: answerFor(transitionState.step, oldGoalScenario), answeredAt: instant(minute) });
+}
+await transitionRuntime.updateGoals({ athleteId: transitionAthlete, selection: { goals: [{ graphId: definitions.graphIds.transitions, priority: "primary" }] }, updatedAt: instant(6), asOf: instant(6) });
+transitionState = await transitionRuntime.backAssessment({ draft: await transitionStore.readAssessmentDraft(transitionAthlete), updatedAt: instant(7) });
+assert(transitionState.step.kind === "goals"
+  && transitionState.step.options.some((option) => option.graphId === definitions.graphIds.transitions)
+  && canonical(transitionState.draft.revisitAnswers[0].value.graphIds) === canonical([definitions.graphIds.transitions]),
+  "Back could not restore the Transitions goal chosen in Progress");
+transitionState = await transitionRuntime.answerAssessment({ draft: transitionState.draft, answer: transitionState.draft.revisitAnswers[0].value, answeredAt: instant(8) });
+for (let minute = 9; transitionState.step.kind !== "review" && minute < 40; minute += 1) {
+  transitionState = await transitionRuntime.answerAssessment({ draft: transitionState.draft, answer: answerFor(transitionState.step, { ...oldGoalScenario, goals: [definitions.graphIds.transitions] }), answeredAt: instant(minute) });
+}
+const commonAnchorIds = new Set(assessmentModule.commonPlacementAnchors.map((anchor) => anchor.id));
+assert(transitionState.step.kind === "review"
+  && transitionState.draft.answers.filter((answer) => answer.value.kind === "anchor").every((answer) => commonAnchorIds.has(answer.stepId)),
+  "Transitions setup introduced an unauthorised goal-specific placement route");
+const transitionCommit = await transitionRuntime.commitAssessment({ athleteId: transitionAthlete, draft: transitionState.draft, asOf: instant(45) });
+assert(transitionCommit.snapshot.intent.goals[0]?.graphId === definitions.graphIds.transitions
+  && transitionCommit.snapshot.intent.goals[0]?.priority === "primary"
+  && !transitionCommit.snapshot.sources.evidenceEvents.some((event) => event.type === "performance_observed" && event.subject.kind === "milestone" && event.subject.milestone.graphId === definitions.graphIds.transitions),
+  "Reconfirmed Transitions goal was lost or awarded transition evidence from common foundations");
+transitionStore.close();
+
+// A release upgrade must replay an old partially persisted commit unchanged.
+const oldPartialStore = makeStore("old-partial-commit");
+const oldPartialAthlete = athlete("old-partial-commit");
+let oldPartialDraft = assessmentModule.createAssessmentDraft({ id: "old-partial-commit", athleteId: oldPartialAthlete, createdAt: instant(0), bundle, initialEquipment: equipment });
+const oldPartialScenario = { goals: [definitions.graphIds.planche, definitions.graphIds.lSitVSit, definitions.graphIds.handstandBalance], experience: "new", anchor: "not-yet", inversion: "none" };
+for (let minute = 1; minute < 40; minute += 1) {
+  const step = assessmentModule.nextAssessmentStep(oldPartialDraft, bundle);
+  if (step.kind === "review") break;
+  oldPartialDraft = assessmentModule.answerAssessmentStep(oldPartialDraft, answerFor(step, oldPartialScenario), instant(minute), bundle);
+}
+const { goalSelectionVersion: _currentMapping, ...legacyPendingDraft } = oldPartialDraft;
+const legacyIntent = assessmentModule.buildAssessmentIntent({ ...legacyPendingDraft, status: "committed", committedAt: legacyPendingDraft.updatedAt });
+await oldPartialStore.saveAssessmentDraft(legacyPendingDraft);
+await oldPartialStore.putAthleteIntent(legacyIntent);
+const legacyEvents = await assessmentModule.buildAssessmentEvidence(legacyPendingDraft, bundle);
+await oldPartialStore.appendEvidenceEvent(legacyEvents[0]);
+await assessmentModule.commitAssessment(oldPartialStore, legacyPendingDraft, bundle);
+const oldRetrySources = await oldPartialStore.readProjectionSources(oldPartialAthlete);
+assert(canonical(oldRetrySources.intent) === canonical(legacyIntent)
+  && oldRetrySources.intent.goals[2].priority === "interest"
+  && oldRetrySources.evidenceEvents.length === legacyEvents.length,
+  "Retrying an old partial setup commit changed native intent or duplicated observations");
+oldPartialStore.close();
 
 // 2. Fresh coordinator path: placement -> projection -> plan -> exactly one
 // immutable Session Record -> deterministic reprojection.
