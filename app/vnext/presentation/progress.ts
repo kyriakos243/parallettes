@@ -1,5 +1,6 @@
 import type {
   BenchmarkSubject,
+  BenchmarkProtocol,
   CapacityFacetRef,
   DefinitionBundle,
   DerivedAthleteState,
@@ -28,6 +29,9 @@ import {
   type SkillDetailPresentation,
   type SkillFamilySummaryPresentation,
   type TargetPresentation,
+  type RoadmapBenchmark,
+  type RoadmapNode,
+  type SkillRoadmapPresentation,
 } from "./contracts";
 
 const familyOrder = [
@@ -316,11 +320,15 @@ const nextTargetFor = (
 ): TargetPresentation | undefined => {
   const nodeOrder = new Map(graph.nodes.map((node, index) => [node.id, index]));
   const emphasis = emphasisForGraph(input, graph.id)?.focus;
+  const stillNeedsWork = (milestone: MilestoneRef): boolean => {
+    const finding = stateFor(input.state, milestone);
+    return !finding || !strongerEvidenceSatisfies(finding, input.state);
+  };
   const eligible = input.state.eligibleTargets
-    .filter((candidate) => candidate.milestone.graphId === graph.id)
+    .filter((candidate) => candidate.milestone.graphId === graph.id && stillNeedsWork(candidate.milestone))
     .map((candidate) => candidate.milestone);
   const working = input.state.workingNodes
-    .filter((candidate) => candidate.milestone.graphId === graph.id)
+    .filter((candidate) => candidate.milestone.graphId === graph.id && stillNeedsWork(candidate.milestone))
     .map((candidate) => candidate.milestone);
   const actionable = [...eligible, ...working];
   const preferred = emphasis?.targetMilestone
@@ -334,6 +342,7 @@ const nextTargetFor = (
     const finding = stateFor(input.state, { graphId: graph.id, nodeId: node.id });
     return node.implementationStatus === "available"
       && node.programmingBoundary === "automatic"
+      && !(finding && strongerEvidenceSatisfies(finding, input.state))
       && !(finding?.lifecycle === "established" && finding.confidence === "current");
   });
   const milestone = preferred ?? (fallback ? { graphId: graph.id, nodeId: fallback.id } : undefined);
@@ -546,6 +555,133 @@ const assertProgressInput = (input: ProgressPresentationInput): void => {
   }
 };
 
+const roadmapBenchmark = (protocol: BenchmarkProtocol): RoadmapBenchmark => {
+  const metric = protocol.metric;
+  const target = metric.kind === "duration-seconds" ? `Hold for at least ${metric.minimum} seconds`
+    : metric.kind === "repetitions" ? `Complete at least ${metric.minimum} clean repetitions`
+      : metric.kind === "successful-attempts"
+        ? `${metric.minimumSuccessful} successful attempts within ${metric.maximumAttempts} attempts`
+        : metric.description;
+  const { qualifyingObservations, minimumDistinctSessions } = protocol.confirmation;
+  return {
+    label: protocol.label,
+    target,
+    conditions: `Equipment: ${protocol.conditions.equipment.join(", ")}. ${protocol.conditions.assistance} ${protocol.conditions.range}`,
+    confirmation: `${qualifyingObservations} qualifying ${qualifyingObservations === 1 ? "result" : "results"} across at least ${minimumDistinctSessions} ${minimumDistinctSessions === 1 ? "session" : "separate sessions"}, recorded through supported training or a guided check.`,
+    quality: protocol.qualityCriteria,
+    safety: protocol.safetyCriteria,
+  };
+};
+
+/** A read-only map of the actual definition graph, never a second progression policy. */
+const skillRoadmap = (
+  graph: DevelopmentGraph,
+  summary: SkillFamilySummaryPresentation,
+  input: ProgressPresentationInput,
+): SkillRoadmapPresentation => {
+  const nodes: RoadmapNode[] = graph.nodes.map((node) => {
+    const milestone = { graphId: graph.id, nodeId: node.id };
+    const finding = stateFor(input.state, milestone);
+    const covered = Boolean(finding && strongerEvidenceSatisfies(finding, input.state));
+    const evidence: RoadmapNode["evidence"] = finding?.lifecycle === "established" ? "confirmed"
+      : finding?.lifecycle === "demonstrated" ? "demonstrated"
+        : covered ? "covered"
+          : finding?.lifecycle === "developing" ? "developing"
+            : finding?.lifecycle === "estimated" ? "estimated" : "unknown";
+    const labels: Record<RoadmapNode["evidence"], string> = {
+      confirmed: "Confirmed", demonstrated: "Demonstrated", developing: "Developing",
+      estimated: "Starting estimate", covered: "Covered by a higher skill", unknown: "Not demonstrated yet",
+    };
+    const messages: Record<RoadmapNode["evidence"], string> = {
+      confirmed: "You have met this milestone’s confirmation requirements. Your achievement stays in your history.",
+      demonstrated: "You have demonstrated this skill. More qualifying evidence is needed before it unlocks further progression.",
+      developing: "You have begun working on this skill. Practice alone does not yet confirm the milestone.",
+      estimated: `${sourceKindFor(finding?.supportingObservationRefs ?? [], input.provenance)}. A qualifying result is still needed to demonstrate this skill.`,
+      covered: "Current evidence of a higher skill satisfies this requirement. This earlier skill is not counted as a separate achievement.",
+      unknown: "There is no recorded demonstration of this milestone yet.",
+    };
+    const requirements = prerequisitesFor(node, input.bundle, input.state).map((item) => {
+      const subject = subjectForRef(item.ref, input.bundle);
+      const linkedGraph = subject?.kind === "milestone"
+        ? input.bundle.graphs.find((candidate) => candidate.id === subject.milestone.graphId) : undefined;
+      const prerequisiteFinding = subject?.kind === "milestone" ? stateFor(input.state, subject.milestone) : undefined;
+      const inferred = prerequisiteFinding && strongerEvidenceSatisfies(prerequisiteFinding, input.state)
+        && !(prerequisiteFinding.lifecycle === "established" && prerequisiteFinding.confidence === "current");
+      const capacityProtocols = subject?.kind === "capacity-facet"
+        ? input.bundle.capacities.find((capacity) => capacity.id === subject.capacity.capacityId)
+          ?.facets.find((facet) => facet.id === subject.capacity.facetId)?.benchmarkProtocolIds ?? [] : [];
+      return {
+        ...item,
+        ...(inferred ? { message: "Satisfied by current evidence of a higher skill; your recorded achievements are preserved." } : {}),
+        ...(subject?.kind === "milestone" ? { milestone: subject.milestone } : {}),
+        ...(linkedGraph ? { familyLabel: presentationFamilyLabel(linkedGraph) } : {}),
+        ...(capacityProtocols.length ? { benchmarks: capacityProtocols.flatMap((id) => {
+          const protocol = input.bundle.benchmarkProtocols.find((candidate) => candidate.id === id);
+          return protocol ? [roadmapBenchmark(protocol)] : [];
+        }) } : {}),
+      };
+    });
+    const evaluation = targetTrainability({ milestone, label: node.label, state: "developing", message: "" }, input);
+    const specialist = node.programmingBoundary === "specialist";
+    return {
+      id: node.id, label: node.label, description: node.description,
+      branch: graph.branches.find((branch) => branch.id === node.branchId)?.label ?? graph.label,
+      tier: node.progressionTier === "foundation" ? "Foundation"
+        : node.progressionTier === "intermediate" ? "Building skill"
+          : node.progressionTier === "advanced" ? "Advanced" : "Optional specialist",
+      specialist, branchGoal: false, evidence, evidenceLabel: labels[evidence],
+      evidenceMessage: covered && (evidence === "confirmed" || evidence === "demonstrated")
+        ? "Your demonstration stays in your history. Current evidence of a higher skill already satisfies this requirement for progression."
+        : messages[evidence],
+      recheck: Boolean(!covered && finding && (evidence === "confirmed" || evidence === "demonstrated") && finding.confidence !== "current"),
+      current: !covered && input.state.workingNodes.some((working) => milestoneKey(working.milestone) === milestoneKey(milestone)),
+      next: summary.nextTarget?.milestone.nodeId === node.id,
+      requirements,
+      benchmarks: node.benchmarkProtocolIds.flatMap((id) => {
+        const protocol = input.bundle.benchmarkProtocols.find((candidate) => candidate.id === id);
+        return protocol ? [roadmapBenchmark(protocol)] : [];
+      }),
+      trainingNote: node.implementationStatus !== "available" ? "Training content for this destination is not available yet."
+        : specialist && !input.intent.preferences.specialistOptIn
+          ? "Optional specialist destination. Requires a separate opt-in and all supporting skills; viewing it does not add it to your workouts."
+          : evaluation === "block" ? "This movement is not available for training now. Today’s plan uses your current requirements and restrictions."
+            : evaluation === "modify" ? "Today’s training needs an adjusted variation, range or dose."
+              : "Today’s plan checks current skills, equipment and restrictions before offering this movement.",
+    };
+  });
+  const edges: SkillRoadmapPresentation["edges"][number][] = nodes.flatMap((node) => node.requirements.flatMap((requirement) =>
+    requirement.milestone?.graphId === graph.id
+      ? [{ from: requirement.milestone.nodeId, to: node.id, requirement: requirement.requirement }] : []));
+  const depth = new Map<RoadmapNode["id"], number>();
+  const visiting = new Set<RoadmapNode["id"]>();
+  const nodeDepth = (id: RoadmapNode["id"]): number => {
+    const known = depth.get(id);
+    if (known !== undefined) return known;
+    if (visiting.has(id)) throw new TypeError("Skill roadmap requires an acyclic definition graph");
+    visiting.add(id);
+    const parents = edges.filter((edge) => edge.to === id);
+    const value = parents.length ? Math.max(...parents.map((edge) => nodeDepth(edge.from))) + 1 : 0;
+    depth.set(id, value);
+    visiting.delete(id);
+    return value;
+  };
+  nodes.forEach((node) => nodeDepth(node.id));
+  const levels = Array.from({ length: Math.max(0, ...depth.values()) + 1 }, (_, index) =>
+    nodes.filter((node) => depth.get(node.id) === index).map((node) => node.id));
+  const priority = input.intent.goals.find((goal) => goal.graphId === graph.id)?.priority;
+  return {
+    graphId: graph.id, label: presentationFamilyLabel(graph),
+    ...(priority === "primary" || priority === "secondary" ? { priority } : {}),
+    nodes: nodes.map((node) => ({ ...node, branchGoal: node.tier === "Advanced" && !node.specialist && !edges.some((edge) =>
+      edge.from === node.id && !nodes.find((candidate) => candidate.id === edge.to)?.specialist) })),
+    edges, levels,
+    currentSummary: summary.demonstratedState.kind === "none" ? "Your starting point is still to be confirmed."
+      : `${summary.demonstratedState.kind === "provisional" ? "Starting estimate" : "Demonstrated"}: ${summary.demonstratedState.label}`,
+    nextSummary: summary.nextTarget?.label ?? "Maintain your confirmed skills",
+    availability: summary.availability,
+  };
+};
+
 export const buildProgressAndGoals = (
   input: ProgressPresentationInput,
 ): ProgressAndGoalsPresentation => {
@@ -555,6 +691,7 @@ export const buildProgressAndGoals = (
     title: "Progress & Goals",
     intro: "See what you have demonstrated, what you are developing and the safest useful step ahead.",
     families,
+    roadmaps: families.map((family) => skillRoadmap(graphFor(input.bundle, family.graphId), family, input)),
     authorityNotice: "Choose the goals that matter to you. Current evidence, prerequisites and restrictions decide which progression is safe today.",
     canManuallyClaimSkills: false,
     exposesInternalScores: false,

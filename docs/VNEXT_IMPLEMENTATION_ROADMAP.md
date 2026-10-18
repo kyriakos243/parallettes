@@ -432,3 +432,12 @@ The owner authorised this task and deployment after passing checks on 2026-10-18
 Full checks/type checking pass, with 31 actual runner/hook/controller scenarios covering drift, suspension, hide-before-render, boundary/queued-callback races, v1/v2/v3 recovery, native/mixed order, wake-lock rejection/release/late grants and one completion. The local browser preserves rest at 00:46 elapsed / 00:14 remaining across leave/back/reload, resumes explicitly, and saves one preparation-only Partial record. Portrait 402×874 and landscape 874×402 fit without overflow. On 2026-10-18 the owner reports all four iPhone checks pass: app switching, screen lock during work/rest, visible screen-awake behavior and Save & close/reopen/resume/completion with exactly one History entry. No unrelated task is authorised.
 
 **Release checkpoint:** Workflow 39070805835 deployed exact source `013f4946a7daae39d21f3c0e808fd8ef3c74b7ce`; all 23 live files, API health and test-account interruption/reload/resume/save/export checks pass. PR #27 records the delivered change. The owner accepted all four iPhone checks and explicitly approved merging PR #27 on 2026-10-18. No unrelated task is authorised.
+
+
+## Post-release task — goal skill roadmap
+
+**Status (2026-10-18):** The owner accepted the roadmap and authorised final checks and deployment once they pass. The candidate is on `codex/progress-skill-roadmap`, based on verified PR #27 main `1531c077e7e4e09ffce4eb992e51e58b56ca95d6`. Phase 11 remains closed.
+
+**Scope:** Progress shows primary/secondary goal trees, current/next markers, all existing milestone branches and exact prerequisite/confirmation details, including supporting capacities and navigable cross-family paths. Contract is canonical in Training Engine §6.8. The app retains current evidence, safety, specialist and workout authority; there are no new skill definitions, scores or schema changes.
+
+**Checks:** Full 103-node/edge/requirement selector validation, higher-evidence and alternative-route regressions, existing Phase 8 and Phase 10 UI safeguards, TypeScript, production build/distribution, and local phone-size interaction checks pass. Owner visual acceptance and deployment authority are recorded; final release checks precede deployment, followed by owner iPhone acceptance.
