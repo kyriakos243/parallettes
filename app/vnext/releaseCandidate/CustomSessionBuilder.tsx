@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   capacityIds,
   graphIds,
@@ -76,6 +76,11 @@ export const CustomSessionBuilder = ({
   const [focusIndex, setFocusIndex] = useState(Math.max(0, initialFocusIndex));
   const [equipment, setEquipment] = useState<readonly EquipmentId[]>(currentEquipment);
   const [demand, setDemand] = useState<SessionDemand>(defaultDemand);
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus({ preventScroll: true });
+    heading.current?.closest("section")?.scrollIntoView({ block: "start", behavior: "instant" });
+  }, []);
   const toggleEquipment = (id: EquipmentId) => setEquipment((current) =>
     current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
 
@@ -83,15 +88,15 @@ export const CustomSessionBuilder = ({
     <main className="vnext-experience vnext-rc-overlay" aria-labelledby="vnext-custom-title">
       <section className="vnext-rc-modal vnext-rc-custom">
         <header className="vnext-rc-modal-header">
-          <div><p className="vnext-kicker">Custom Session</p><h1 id="vnext-custom-title">Short, focused, still safely vNext</h1></div>
+          <div><p className="vnext-kicker">Custom session</p><h1 id="vnext-custom-title" ref={heading} tabIndex={-1}>Short workout</h1></div>
           <button type="button" className="vnext-action" data-kind="secondary" onClick={onClose}>Close</button>
         </header>
-        <p>Choose 5–20 minutes and a direction. If you have 25 minutes, use Today for the complete workout.</p>
+        <p>Choose your time and focus. If you have 25 minutes, use Today for the full workout.</p>
 
         <fieldset>
           <legend>Duration</legend>
           <div className="vnext-custom-choice-row">
-            {([5, 10, 15, 20] as const).map((value) => <button key={value} type="button" aria-pressed={minutes === value} onClick={() => setMinutes(value)}>{value} minutes</button>)}
+            {([5, 10, 15, 20] as const).map((value) => <button key={value} type="button" aria-pressed={minutes === value} onClick={() => setMinutes(value)}>{value} min</button>)}
           </div>
         </fieldset>
 
@@ -102,6 +107,8 @@ export const CustomSessionBuilder = ({
           </select>
         </label>
 
+        <details className="vnext-custom-settings">
+          <summary>Equipment &amp; effort<span>{equipmentOptions.filter((option) => equipment.includes(option.id)).map((option) => option.label).join(", ") || "Choose equipment"} · {demand === "technique" ? "Easier / Technique" : demand === "challenge" ? "Challenge" : "Standard"}</span></summary>
         <fieldset>
           <legend>Equipment available now</legend>
           <div className="vnext-custom-checks">
@@ -112,7 +119,7 @@ export const CustomSessionBuilder = ({
         </fieldset>
 
         <fieldset>
-          <legend>Today’s demand</legend>
+          <legend>How should it feel?</legend>
           <div className="vnext-custom-choice-row">
             {(["technique", "standard", "challenge"] as const).map((value) => (
               <button key={value} type="button" aria-pressed={demand === value} onClick={() => setDemand(value)}>
@@ -120,12 +127,13 @@ export const CustomSessionBuilder = ({
               </button>
             ))}
           </div>
-          <p className="vnext-help">Demand changes today’s workload only. It cannot unlock a progression or specialist destination.</p>
+          <p className="vnext-help">The exercises stay within your current abilities.</p>
         </fieldset>
 
-        <p className="vnext-authority">This uses the same current evidence, trainability, restrictions, recent exposure and owned movement guides as Today’s Workout. It does not use the legacy custom generator.</p>
+        </details>
+        {equipment.length === 0 && <p role="alert">Choose at least one available training space or piece of equipment.</p>}
         <button type="button" className="vnext-submit" disabled={busy || equipment.length === 0} onClick={() => onBuild({ minutes, focus: focusOptions[focusIndex]!, equipment, demand })}>
-          Build safe {minutes}-minute session
+          Preview {minutes}-minute workout
         </button>
       </section>
     </main>

@@ -15,15 +15,15 @@ const demandPresentation = (
 ): TodayWorkoutPresentation["demand"] => demand === "technique" ? {
   value: demand,
   label: "Easier / Technique",
-  message: "Prioritises assistance, control and clean practice at the same safe progression frontier.",
+  message: "More support and controlled practice at your current step.",
 } : demand === "challenge" ? {
   value: demand,
   label: "Challenge",
-  message: "Adds workload to work that is already available today; it never unlocks a harder skill.",
+  message: "More work at your current step, without unlocking harder skills.",
 } : {
   value: demand,
   label: "Standard",
-  message: "Uses the normal quality workload for today’s available work.",
+  message: "Your usual workload for today.",
 };
 
 const graphFor = (bundle: DefinitionBundle, graphId: EmphasisFocus["graphId"]): DevelopmentGraph | undefined =>
@@ -45,7 +45,7 @@ const focusReason = (
     return `A short quality check will update whether ${target ?? "this skill"} is ready for harder work today.`;
   }
   if (focus.kind === "prerequisite-development") {
-    return `${target ?? "This goal"} remains the destination; today develops the requirement that safely comes first.`;
+    return `Today builds the foundations you need for ${target ?? "this goal"}.`;
   }
   if (focus.kind === "maintenance" || role === "maintenance") {
     return `${target ?? "This skill"} gets a small quality dose so it stays available without competing with the primary goal.`;

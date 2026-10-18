@@ -1,0 +1,76 @@
+/* Daily browsing only; the accepted workout player and motion guides keep their styles. */
+.vnext-visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+.vnext-simple-shell { padding-top: 12px; }
+.vnext-simple-shell .vnext-header { padding: 4px 0 12px; gap: 12px; align-items: center; }
+.vnext-simple-shell .vnext-brand-lockup { margin: 0; }
+.vnext-simple-shell .vnext-view { gap: 14px; padding-top: 16px; }
+.vnext-simple-shell .vnext-today-hero {
+  grid-template-columns: minmax(0, 1fr) auto; gap: 12px;
+  padding: 20px; border-radius: 20px; box-shadow: none;
+}
+.vnext-simple-shell .vnext-today-hero::after { content: none; }
+.vnext-simple-shell .vnext-today-hero h2 { margin: 4px 0 0; font-size: clamp(25px, 4vw, 34px); line-height: 1.12; }
+.vnext-duration-badge { align-self: start; display: grid; gap: 4px; text-align: right; font-size: 17px; font-weight: 850; }
+.vnext-duration-badge span { color: #c2d4cf; font-size: 12px; font-weight: 500; }
+.vnext-simple-shell .vnext-focus-summary { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; }
+.vnext-simple-shell .vnext-primary-workout-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.vnext-simple-shell .vnext-primary-workout-actions > button { flex: 1 1 200px; margin: 0; }
+.vnext-simple-shell .vnext-demand { padding: 14px; }
+.vnext-simple-shell .vnext-demand fieldset { min-width: 0; }
+.vnext-simple-shell .vnext-demand legend { margin-bottom: 8px; }
+.vnext-simple-shell .vnext-demand .vnext-help { margin: 8px 0 0; }
+.vnext-simple-shell .vnext-demand-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.vnext-simple-shell .vnext-demand-options button { padding: 8px 6px; font-size: 13px; }
+.vnext-simple-shell .vnext-rc-saved-setup {
+  width: 100%; margin: 0; padding: 8px 12px; display: flex; flex-wrap: wrap;
+  justify-content: space-between; align-items: center; gap: 4px 12px;
+  background: #f3f7f4; border: 1px solid var(--vnext-line); border-radius: 12px;
+}
+.vnext-simple-shell .vnext-rc-saved-setup > span { font-size: 13px; color: var(--vnext-muted); }
+.vnext-simple-shell .vnext-rc-saved-setup .vnext-actions { margin: 0; gap: 4px; }
+.vnext-simple-shell .vnext-rc-saved-setup button { padding: 8px 10px; background: transparent; color: var(--vnext-forest); font-size: 13px; }
+.vnext-simple-shell .vnext-session-timeline { gap: 6px; }
+.vnext-simple-shell .vnext-session-timeline > div { min-width: 0; padding: 10px; grid-template-columns: minmax(0, 1fr); }
+.vnext-simple-shell .vnext-session-timeline strong { font-size: 12px; white-space: normal; overflow: visible; }
+.vnext-workout-explanation { border-bottom: 1px solid var(--vnext-line); padding-bottom: 4px; }
+.vnext-workout-explanation summary,
+.vnext-exercise-explanation summary { min-height: 44px; padding: 12px 0; cursor: pointer; color: var(--vnext-teal); font-size: 14px; font-weight: 750; }
+.vnext-workout-explanation p { color: var(--vnext-muted); font-size: 14px; line-height: 1.5; margin: 0 0 12px; }
+.vnext-exercise-explanation p { margin: 0 0 12px; }
+.vnext-simple-shell .vnext-plan-copy .vnext-plan-prescription { margin-bottom: 0; }
+.vnext-simple-shell .vnext-section-heading h2 { font-size: 26px; }
+.vnext-simple-app .vnext-rc-banner { padding-top: 4px; padding-bottom: 4px; gap: 4px 12px; }
+.vnext-simple-app .vnext-rc-banner > span { font-size: 12px; }
+.vnext-rc-custom { gap: 14px; }
+.vnext-rc-custom .vnext-rc-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.vnext-rc-custom select { font-size: 16px; }
+.vnext-rc-custom .vnext-custom-choice-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.vnext-custom-settings { border: 1px solid #dce5e0; border-radius: 12px; padding: 0 14px; }
+.vnext-custom-settings > summary { min-height: 44px; padding: 12px 0; font-weight: 800; cursor: pointer; }
+.vnext-custom-settings > summary span { display: block; margin-top: 4px; font-size: 13px; line-height: 1.5; font-weight: 500; color: #536963; }
+.vnext-custom-settings > fieldset { padding: 0 0 14px; }
+.vnext-custom-settings .vnext-custom-choice-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.vnext-custom-settings .vnext-custom-checks { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.vnext-custom-settings .vnext-custom-checks label { padding: 8px; font-size: 13px; }
+.vnext-custom-settings .vnext-custom-checks input { flex-shrink: 0; }
+.vnext-custom-settings .vnext-help { margin-bottom: 0; }
+@media (max-width: 760px) {
+  .vnext-simple-shell .vnext-header { grid-template-columns: 1fr; }
+  .vnext-simple-shell .vnext-nav { width: 100%; }
+  .vnext-simple-shell .vnext-nav button { flex: 1 1 auto; padding: 0 9px; }
+  .vnext-simple-shell .vnext-today-hero { padding: 16px; }
+  .vnext-simple-shell .vnext-session-timeline { display: flex; flex-wrap: wrap; }
+  .vnext-simple-shell .vnext-session-timeline > div { flex-basis: 70px; }
+  .vnext-simple-app .vnext-rc-banner > span { display: none; }
+  .vnext-simple-app .vnext-rc-banner-tools { width: 100%; justify-content: space-between; }
+  .vnext-simple-app .vnext-rc-banner details { width: auto; }
+  .vnext-simple-app .vnext-rc-banner details[open] > div { left: auto; right: 0; }
+}
+@media (max-width: 360px) {
+  .vnext-simple-shell .vnext-today-hero { grid-template-columns: minmax(0, 1fr); }
+  .vnext-duration-badge { text-align: left; }
+  .vnext-custom-settings .vnext-custom-checks { grid-template-columns: minmax(0, 1fr); }
+}

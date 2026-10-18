@@ -925,7 +925,7 @@ const uiSource = readFileSync(resolve(projectRoot, "app/vnext/ui/VNextExperience
 const appSource = readFileSync(resolve(projectRoot, "app/vnext/releaseCandidate/VNextReleaseCandidateApp.tsx"), "utf8");
 assert(uiSource.includes("Today’s focus")
   && uiSource.includes("Progress &amp; Goals")
-  && uiSource.includes("Every block has a reason")
+  && uiSource.includes("Why this exercise?")
   && uiSource.includes("Previously demonstrated in this family")
   && uiSource.includes("await onGoalSelectionChange(selection)")
   && appSource.includes("Goals saved. Your next workout will use these priorities."),
@@ -934,7 +934,7 @@ assert(!/(?:Set|Mark|Claim)\s+(?:skill|achievement)\s+(?:as\s+)?(?:complete|achi
   "User surface: a manual skill/achievement control is visible");
 assert(!/(?:readinessScore|capabilityScore|reasonCodes|projectionVersion|allOf|anyOf)/u.test(uiSource),
   "User surface: internal score/graph/projector machinery is rendered");
-assert(uiSource.includes('aria-label="vNext training sections"')
+assert(uiSource.includes('aria-label="Training sections"')
   && uiSource.includes('role="status" aria-live="polite"')
   && uiSource.includes("<fieldset>")
   && uiSource.includes("<legend>"),

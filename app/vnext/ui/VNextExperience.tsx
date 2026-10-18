@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { GraphId, PlanItemId, SessionDemand } from "../contracts";
 import { VNextMotionGuide } from "../media/VNextMotionGuide";
 import { SkillRoadmap } from "./SkillRoadmap";
@@ -56,6 +56,7 @@ export type VNextExperienceProps = Readonly<{
   restrictions: RestrictionPresentation;
   recentSessions: readonly VNextRecentSession[];
   completion?: WorkoutCompletionPresentation;
+  setupNotice?: ReactNode;
   workoutStartBlocker?: string;
   workoutOrigin?: "today" | "custom";
   workoutRecoveryStage?: "preview" | "active";
@@ -151,10 +152,19 @@ const RestrictionNotice = ({
   </section>
 ) : null;
 
+const previewPhaseLabel = (label: string): string => ({
+  Preparation: "Warm-up", "Preparation rounds": "Warm-up",
+  "Technical work": "Skill practice", "Primary development": "Main work",
+  "Supporting capacity": "Support", "Supporting work": "Support",
+  "Supporting rounds": "Support", "Secondary focus": "Support",
+  Maintenance: "Practice", Reset: "Cool-down",
+}[label] ?? label);
+
 const TodayView = ({
   today,
   restrictions,
   completion,
+  setupNotice,
   workoutStartBlocker,
   workoutOrigin,
   workoutRecoveryStage,
@@ -171,7 +181,7 @@ const TodayView = ({
   onRestrictionRequested,
   announce,
 }: Readonly<Pick<VNextExperienceProps,
-  "today" | "restrictions" | "completion" | "onDemandChange" | "onStartWorkout" | "busy"
+  "today" | "restrictions" | "completion" | "setupNotice" | "onDemandChange" | "onStartWorkout" | "busy"
   | "workoutSwapOptions" | "workoutSelections" | "onWorkoutSwap" | "onCustomSessionRequested"
   | "onDiscardWorkout" | "onEndRecoveredWorkout" | "onWorkoutReviewSubmitted" | "onRestrictionRequested" | "workoutStartBlocker"
   | "workoutOrigin" | "workoutRecoveryStage"> & {
@@ -210,6 +220,13 @@ const TodayView = ({
   const durationMinutes = today.durationLabel?.replace(/ minutes?$/, "") ?? "";
   const durationAdjective = durationMinutes ? `${durationMinutes}-minute` : "short";
   const customContext = workoutOrigin === "custom" && Boolean(workoutRecoveryStage || completion);
+  const phases = today.blocks.reduce<Array<{ key: string; label: string; minutes: number }>>((result, block) => {
+    const label = previewPhaseLabel(block.blockLabel);
+    const previous = result[result.length - 1];
+    if (previous?.label === label) previous.minutes = Math.round((previous.minutes + block.plannedMinutes) * 10) / 10;
+    else result.push({ key: block.planItemId, label, minutes: block.plannedMinutes });
+    return result;
+  }, []);
 
   const updateReview = (planItemId: PlanItemId, update: Partial<ReviewDraft>) => {
     setReviews((current) => {
@@ -396,28 +413,16 @@ const TodayView = ({
       {today.status === "ready" && today.focus ? (
         <>
           <section className="vnext-today-hero" aria-labelledby="vnext-today-heading" data-duration={durationMinutes}>
-            <div>
-              <p className="vnext-kicker">{customContext ? "Custom Session focus" : "Today’s focus"}</p>
+            <div className="vnext-focus-heading">
+              <p className="vnext-kicker">{customContext ? "Short workout" : "Today’s focus"}</p>
               <h2 id="vnext-today-heading">{today.focus.label}</h2>
-              <p>{today.reason}</p>
             </div>
-            <div className="vnext-today-meta">
-              <div><span>Main focus</span><strong>{today.primary?.familyLabel ?? "Purposeful practice"}</strong></div>
-              <div><span>Supporting focus</span><strong>{today.secondary?.familyLabel ?? "None today"}</strong></div>
-              <div><span>Session</span><strong>{today.durationLabel ?? "Safe shorter session"}</strong></div>
-              <div><span>Maintenance</span><strong>{today.maintenance.map((item) => item.familyLabel).join(", ") || "As needed"}</strong></div>
-            </div>
+            <div className="vnext-duration-badge">{today.durationLabel ?? "Short workout"}<span>including rest</span></div>
+            <p className="vnext-focus-summary">
+              <span>Main focus: <strong>{today.primary?.familyLabel ?? "Practice"}</strong></span>
+              {today.secondary && <span>Supporting focus: <strong>{today.secondary.familyLabel}</strong></span>}
+            </p>
           </section>
-
-          <div className="vnext-session-timeline" aria-label={customContext ? "Custom Session timeline" : "Today’s workout timeline"}>
-            {today.blocks.map((block, index) => (
-              <div key={block.planItemId} style={{ flexGrow: Math.max(1, block.plannedMinutes) }}>
-                <span>{index + 1}</span>
-                <strong>{block.blockLabel}</strong>
-                <small>{block.plannedMinutes} min</small>
-              </div>
-            ))}
-          </div>
 
           {!completion && <div className="vnext-primary-workout-actions" aria-label="Workout actions">
             <button
@@ -430,7 +435,7 @@ const TodayView = ({
                   ? `Your exact in-progress ${workoutOrigin === "custom" ? "Custom Session" : "workout"} is ready to resume.`
                   : workoutRecoveryStage === "preview"
                     ? `Your ${workoutOrigin === "custom" ? "Custom Session" : "workout"} preview is ready.`
-                    : "Today’s vNext workout is ready to review and start.");
+                    : "Your workout is ready to review and start.");
               }}
             >
               {workoutRecoveryStage === "active"
@@ -455,7 +460,7 @@ const TodayView = ({
             )}
             {onCustomSessionRequested && !workoutRecoveryStage && (
               <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onCustomSessionRequested}>
-                Build a 5–20 minute session
+                Short workout · 5–20 min
               </button>
             )}
           </div>}
@@ -472,7 +477,7 @@ const TodayView = ({
                     disabled={busy || !onDemandChange}
                     onClick={() => {
                       onDemandChange?.(option.value);
-                      announce(`${option.label} selected. The safe skill frontier stays the same.`);
+                      announce(`${option.label} selected. Your current skill level stays the same.`);
                     }}
                   >
                     {option.label}
@@ -483,10 +488,27 @@ const TodayView = ({
             </fieldset>
           </section>}
 
+          {!completion && setupNotice}
+
+          <div className="vnext-session-timeline" aria-label={customContext ? "Short workout phases" : "Today’s workout phases"}>
+            {phases.map((phase) => (
+              <div key={phase.key} style={{ flexGrow: Math.max(1, phase.minutes) }}>
+                <strong>{phase.label}</strong>
+                <small>{phase.minutes} min</small>
+              </div>
+            ))}
+          </div>
+          <details className="vnext-workout-explanation">
+            <summary>Why this workout?</summary>
+            <p>{today.reason}</p>
+            {today.maintenance.length > 0 && <p>Maintenance: {today.maintenance.map((item) => item.familyLabel).join(", ")}</p>}
+            <p>{today.authorityNotice}</p>
+          </details>
+
           <section aria-labelledby="vnext-plan-heading">
             <div className="vnext-section-heading">
               <p className="vnext-kicker">Your {durationAdjective} plan</p>
-              <h2 id="vnext-plan-heading">Every block has a reason</h2>
+              <h2 id="vnext-plan-heading">Your exercises</h2>
             </div>
             <div className="vnext-plan-grid">
               {today.blocks.map((block, index) => {
@@ -507,10 +529,13 @@ const TodayView = ({
                       {mediaReference ? <VNextMotionGuide preset={mediaReference} /> : <span>Guide unavailable</span>}
                     </div>
                     <div className="vnext-plan-copy">
-                      <p className="vnext-kicker">{block.blockLabel}</p>
+                      <p className="vnext-kicker">{previewPhaseLabel(block.blockLabel)}{block.blockLabel.endsWith("rounds") ? " · alternating sets" : ""}</p>
                       <h3>{exerciseName}</h3>
                       <p className="vnext-plan-prescription"><strong>{prescriptionLabel}</strong><br />{setStructureLabel}</p>
-                      <p>{block.reason} {block.intensity}</p>
+                      <details className="vnext-exercise-explanation">
+                        <summary>Why this exercise?</summary>
+                        <p>{block.reason} {block.intensity}</p>
+                      </details>
                       {selected && <p className="vnext-swap-note">Safe swap selected: {selected.reason}</p>}
                       {onWorkoutSwap && (
                         <button
@@ -567,17 +592,16 @@ const TodayView = ({
             </div>
           </section>
 
-          <p className="vnext-authority">{today.authorityNotice}</p>
           {workoutStartBlocker && <p className="vnext-authority" role="alert">{workoutStartBlocker}</p>}
         </>
       ) : (
         <section className="vnext-empty" aria-labelledby="vnext-today-heading">
-          <h2 id="vnext-today-heading">Today’s safe plan needs an update</h2>
+          <h2 id="vnext-today-heading">Your workout needs an update</h2>
           <p>{today.reason}</p>
           <p>{today.authorityNotice}</p>
         </section>
       )}
-
+      {!completion && (today.status !== "ready" || !today.focus) && setupNotice}
 
     </section>
   );
@@ -960,10 +984,10 @@ const HistoryView = ({ sessions }: Readonly<{ sessions: readonly VNextRecentSess
     <div className="vnext-section-heading">
       <p className="vnext-kicker">Your training</p>
       <h2 id="vnext-history-heading">Recent sessions</h2>
-      <p>Completed and partial workouts stay visible here. Migrated v1.2 sessions remain clearly identified and are never presented as more precise than their saved history.</p>
+      <p>Your completed and unfinished workouts are saved here. Older imported workouts may have fewer details.</p>
     </div>
     {sessions.length === 0 ? (
-      <div className="vnext-empty">Your completed workouts will appear here after the first saved Session Record.</div>
+      <div className="vnext-empty">Your workouts will appear here after you save your first one.</div>
     ) : (
       <div className="vnext-history-list">
         {sessions.map((session) => (
@@ -975,7 +999,7 @@ const HistoryView = ({ sessions }: Readonly<{ sessions: readonly VNextRecentSess
             <div className="vnext-history-meta">
               <span>{historyDuration(session.participationSeconds)}</span>
               <span>{session.status === "complete" ? "Completed" : session.status === "modified" ? "Modified" : session.status === "partial" ? "Partial" : "Ended early"}</span>
-              {session.source === "migrated" && <span>Migrated v1.2</span>}
+              {session.source === "migrated" && <span>Imported workout</span>}
             </div>
           </article>
         ))}
@@ -999,6 +1023,7 @@ export const VNextExperience = ({
   restrictions,
   recentSessions,
   completion,
+  setupNotice,
   workoutStartBlocker,
   workoutOrigin,
   workoutRecoveryStage,
@@ -1023,7 +1048,7 @@ export const VNextExperience = ({
       ? `Your exact in-progress ${workoutOrigin === "custom" ? "Custom Session" : "workout"} is ready to resume.`
       : workoutRecoveryStage === "preview"
         ? `Your ${workoutOrigin === "custom" ? "Custom Session" : "workout"} preview is ready to review.`
-        : "Today’s safe vNext plan is ready to review.";
+        : "Today’s workout is ready.";
   const [view, setView] = useState<ViewId>(initialView);
   const [statusMessage, setStatusMessage] = useState(workflowStatus);
   useEffect(() => {
@@ -1037,28 +1062,28 @@ export const VNextExperience = ({
 
   return (
     <main className="vnext-experience" aria-labelledby="vnext-app-title">
-      <div className="vnext-shell">
+      <div className="vnext-shell vnext-simple-shell">
         <header className="vnext-header">
           <div>
             <div className="vnext-brand-lockup" aria-label="Parallette25">
               <span className="vnext-brand-mark" aria-hidden="true"><i /><i /></span>
               <span><strong>PARALLETTE</strong><b>25+</b></span>
             </div>
-            <h1 id="vnext-app-title">Train what matters, at the step that fits.</h1>
-            <p>Goals set the direction. Demonstrated evidence and current context keep each session safe and useful.</p>
+            <h1 id="vnext-app-title" className="vnext-visually-hidden">Parallette25</h1>
           </div>
-          <nav className="vnext-nav" aria-label="vNext training sections">
+          <nav className="vnext-nav" aria-label="Training sections">
             <button type="button" aria-pressed={view === "today"} onClick={() => changeView("today")}>Today</button>
             <button type="button" aria-pressed={view === "progress"} onClick={() => changeView("progress")}>Progress &amp; Goals</button>
             <button type="button" aria-pressed={view === "history"} onClick={() => changeView("history")}>History</button>
           </nav>
         </header>
-        <p className="vnext-live-status" role="status" aria-live="polite">{statusMessage}</p>
+        <p className="vnext-live-status vnext-visually-hidden" role="status" aria-live="polite">{statusMessage}</p>
         {view === "today" ? (
           <TodayView
             today={today}
             restrictions={restrictions}
             completion={completion}
+            setupNotice={setupNotice}
             workoutStartBlocker={workoutStartBlocker}
             workoutOrigin={workoutOrigin}
             workoutRecoveryStage={workoutRecoveryStage}
