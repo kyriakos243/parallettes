@@ -436,8 +436,8 @@ Full checks/type checking pass, with 31 actual runner/hook/controller scenarios 
 
 ## Post-release task — goal skill roadmap
 
-**Status (2026-10-18):** The owner accepted the roadmap and authorised final checks and deployment once they pass. The candidate is on `codex/progress-skill-roadmap`, based on verified PR #27 main `1531c077e7e4e09ffce4eb992e51e58b56ca95d6`. Phase 11 remains closed.
+**Status (2026-10-18):** Delivered and live verified by controlled workflow 39112930139 from exact source `c633175aade2f0a70db3bc01d583be8751bb5d3b`, based on verified PR #27 main. [PR #28](https://github.com/kyriakos243/parallettes/pull/28) awaits owner iPhone acceptance and explicit merge approval. Phase 11 remains closed.
 
 **Scope:** Progress shows primary/secondary goal trees, current/next markers, all existing milestone branches and exact prerequisite/confirmation details, including supporting capacities and navigable cross-family paths. Contract is canonical in Training Engine §6.8. The app retains current evidence, safety, specialist and workout authority; there are no new skill definitions, scores or schema changes.
 
-**Checks:** Full 103-node/edge/requirement selector validation, higher-evidence and alternative-route regressions, existing Phase 8 and Phase 10 UI safeguards, TypeScript, production build/distribution, and local phone-size interaction checks pass. Owner visual acceptance and deployment authority are recorded; final release checks precede deployment, followed by owner iPhone acceptance.
+**Checks:** Full 103-node/edge/requirement selector validation, higher-evidence and alternative-route regressions, existing Phase 8 and Phase 10 UI safeguards, TypeScript, production build/distribution, and local phone-size interaction checks pass. Owner visual acceptance and deployment authority are recorded. Full CI checks, fresh encrypted backup/restore, exact served-file equality, live prerequisite/target/navigation checks, responsive layout and unchanged observation exports pass. Runbook §18 owns the release evidence. Physical iPhone acceptance is the remaining checkpoint; no next task is authorised.
