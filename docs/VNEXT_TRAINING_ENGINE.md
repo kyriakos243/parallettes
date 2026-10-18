@@ -304,4 +304,6 @@ The timeline groups only adjacent displayed items into Warm-up, Skill practice, 
 
 Custom keeps the existing 5/10/15/20-minute choices and defaults, with time and focus first. Equipment and effort remain editable in a disclosure whose closed summary shows the active choices. Zero equipment still disables preview and explains how to proceed. Opening the builder focuses its heading and brings the form into view. Preview creation, cancellation, swaps and reload recovery preserve their existing non-evidence semantics. User-facing preparation, recovery, backup/sync and History wording removes internal implementation terminology without changing operations. Detailed History and bottom navigation remain outside this task.
 
+The account/data-tools banner adds the device’s top safe-area inset to its normal spacing so Home Screen status chrome cannot cover those controls.
+
 Styles are isolated in `todaySimplicity.css`; the fingerprinted player, media and Phase 8/9 styles remain unchanged. Release checks and physical-device acceptance belong in release runbook §20.
