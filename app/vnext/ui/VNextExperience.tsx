@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GraphId, PlanItemId, SessionDemand } from "../contracts";
 import { VNextMotionGuide } from "../media/VNextMotionGuide";
+import { SkillRoadmap } from "./SkillRoadmap";
 import type { SafeWorkoutSwap } from "../workoutUx";
 import type {
   AssessmentEntryAction,
@@ -874,6 +875,8 @@ const ProgressView = ({
             <h2 id="vnext-progress-heading">{progress.title}</h2>
             <p>{progress.intro}</p>
           </div>
+          <SkillRoadmap roadmaps={progress.roadmaps} />
+          <div className="vnext-section-heading"><h2>All skill families</h2><p>Review your current focus or update your goals below.</p></div>
           <div className="vnext-family-grid">
             {progress.families.map((family) => (
               <button

@@ -9,6 +9,7 @@ import type {
   ExerciseId,
   GraphId,
   MilestoneRef,
+  NodeId,
   ObservationSourceRef,
   PlanItemId,
   PrerequisiteRef,
@@ -109,9 +110,56 @@ export type ProgressAndGoalsPresentation = Readonly<{
   title: "Progress & Goals";
   intro: string;
   families: readonly SkillFamilySummaryPresentation[];
+  roadmaps: readonly SkillRoadmapPresentation[];
   authorityNotice: string;
   canManuallyClaimSkills: false;
   exposesInternalScores: false;
+}>;
+
+export type RoadmapRequirement = PrerequisitePresentation & Readonly<{
+  milestone?: MilestoneRef;
+  familyLabel?: string;
+  benchmarks?: readonly RoadmapBenchmark[];
+}>;
+
+export type RoadmapBenchmark = Readonly<{
+  label: string;
+  target: string;
+  conditions: string;
+  confirmation: string;
+  quality: readonly string[];
+  safety: readonly string[];
+}>;
+
+export type RoadmapNode = Readonly<{
+  id: NodeId;
+  label: string;
+  description: string;
+  branch: string;
+  tier: string;
+  specialist: boolean;
+  branchGoal: boolean;
+  evidence: "confirmed" | "demonstrated" | "developing" | "estimated" | "covered" | "unknown";
+  evidenceLabel: string;
+  evidenceMessage: string;
+  recheck: boolean;
+  current: boolean;
+  next: boolean;
+  requirements: readonly RoadmapRequirement[];
+  benchmarks: readonly RoadmapBenchmark[];
+  trainingNote: string;
+}>;
+
+export type SkillRoadmapPresentation = Readonly<{
+  graphId: GraphId;
+  label: string;
+  priority?: "primary" | "secondary";
+  nodes: readonly RoadmapNode[];
+  edges: readonly Readonly<{ from: NodeId; to: NodeId; requirement: "required" | "one-of" }>[];
+  levels: readonly (readonly NodeId[])[];
+  currentSummary: string;
+  nextSummary: string;
+  availability: AvailabilityPresentation;
 }>;
 
 export type SkillDetailPresentation = SkillFamilySummaryPresentation & Readonly<{
