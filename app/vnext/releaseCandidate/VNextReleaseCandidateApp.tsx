@@ -407,7 +407,7 @@ const VNextAthleteApplication = ({
     const queued = commandQueue.current.catch(() => undefined).then(command);
     commandQueue.current = queued.then(() => undefined, () => undefined);
     void queued.catch((reason: unknown) => {
-      setError(reason instanceof Error ? reason.message : "The vNext operation could not be completed.");
+      setError(reason instanceof Error ? reason.message : "This action could not be completed. Please try again.");
     }).finally(() => {
       pendingCommands.current -= 1;
       if (pendingCommands.current === 0) setBusy(false);
@@ -422,24 +422,24 @@ const VNextAthleteApplication = ({
       const result = await runtime.bootstrap(refreshInput());
       setSnapshot(result.snapshot);
       if (initialWorkoutRecovery?.stage === "active") {
-        setMessage("Your exact in-progress workout is ready to resume on this device.");
+        setMessage("Your paused workout is ready to resume.");
       } else if (initialWorkoutRecovery?.stage === "preview") {
         setMessage(`Your ${initialWorkoutRecovery.origin === "custom" ? "Custom Session" : "Today workout"} preview was restored. It has not recorded training.`);
       } else if (initialWorkoutRecovery?.stage === "review") {
-        setMessage("Your completed timer facts were recovered. Add the short review to save one Session Record.");
+        setMessage("Your workout is ready to save. Finish the short review.");
       } else if (initialWorkoutRecovery?.stage === "prepared") {
-        setMessage("The exact prepared Session Record was recovered and is ready for idempotent retry.");
+        setMessage("Your workout is ready to save again. Retrying will not create a duplicate.");
       } else if (initialGuidedRecovery) {
-        setMessage("The exact guided observation was recovered and is ready for idempotent retry.");
+        setMessage("Your test result is ready to save again. Retrying will not create a duplicate.");
       } else if (result.snapshot.assessmentDraft?.status === "in-progress") {
-        setMessage("Your starting-point check is saved. Resume it whenever you’re ready.");
+        setMessage("");
       } else if (result.createdDefaultIntent) {
         const started = await runtime.startAssessment({ ...refreshInput(), mode: "new-placement" });
         setSnapshot(started.snapshot);
         setAssessment(started.assessment);
         setMessage("A few questions will help choose your starting point. You can finish later.");
       } else {
-        setMessage(preparation?.message ?? "vNext observations rebuilt successfully on this device.");
+        setMessage(preparation?.message ?? "");
       }
     });
   }, [deployment, identity, initialGuidedRecovery, initialWorkoutRecovery, refreshInput, runCommand, runtime, store]);
@@ -809,7 +809,7 @@ const VNextAthleteApplication = ({
       policyVersions: [{ id: vNextProjectionPolicy.id, version: vNextProjectionPolicy.version }],
     });
     downloadJson(`parallette25-vnext-${athleteId}.json`, bundle);
-    setMessage("A complete vNext observation export was created without changing its evidence.");
+    setMessage("Your training backup is ready.");
   });
 
   const importObservations = (file: File): void => runCommand(async () => {
@@ -818,7 +818,7 @@ const VNextAthleteApplication = ({
     const result = await store.importBundle(parsed);
     const refreshed = await runtime.refresh(refreshInput());
     setSnapshot(refreshed);
-    setMessage(`Observation import complete: ${result.inserted} inserted, ${result.duplicates} already present.`);
+    setMessage(`Backup imported: ${result.inserted} new entries; ${result.duplicates} already saved.`);
   });
 
   const syncObservations = (): void => runCommand(async () => {
@@ -826,7 +826,7 @@ const VNextAthleteApplication = ({
     const result = await syncVNextShadowObservations(store, athleteId);
     const refreshed = await runtime.refresh(refreshInput());
     setSnapshot(refreshed);
-    setMessage(`Sync complete through cursor ${result.cursor}; immutable observations were unioned without double-counting.`);
+    setMessage(`Your training is synced.`);
   });
 
   const resetProgress = async (): Promise<void> => {
@@ -897,7 +897,7 @@ const VNextAthleteApplication = ({
     persistWorkoutRecovery({ version: 1, athleteId, stage: "preview", origin: "custom", generated, selections: {}, swapOptions });
     setCustomOpen(false);
     setWorkoutOpen(false);
-    setMessage(`${request.minutes}-minute vNext Custom Session built from current evidence and safety rules.`);
+    setMessage(`${request.minutes}-minute workout ready. Review the exercises, then start when you’re ready.`);
   });
 
   const startOrResumeWorkout = (): void => {
@@ -905,7 +905,7 @@ const VNextAthleteApplication = ({
     if (workoutRecovery?.stage === "active" || workoutRecovery?.stage === "preview") {
       setWorkoutOpen(true);
       setMessage(workoutRecovery.stage === "active"
-        ? "Resuming the exact locally retained Session Plan."
+        ? "Your paused workout is ready."
         : `Reviewing the ${workoutRecovery.origin === "custom" ? "Custom Session" : "Today workout"} before its timer starts.`);
       return;
     }
@@ -963,7 +963,7 @@ const VNextAthleteApplication = ({
   const closeWorkout = (started: boolean): void => {
     setWorkoutOpen(false);
     if (started) {
-      setMessage("The exact in-progress workout remains on this device and can be resumed, reviewed or discarded.");
+      setMessage("Workout saved on this device. Resume whenever you’re ready.");
       return;
     }
     const origin = workoutRecovery?.origin ?? "today";
@@ -1001,7 +1001,7 @@ const VNextAthleteApplication = ({
       return false;
     }
     setWorkoutOpen(false);
-    setMessage("Workout timer facts are durably retained. Add the minimal review to create one Session Record.");
+    setMessage("Your workout is kept on this device. Finish the short review to save it in History.");
     return true;
   };
 
@@ -1069,7 +1069,7 @@ const VNextAthleteApplication = ({
     return <AssessmentRunner draft={assessment.draft} step={assessment.step} bundle={bundleFor(assessment.draft.catalogueVersion)} review={review} busy={busy} error={error} onAnswer={answerAssessment} onBack={backAssessment} onCommit={commitAssessment} onClose={() => runCommand(async () => {
       setSnapshot(await runtime.refresh(refreshInput()));
       setAssessment(undefined);
-      setMessage("Your answers are saved on this device. Resume setup whenever you’re ready.");
+      setMessage("");
     })} onGuidedTestRequested={openGuidedTestFromReview} />;
   }
 
@@ -1108,7 +1108,7 @@ const VNextAthleteApplication = ({
     : undefined;
 
   return (
-    <div className="vnext-rc-root">
+    <div className="vnext-rc-root vnext-simple-app">
       <aside className="vnext-rc-banner" aria-label={deployment.kind === "production" ? "Application and account status" : "Release candidate status"}>
         <span><strong>{deployment.bannerTitle}</strong> · {deployment.bannerDetail}</span>
         <div className="vnext-rc-banner-tools">
@@ -1116,29 +1116,28 @@ const VNextAthleteApplication = ({
           <details>
             <summary>Offline &amp; data tools</summary>
             <div className="vnext-actions">
-              <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || workflowLocked} onClick={exportObservations}>Export observations</button>
-              <label className="vnext-action" data-kind="secondary" aria-disabled={busy || workflowLocked}>Import observations<input className="vnext-rc-file" type="file" accept="application/json,.json" disabled={busy || workflowLocked} onChange={(event) => { const file = event.target.files?.[0]; if (file) importObservations(file); event.target.value = ""; }} /></label>
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || workflowLocked} onClick={exportObservations}>Export backup</button>
+              <label className="vnext-action" data-kind="secondary" aria-disabled={busy || workflowLocked}>Import backup<input className="vnext-rc-file" type="file" accept="application/json,.json" disabled={busy || workflowLocked} onChange={(event) => { const file = event.target.files?.[0]; if (file) importObservations(file); event.target.value = ""; }} /></label>
               {identity.mode === "account"
-                ? <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || workflowLocked} onClick={syncObservations}>Sync observations</button>
+                ? <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || workflowLocked} onClick={syncObservations}>Sync now</button>
                 : <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || workflowLocked} onClick={() => setAccountOpen(true)}>Set up sync</button>}
             </div>
           </details>
         </div>
       </aside>
-      {(message || error) && <p className={`vnext-rc-message${error ? " is-error" : ""}`} role={error ? "alert" : "status"}>{error ?? message}{pendingPrepared && error ? " The exact prepared record is retained for retry." : ""}</p>}
-      {pendingPrepared && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={retryPreparedCompletion}>Retry the same Session Record</button>}
-      {guidedRecovery && !guidedOffer && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={() => commitExactGuidedRecovery(guidedRecovery)}>Retry the same guided observation</button>}
-      {!workflowLocked && snapshot.assessmentDraft?.status === "in-progress" && (
+      {(message || error) && <p className={`vnext-rc-message${error ? " is-error" : ""}`} role={error ? "alert" : "status"}>{error ?? message}{pendingPrepared && error ? " Your workout is kept on this device so you can retry." : ""}</p>}
+      {pendingPrepared && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={retryPreparedCompletion}>Retry saving workout</button>}
+      {guidedRecovery && !guidedOffer && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={() => commitExactGuidedRecovery(guidedRecovery)}>Retry saving test result</button>}
+      <VNextExperience
+        setupNotice={!workflowLocked && snapshot.assessmentDraft?.status === "in-progress" ? (
         <section className="vnext-panel vnext-rc-saved-setup" aria-label="Saved setup">
-          <strong>Your starting-point check is saved</strong>
-          <p>Continue when you’re ready. Your saved answers will be there.</p>
+          <span>Setup saved</span>
           <div className="vnext-actions">
             <button type="button" className="vnext-action" disabled={busy} onClick={() => startAssessment(snapshot.presentations.assessment.actions.find((action) => action.kind === "reassessment"))}>Resume setup</button>
             <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => { setRestartForRestrictions(false); setRestartSetupOpen(true); }}>Start over</button>
           </div>
         </section>
-      )}
-      <VNextExperience
+        ) : undefined}
         progress={snapshot.presentations.progress}
         skillDetails={snapshot.presentations.skillDetails}
         today={todayPresentation}
@@ -1162,7 +1161,7 @@ const VNextAthleteApplication = ({
           return next;
         }) : undefined}
         onCustomSessionRequested={!workflowLocked && !busy ? () => setCustomOpen(true) : undefined}
-        onDemandChange={!workflowLocked && !busy ? (demand) => runCommand(async () => { const updated = await runtime.selectDailyDemand({ ...refreshInput(), sessionDemand: demand }); setWorkoutSelections({}); setSnapshot(updated); setMessage(`${demand === "technique" ? "Easier / Technique" : demand === "challenge" ? "Challenge" : "Standard"} changes today’s dose only; the safe frontier was preserved.`); }) : undefined}
+        onDemandChange={!workflowLocked && !busy ? (demand) => runCommand(async () => { const updated = await runtime.selectDailyDemand({ ...refreshInput(), sessionDemand: demand }); setWorkoutSelections({}); setSnapshot(updated); setMessage(`${demand === "technique" ? "Easier / Technique" : demand === "challenge" ? "Challenge" : "Standard"} selected for today’s workout.`); }) : undefined}
         onGoalSelectionChange={!workflowLocked && !busy ? (selection) => new Promise<void>((resolve, reject) => {
           runCommand(async () => {
             try {

@@ -47,7 +47,7 @@ assert(!sources.html.includes("user-scalable=no"), "The viewport prevents user z
 // Final athlete surface semantics and trust copy.
 includesAll(sources.experience, [
   '<main className="vnext-experience" aria-labelledby="vnext-app-title">',
-  '<nav className="vnext-nav" aria-label="vNext training sections">',
+  '<nav className="vnext-nav" aria-label="Training sections">',
   'role="status" aria-live="polite"',
   'Today’s focus',
   'Main focus',
@@ -66,7 +66,7 @@ includesAll(sources.experience, [
   'await onGoalSelectionChange(selection)',
   'workoutRecoveryStage === "active"',
   'Resume ${workoutOrigin === "custom" ? "Custom Session" : "today’s workout"}',
-  'Build a 5–20 minute session',
+  'Short workout · 5–20 min',
   'data-duration={durationMinutes}',
   'Your {durationAdjective} plan',
   'History',
@@ -101,8 +101,8 @@ includesAll(sources.workout, ["aria-label=\"Workout timer\"", "Save & close", "F
 includesAll(sources.custom, [
   "([5, 10, 15, 20] as const)",
   "If you have 25 minutes, use Today",
-  "Build safe {minutes}-minute session",
-  "It does not use the legacy custom generator",
+  "Preview {minutes}-minute workout",
+  '<details className="vnext-custom-settings">',
 ], "Custom Session builder");
 includesAll(sources.account, [
   "<form className=\"vnext-account-form\"",
@@ -172,7 +172,7 @@ for (const [foreground, background, label] of [
 includesAll(sources.rcApp, [
   "Goals saved. Your next workout will use these priorities.",
   "ordinary v1.2 authority is unchanged",
-  "The exact prepared record is retained for retry.",
+  "Your workout is kept on this device so you can retry.",
   "Session Record",
 ], "integrated RC authority path");
 assert(sources.workout.includes("const VNextMotionGuide = lazy("), "Workout media is not lazy-loaded");
