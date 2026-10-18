@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { GraphId, PlanItemId, SessionDemand } from "../contracts";
 import { VNextMotionGuide } from "../media/VNextMotionGuide";
 import { SkillRoadmap } from "./SkillRoadmap";
+import { HistoryView, WorkoutSavedSummary } from "./HistoryPanels";
+import type { VNextRecentSession } from "./sessionHistory";
+export type { VNextRecentSession } from "./sessionHistory";
 import type { SafeWorkoutSwap } from "../workoutUx";
 import type {
   AssessmentEntryAction,
@@ -38,15 +41,6 @@ export type VNextWorkoutReviewFeedback = Readonly<{
   modificationReason?: string;
 }>;
 
-export type VNextRecentSession = Readonly<{
-  id: string;
-  title: string;
-  completedAt: string;
-  participationSeconds: number;
-  status: "complete" | "modified" | "partial" | "abandoned";
-  source: "vnext" | "migrated";
-}>;
-
 export type VNextExperienceProps = Readonly<{
   progress: ProgressAndGoalsPresentation;
   skillDetails: readonly SkillDetailPresentation[];
@@ -57,6 +51,9 @@ export type VNextExperienceProps = Readonly<{
   recentSessions: readonly VNextRecentSession[];
   completion?: WorkoutCompletionPresentation;
   setupNotice?: ReactNode;
+  savedWorkout?: VNextRecentSession;
+  syncMessage?: string;
+  onDismissSummary?: () => void;
   workoutStartBlocker?: string;
   workoutOrigin?: "today" | "custom";
   workoutRecoveryStage?: "preview" | "active";
@@ -266,7 +263,7 @@ const TodayView = ({
       };
     });
     onWorkoutReviewSubmitted?.(feedback);
-    announce("Workout feedback is ready for the single vNext Session Record.");
+    announce("Saving your workout…");
   };
 
   return (
@@ -415,7 +412,7 @@ const TodayView = ({
           <section className="vnext-today-hero" aria-labelledby="vnext-today-heading" data-duration={durationMinutes}>
             <div className="vnext-focus-heading">
               <p className="vnext-kicker">{customContext ? "Short workout" : "Today’s focus"}</p>
-              <h2 id="vnext-today-heading">{today.focus.label}</h2>
+              <h2 id="vnext-today-heading" tabIndex={-1}>{today.focus.label}</h2>
             </div>
             <div className="vnext-duration-badge">{today.durationLabel ?? "Short workout"}<span>including rest</span></div>
             <p className="vnext-focus-summary">
@@ -596,7 +593,7 @@ const TodayView = ({
         </>
       ) : (
         <section className="vnext-empty" aria-labelledby="vnext-today-heading">
-          <h2 id="vnext-today-heading">Your workout needs an update</h2>
+          <h2 id="vnext-today-heading" tabIndex={-1}>Your workout needs an update</h2>
           <p>{today.reason}</p>
           <p>{today.authorityNotice}</p>
         </section>
@@ -972,42 +969,6 @@ const ProgressView = ({
   );
 };
 
-const historyDuration = (seconds: number): string => {
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  if (minutes === 0) return `${remainder}s`;
-  return remainder === 0 ? `${minutes} min` : `${minutes}m ${remainder}s`;
-};
-
-const HistoryView = ({ sessions }: Readonly<{ sessions: readonly VNextRecentSession[] }>) => (
-  <section className="vnext-view" aria-labelledby="vnext-history-heading">
-    <div className="vnext-section-heading">
-      <p className="vnext-kicker">Your training</p>
-      <h2 id="vnext-history-heading">Recent sessions</h2>
-      <p>Your completed and unfinished workouts are saved here. Older imported workouts may have fewer details.</p>
-    </div>
-    {sessions.length === 0 ? (
-      <div className="vnext-empty">Your workouts will appear here after you save your first one.</div>
-    ) : (
-      <div className="vnext-history-list">
-        {sessions.map((session) => (
-          <article className="vnext-history-item" key={session.id}>
-            <div>
-              <strong>{session.title}</strong>
-              <span>{new Date(session.completedAt).toLocaleDateString(undefined, { dateStyle: "medium" })}</span>
-            </div>
-            <div className="vnext-history-meta">
-              <span>{historyDuration(session.participationSeconds)}</span>
-              <span>{session.status === "complete" ? "Completed" : session.status === "modified" ? "Modified" : session.status === "partial" ? "Partial" : "Ended early"}</span>
-              {session.source === "migrated" && <span>Imported workout</span>}
-            </div>
-          </article>
-        ))}
-      </div>
-    )}
-  </section>
-);
-
 /**
  * Feature-isolated Phase 8 surface. It consumes user-safe presentation models
  * and emits commands only; Phase 9 must connect it to one coherent vNext
@@ -1024,6 +985,9 @@ export const VNextExperience = ({
   recentSessions,
   completion,
   setupNotice,
+  savedWorkout,
+  syncMessage = "Saved on this device.",
+  onDismissSummary,
   workoutStartBlocker,
   workoutOrigin,
   workoutRecoveryStage,
@@ -1049,7 +1013,18 @@ export const VNextExperience = ({
       : workoutRecoveryStage === "preview"
         ? `Your ${workoutOrigin === "custom" ? "Custom Session" : "workout"} preview is ready to review.`
         : "Today’s workout is ready.";
+  const [historySelection, setHistorySelection] = useState<string>();
   const [view, setView] = useState<ViewId>(initialView);
+  const previousSavedId = useRef(savedWorkout?.id);
+  useEffect(() => {
+    if (savedWorkout) setView("today");
+    else if (previousSavedId.current && view === "today") {
+      const heading = document.getElementById("vnext-today-heading");
+      heading?.focus({ preventScroll: true });
+      heading?.scrollIntoView({ block: "start" });
+    }
+    previousSavedId.current = savedWorkout?.id;
+  }, [savedWorkout?.id]);
   const [statusMessage, setStatusMessage] = useState(workflowStatus);
   useEffect(() => {
     setStatusMessage(workflowStatus);
@@ -1078,6 +1053,13 @@ export const VNextExperience = ({
           </nav>
         </header>
         <p className="vnext-live-status vnext-visually-hidden" role="status" aria-live="polite">{statusMessage}</p>
+        {view === "today" && savedWorkout && !completion && !workoutRecoveryStage && <WorkoutSavedSummary
+          session={savedWorkout}
+          syncMessage={syncMessage}
+          nextFocus={today.status === "ready" && today.focus ? `${today.focus.label}. Return when you’re ready to train.` : "Check Today for your current options and any comfort updates."}
+          onDone={() => onDismissSummary?.()}
+          onHistory={() => { setHistorySelection(savedWorkout.id); changeView("history"); onDismissSummary?.(); }}
+        />}
         {view === "today" ? (
           <TodayView
             today={today}
@@ -1114,7 +1096,7 @@ export const VNextExperience = ({
             announce={announce}
           />
         ) : (
-          <HistoryView sessions={recentSessions} />
+          <HistoryView sessions={recentSessions} selectedId={historySelection} />
         )}
       </div>
     </main>

@@ -173,7 +173,7 @@ includesAll(sources.rcApp, [
   "Goals saved. Your next workout will use these priorities.",
   "ordinary v1.2 authority is unchanged",
   "Your workout is kept on this device so you can retry.",
-  "Session Record",
+  "runtime.commitWorkoutCompletion",
 ], "integrated RC authority path");
 assert(sources.workout.includes("const VNextMotionGuide = lazy("), "Workout media is not lazy-loaded");
 assert(sources.account.includes('const accountBoundary = () => import("../../profileStore")'),

@@ -26,7 +26,9 @@ import {
   generateVNextCustomSession,
   safeWorkoutSwaps,
 } from "../index";
-import { VNextExperience, type VNextRecentSession, type VNextWorkoutReviewFeedback } from "../ui";
+import { VNextExperience, type VNextWorkoutReviewFeedback } from "../ui";
+import { buildSessionHistory } from "../ui/sessionHistory";
+import { confirmedSyncFingerprint, trainingSyncMessage, type TrainingSyncStatus } from "../ui/syncStatus";
 import { AssessmentRunner } from "./AssessmentRunner";
 import { GuidedTestRunner, type GuidedTestFormResult } from "./GuidedTestRunner";
 import { CustomSessionBuilder, type VNextCustomSessionRequest } from "./CustomSessionBuilder";
@@ -277,30 +279,6 @@ const completionStatus = (
   return "complete";
 };
 
-const recentSessionPresentation = (snapshot: VNextRuntimeSnapshot, vNextDefinitionBundle: DefinitionBundle): readonly VNextRecentSession[] => {
-  const plans = new Map(snapshot.sources.sessionPlans.map((plan) => [plan.id, plan] as const));
-  return [...snapshot.sources.sessionRecords]
-    .sort((left, right) => Date.parse(right.completedAt) - Date.parse(left.completedAt)
-      || right.id.localeCompare(left.id))
-    .slice(0, 12)
-    .map((record) => {
-      const plan = plans.get(record.planId);
-      const custom = plan?.rationale.some((reason) => reason.code === "planning-custom-short-session");
-      const graphId = plan?.rationale.find((reason) => reason.relatedGraphId)?.relatedGraphId;
-      const graph = graphId
-        ? vNextDefinitionBundle.graphs.find((candidate) => candidate.id === graphId)
-        : undefined;
-      return {
-        id: record.id,
-        title: custom ? "Custom Session" : graph ? `${graph.label} session` : "Parallette25 session",
-        completedAt: record.completedAt,
-        participationSeconds: record.itemOutcomes.reduce((sum, outcome) => sum + outcome.participationSeconds, 0),
-        status: record.status,
-        source: record.legacySource ? "migrated" : "vnext",
-      };
-    });
-};
-
 const VNextAthleteApplication = ({
   identity,
   onIdentitySelected,
@@ -355,6 +333,9 @@ const VNextAthleteApplication = ({
   const [accountOpen, setAccountOpen] = useState(false);
   const [message, setMessage] = useState(deployment.openingMessage);
   const [error, setError] = useState<string>();
+  const [savedWorkoutId, setSavedWorkoutId] = useState<string>();
+  const [online, setOnline] = useState(navigator.onLine);
+  const [syncStatus, setSyncStatus] = useState<TrainingSyncStatus>({ phase: "idle" });
   const commandQueue = useRef<Promise<void>>(Promise.resolve());
   const pendingCommands = useRef(0);
   const bootstrapStarted = useRef(false);
@@ -453,32 +434,47 @@ const VNextAthleteApplication = ({
       : "The RC is usable online; offline caching will retry later."));
   }, [deployment.kind]);
 
+  const syncTraining = useCallback(async () => {
+    setSyncStatus({ phase: "syncing" });
+    try {
+      const { syncVNextShadowObservations } = await import("../../profileStore");
+      await syncVNextShadowObservations(store, athleteId);
+      const refreshed = await runtime.refresh(refreshInput());
+      const fingerprint = await confirmedSyncFingerprint({
+        fingerprint: refreshed.sources.sourceFingerprint,
+        readFingerprint: async () => (await store.readProjectionSources(athleteId)).sourceFingerprint,
+        hasPending: async () => (await store.readSyncUpload(athleteId, 1)).length > 0,
+      });
+      setSnapshot(refreshed);
+      setSyncStatus(fingerprint ? { phase: "synced", fingerprint, confirmedAt: new Date().toISOString() } : { phase: "waiting" });
+    } catch (reason) {
+      const { isTransientVNextSyncError } = await import("../../profileStore");
+      if (isTransientVNextSyncError(reason)) {
+        setSyncStatus({ phase: "waiting" });
+        return;
+      }
+      setSyncStatus({ phase: "error" });
+      throw new Error("Your training is saved on this device, but sync could not finish. Check your account or try Sync now again.");
+    }
+  }, [athleteId, refreshInput, runtime, store]);
+
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => { window.removeEventListener("online", update); window.removeEventListener("offline", update); };
+  }, []);
+
   useEffect(() => {
     if (deployment.kind !== "production" || identity.mode !== "account" || !snapshot) return;
     const sync = (force = false): void => {
       const fingerprint = snapshot.sources.sourceFingerprint;
       if (!force && lastAutomaticSyncFingerprint.current === fingerprint) return;
       lastAutomaticSyncFingerprint.current = fingerprint;
-      runCommand(async () => {
-        try {
-          const { syncVNextShadowObservations } = await import("../../profileStore");
-          await syncVNextShadowObservations(store, athleteId);
-          const refreshed = await runtime.refresh(refreshInput());
-          setSnapshot(refreshed);
-        } catch (error) {
-          const { isTransientVNextSyncError } = await import("../../profileStore");
-          if (!isTransientVNextSyncError(error)) throw error;
-          // Local append-only truth remains authoritative while offline. The
-          // online event or the next source change retries the same outbox.
-          setMessage("Saved safely on this device. Secure sync will retry when the connection returns.");
-        }
-      });
+      runCommand(syncTraining);
     };
     sync();
-    const refreshRemote = (): void => {
-      lastAutomaticSyncFingerprint.current = undefined;
-      sync(true);
-    };
+    const refreshRemote = (): void => { sync(true); };
     const onVisibilityChange = (): void => {
       if (document.visibilityState === "visible") refreshRemote();
     };
@@ -494,7 +490,7 @@ const VNextAthleteApplication = ({
       window.removeEventListener("focus", refreshRemote);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [athleteId, deployment.kind, identity.mode, refreshInput, runCommand, runtime, snapshot, store]);
+  }, [deployment.kind, identity.mode, runCommand, snapshot, syncTraining]);
 
   useEffect(() => {
     if (deployment.kind !== "production" || identity.mode !== "local" || !snapshot
@@ -509,6 +505,9 @@ const VNextAthleteApplication = ({
     document.addEventListener("visibilitychange", refreshVisiblePlan);
     return () => document.removeEventListener("visibilitychange", refreshVisiblePlan);
   }, [assessment, deployment.kind, guidedOffer, identity.mode, refreshInput, runCommand, runtime, snapshot, workoutRecovery]);
+
+  const sessionHistory = useMemo(() => snapshot ? buildSessionHistory(snapshot.sources, vNextDefinitionBundles) : [], [snapshot, vNextDefinitionBundles]);
+  const syncMessage = trainingSyncMessage({ account: identity.mode === "account", online, fingerprint: snapshot?.sources.sourceFingerprint, status: syncStatus });
 
   const displayedGenerated = workoutRecovery?.generated ?? snapshot?.generated;
   const plan = displayedGenerated?.plan;
@@ -645,7 +644,7 @@ const VNextAthleteApplication = ({
         setSnapshot(committed.snapshot);
         clearGuidedRecovery();
         setGuidedOffer(undefined);
-        setMessage("One guided observation was saved. The projection—not the form—decides what it confirms.");
+        setMessage("Test result saved. Check Progress to see your updated starting point.");
       } finally {
         guidedSubmissionLocked.current = false;
       }
@@ -771,9 +770,10 @@ const VNextAthleteApplication = ({
         const refreshed = await runtime.refresh(refreshInput());
         setSnapshot(refreshed);
         clearWorkoutRecovery();
+        setSavedWorkoutId(prepared.record.id);
         setMessage(prepared.restrictionFollowUp
-          ? "Workout saved as one immutable Session Record. The reported symptom now restricts the affected training demand while your achievement history remains intact."
-          : "Workout saved as one immutable Session Record. Today’s recommendation has been rebuilt from the updated evidence.");
+          ? "Workout saved. Your reported discomfort will be considered in future workouts; your achievements are kept."
+          : "");
       } finally {
         completionSubmissionLocked.current = false;
       }
@@ -790,9 +790,10 @@ const VNextAthleteApplication = ({
         const refreshed = await runtime.refresh(refreshInput());
         setSnapshot(refreshed);
         clearWorkoutRecovery();
+        setSavedWorkoutId(pendingPrepared.record.id);
         setMessage(committed.append.record.status === "duplicate"
-          ? "The existing Session Record was verified; no duplicate was created."
-          : "The retained Session Record was saved successfully.");
+          ? "Workout already saved. No duplicate was added."
+          : "Workout saved.");
       } finally {
         completionSubmissionLocked.current = false;
       }
@@ -821,15 +822,11 @@ const VNextAthleteApplication = ({
     setMessage(`Backup imported: ${result.inserted} new entries; ${result.duplicates} already saved.`);
   });
 
-  const syncObservations = (): void => runCommand(async () => {
-    const { syncVNextShadowObservations } = await import("../../profileStore");
-    const result = await syncVNextShadowObservations(store, athleteId);
-    const refreshed = await runtime.refresh(refreshInput());
-    setSnapshot(refreshed);
-    setMessage(`Your training is synced.`);
-  });
+  const syncObservations = (): void => runCommand(syncTraining);
 
   const resetProgress = async (): Promise<void> => {
+    setSavedWorkoutId(undefined);
+    setSyncStatus({ phase: "waiting" });
     const resetAt = now();
     const refreshed = await runtime.resetProgress({ ...refreshInput(), resetAt });
     clearWorkoutRecovery();
@@ -1112,7 +1109,7 @@ const VNextAthleteApplication = ({
       <aside className="vnext-rc-banner" aria-label={deployment.kind === "production" ? "Application and account status" : "Release candidate status"}>
         <span><strong>{deployment.bannerTitle}</strong> · {deployment.bannerDetail}</span>
         <div className="vnext-rc-banner-tools">
-          <button type="button" className="vnext-rc-account-button" onClick={() => setAccountOpen(true)}>{identity.mode === "account" ? `Synced as ${identity.username}` : "On this device"}</button>
+          <button type="button" className="vnext-rc-account-button" onClick={() => setAccountOpen(true)}>{identity.mode === "account" ? `Account: ${identity.username}` : "On this device"}</button>
           <details>
             <summary>Offline &amp; data tools</summary>
             <div className="vnext-actions">
@@ -1125,6 +1122,7 @@ const VNextAthleteApplication = ({
           </details>
         </div>
       </aside>
+      <p className="vnext-sync-status" data-state={syncStatus.phase} role="status">{syncMessage}</p>
       {(message || error) && <p className={`vnext-rc-message${error ? " is-error" : ""}`} role={error ? "alert" : "status"}>{error ?? message}{pendingPrepared && error ? " Your workout is kept on this device so you can retry." : ""}</p>}
       {pendingPrepared && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={retryPreparedCompletion}>Retry saving workout</button>}
       {guidedRecovery && !guidedOffer && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={() => commitExactGuidedRecovery(guidedRecovery)}>Retry saving test result</button>}
@@ -1144,7 +1142,10 @@ const VNextAthleteApplication = ({
         goals={snapshot.presentations.goals}
         assessment={snapshot.presentations.assessment}
         restrictions={snapshot.presentations.restrictions}
-        recentSessions={recentSessionPresentation(snapshot, vNextDefinitionBundle)}
+        recentSessions={sessionHistory}
+        savedWorkout={sessionHistory.find((session) => session.id === savedWorkoutId)}
+        syncMessage={syncMessage}
+        onDismissSummary={() => setSavedWorkoutId(undefined)}
         completion={completionPresentation}
         busy={busy}
         workoutStartBlocker={workoutStartBlocker}

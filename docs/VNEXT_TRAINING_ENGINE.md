@@ -307,3 +307,12 @@ Custom keeps the existing 5/10/15/20-minute choices and defaults, with time and 
 The account/data-tools banner adds the device’s top safe-area inset to its normal spacing so Home Screen status chrome cannot cover those controls.
 
 Styles are isolated in `todaySimplicity.css`; the fingerprinted player, media and Phase 8/9 styles remain unchanged. Release checks and physical-device acceptance belong in release runbook §20.
+
+
+### 6.11 Workout summary, History and save/sync clarity — 2026-10-18
+
+The owner approved this presentation update and controlled deployment after checks. Successful completion and exact prepared retry show a focused “Workout saved” summary of the saved record, movements reached, recorded activity and the refreshed next-workout focus. Done returns to Today; View in History opens that record. The summary is ephemeral UI state and makes no achievement claim. It appears only after persistence succeeds; a retained review/prepared retry remains distinct from a saved History entry.
+
+History lists correction-chain leaves newest first, twelve at a time with Load older workouts. Expandable entries resolve the plan’s native catalogue and exact exercise/prescription versions through all retained readers. Original sets/reps/rest are explicitly Planned; recorded performed identities, activity, outcomes and feedback are separate. Native recorded activity excludes rest/pauses and does not imply counted completed sets or reps. Sparse imported workouts retain their original session-total duration when known and label per-exercise timing/prescription as unavailable; converter uncertainty is not presented as a reported modification. The reader does not change observations, plans, projection or training eligibility.
+
+Account identity no longer claims sync success. Device-local save, syncing, offline/waiting, confirmed sync and actionable sync error have separate messages. Confirmation is transient and requires successful delta exchange plus stable refreshed source identity and an empty upload queue; changed sources invalidate it. Existing automatic reconnect/focus/visibility/periodic retries remain. Save, prepared-retry and migration-opening copy uses plain language. No schema, Worker/API, account-security, timing or media change is included.

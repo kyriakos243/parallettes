@@ -68,6 +68,7 @@ const mountReleaseCandidate = async (): Promise<void> => {
   ]);
   await import("../app/vnext/ui/setupGoals.css");
   await import("../app/vnext/ui/todaySimplicity.css");
+  await import("../app/vnext/ui/sessionHistory.css");
   root.render(<StrictMode><VNextReleaseCandidateApp /></StrictMode>);
 };
 
@@ -99,6 +100,7 @@ const mountProductionApplication = async (): Promise<void> => {
   ]);
   await import("../app/vnext/ui/setupGoals.css");
   await import("../app/vnext/ui/todaySimplicity.css");
+  await import("../app/vnext/ui/sessionHistory.css");
   root.render(<StrictMode><VNextProductionApp /></StrictMode>);
 };
 

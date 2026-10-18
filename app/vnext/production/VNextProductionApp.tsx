@@ -20,7 +20,7 @@ const PRODUCTION_PRESENTATION = {
   kicker: "Parallette25",
   localHeading: "Start fresh on this device",
   localDetail: "Creates a new offline athlete. Existing Parallette25 profiles are offered above when available.",
-  accountDetail: "Continue an existing athlete on this device, or sign in for secure observation sync.",
+  accountDetail: "Continue your saved profile or sign in to sync your training.",
   accountUnavailableDetail: "Cloud accounts are unavailable in this deployment. Device-only training remains available offline.",
 } as const;
 const PRODUCTION_STORAGE_NAMESPACE = "vnext-production1";
@@ -148,20 +148,20 @@ const prepareProductionAthlete = async ({
       }
       return {
         message: migrationStatus === "inserted"
-          ? "Your v1.2 progress was converted from a recoverable snapshot. Cloud reconciliation will retry when the connection returns."
-          : "Your saved vNext observations are available offline. Cloud reconciliation will retry automatically when requested.",
+          ? "Your previous progress is saved on this device. Sync will retry when you reconnect."
+          : "Your training is available on this device. Sync will retry when you reconnect.",
       };
     }
   }
 
   return {
     message: migrationStatus === "inserted"
-      ? "Your v1.2 progress was converted once from a recoverable snapshot and reconciled with vNext."
+      ? "Your previous progress is ready."
       : migrationStatus === "duplicate"
         ? "Your existing conversion receipt was verified; no progress was duplicated."
         : syncUnavailable
-          ? "Your saved vNext observations are available offline. Cloud reconciliation will retry automatically."
-          : "Your vNext observations were reconciled successfully.",
+          ? "Your training is available on this device. Sync will retry when you reconnect."
+          : "",
   };
 };
 
