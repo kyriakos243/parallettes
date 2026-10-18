@@ -604,11 +604,11 @@ const GoalControls = ({
     if (!editing) setSelection(initialGoalSelection(presentation));
   }, [presentation, editing]);
   useEffect(() => {
-    if (editing) mainSelect.current?.focus({ preventScroll: true });
+    if (editing) mainSelect.current?.focus();
   }, [editing]);
   useEffect(() => {
     if (!editing && !saving && !busy && returnFocus.current) {
-      editButton.current?.focus({ preventScroll: true });
+      editButton.current?.focus();
       returnFocus.current = false;
     }
   }, [editing, saving, busy]);
