@@ -42,7 +42,8 @@
 .vnext-exercise-explanation p { margin: 0 0 12px; }
 .vnext-simple-shell .vnext-plan-copy .vnext-plan-prescription { margin-bottom: 0; }
 .vnext-simple-shell .vnext-section-heading h2 { font-size: 26px; }
-.vnext-simple-app .vnext-rc-banner { padding-top: 4px; padding-bottom: 4px; gap: 4px 12px; }
+/* Home Screen mode draws under the iPhone status area; keep account controls below it. */
+.vnext-simple-app .vnext-rc-banner { padding-top: calc(4px + env(safe-area-inset-top, 0px)); padding-bottom: 4px; gap: 4px 12px; }
 .vnext-simple-app .vnext-rc-banner > span { font-size: 12px; }
 .vnext-rc-custom { gap: 14px; }
 .vnext-rc-custom .vnext-rc-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
