@@ -206,12 +206,12 @@ export const SkillRoadmap = ({ roadmaps }: Readonly<{ roadmaps: readonly SkillRo
     </div>
     {goals.length > 0 ? <div className="vnext-roadmap-goals" aria-label="Your goal roadmaps">
       {goals.map((map) => <button type="button" key={map.graphId} aria-pressed={map.graphId === roadmap.graphId} onClick={() => { setTrail([]); open({ graphId: map.graphId }); }}>
-        <span>{map.priority === "primary" ? "Primary goal" : "Secondary goal"}</span><strong>{map.label}</strong>
+        <span>{map.priority === "primary" ? "Main goal" : "Supporting goal"}</span><strong>{map.label}</strong>
       </button>)}
-    </div> : <p className="vnext-help">Choose your primary and secondary goals below to keep their roadmaps here.</p>}
+    </div> : <p className="vnext-help">Choose your main and supporting goals above to keep their roadmaps here.</p>}
     <label className="vnext-roadmap-explore">Explore a skill family
       <select value={roadmap.graphId} onChange={(event) => { setTrail([]); open({ graphId: event.target.value as GraphId }); }}>
-        {roadmaps.map((map) => <option key={map.graphId} value={map.graphId}>{map.label}{map.priority ? ` · ${map.priority} goal` : ""}</option>)}
+        {roadmaps.map((map) => <option key={map.graphId} value={map.graphId}>{map.label}{map.priority ? ` · ${map.priority === "primary" ? "Main goal" : "Supporting goal"}` : ""}</option>)}
       </select>
     </label>
     {trail.length > 0 && <button type="button" className="vnext-back" onClick={() => { const previous = trail[trail.length - 1]; setTrail(trail.slice(0, -1)); open(previous); }}>

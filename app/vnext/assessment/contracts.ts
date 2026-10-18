@@ -7,6 +7,7 @@ import {
   type AssessmentDraftId,
   type AthleteGoal,
   type AthleteId,
+  type AthleteIntent,
   type BenchmarkProtocolId,
   type BenchmarkSubject,
   type DefinitionBundle,
@@ -33,6 +34,7 @@ export type PlacementResponse = "clean" | "partial" | "not-yet" | "not-sure" | "
 
 export type AssessmentIntentSeed = Readonly<{
   goals: readonly AthleteGoal[];
+  emphasisOverride?: AthleteIntent["emphasisOverride"];
   equipment: readonly EquipmentId[];
   defaultSessionDemand: SessionDemand;
   preferences: Readonly<{
@@ -85,6 +87,10 @@ export type AssessmentDraft = Readonly<{
   intentSeed: AssessmentIntentSeed;
   targetedProtocolIds: readonly BenchmarkProtocolId[];
   answers: readonly AssessmentAnswerRecord[];
+  /** Previous choices for Back navigation only; never used as evidence or routing answers. */
+  revisitAnswers?: readonly AssessmentAnswerRecord[];
+  /** Keeps old committed-draft retries on their original goal mapping. */
+  goalSelectionVersion?: 2;
   history: readonly string[];
   revision: number;
   status: "in-progress" | "committed";
@@ -266,6 +272,12 @@ export const assertAssessmentDraft = (
   if (!Array.isArray(value.targetedProtocolIds) || !Array.isArray(value.answers) || !Array.isArray(value.history)) {
     throw new TypeError("Invalid assessment collections");
   }
+  if (value.goalSelectionVersion !== undefined && value.goalSelectionVersion !== 2) {
+    throw new TypeError("Unsupported assessment goal selection version");
+  }
+  if (value.revisitAnswers !== undefined && !Array.isArray(value.revisitAnswers)) {
+    throw new TypeError("Invalid assessment previous choices");
+  }
   if (!value.intentSeed || typeof value.intentSeed !== "object"
     || !Array.isArray(value.intentSeed.goals) || !Array.isArray(value.intentSeed.equipment)) {
     throw new TypeError("Invalid assessment intent seed");
@@ -281,6 +293,13 @@ export const assertAssessmentDraft = (
   }
   const goalKeys = value.intentSeed.goals.map((goal) => goal.graphId);
   assertUniqueStableIds(goalKeys, "intent goals");
+  const emphasis = value.intentSeed.emphasisOverride;
+  if (emphasis !== undefined && (!emphasis || typeof emphasis !== "object"
+    || !goalKeys.includes(emphasis.primaryGraphId)
+    || (emphasis.secondaryGraphId !== undefined && (!goalKeys.includes(emphasis.secondaryGraphId)
+      || emphasis.secondaryGraphId === emphasis.primaryGraphId)))) {
+    throw new TypeError("Invalid assessment intent focus");
+  }
   if (!["technique", "standard", "challenge"].includes(value.intentSeed.defaultSessionDemand)
     || !value.intentSeed.preferences || typeof value.intentSeed.preferences !== "object"
     || typeof value.intentSeed.preferences.specialistOptIn !== "boolean"
@@ -289,16 +308,18 @@ export const assertAssessmentDraft = (
         || value.intentSeed.preferences.preferredDurationMinutes <= 0))) {
     throw new TypeError("Invalid assessment intent preferences");
   }
-  if (value.answers.some((answer) => !answer || typeof answer !== "object" || !isStableId(answer.stepId))) {
+  const allAnswers = [...value.answers, ...(value.revisitAnswers ?? [])];
+  if (allAnswers.some((answer) => !answer || typeof answer !== "object" || !isStableId(answer.stepId))) {
     throw new TypeError("Invalid assessment answer");
   }
   const answerIds = value.answers.map((answer) => answer.stepId);
   assertUniqueStableIds(answerIds, "assessment answer steps");
+  assertUniqueStableIds(allAnswers.map((answer) => answer.stepId), "assessment answer and previous-choice steps");
   if (answerIds.length !== value.history.length
     || answerIds.some((id, index) => value.history[index] !== id)) {
     throw new TypeError("Assessment history must exactly match answer order");
   }
-  for (const answer of value.answers) {
+  for (const answer of allAnswers) {
     assertAnswerValue(answer.value, `assessment answer ${answer.stepId}`);
     if (!isCanonicalIsoTimestamp(answer.answeredAt)
       || Date.parse(answer.answeredAt) < Date.parse(value.createdAt)

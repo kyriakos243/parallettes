@@ -564,9 +564,13 @@ export const createVNextReleaseCandidateRuntime = (
   const updateGoals: VNextRuntime["updateGoals"] = async (input) => {
     const sources = await store.readProjectionSources(input.athleteId);
     if (!sources.intent) throw new Error("vNext goals require a bootstrapped Athlete Intent");
+    const pausedDraft = await store.readAssessmentDraft(input.athleteId);
+    const latestLocalChange = pausedDraft?.status === "in-progress"
+      ? atLeastTimestamp(sources.intent.updatedAt, pausedDraft.updatedAt, "Goal update time")
+      : sources.intent.updatedAt;
     const updatedAt = strictlyAfterTimestamp(
       input.updatedAt ?? clock(),
-      sources.intent.updatedAt,
+      latestLocalChange,
       "Goal update time",
     );
     const intent = applyGoalControlSelection({
@@ -575,6 +579,42 @@ export const createVNextReleaseCandidateRuntime = (
       selection: input.selection,
       updatedAt,
     });
+    if (pausedDraft?.status === "in-progress") {
+      const goalAnswerIndex = pausedDraft.answers.findIndex((answer) => answer.value.kind === "goals");
+      const orderedGoals = [
+        ...intent.goals.filter((goal) => goal.priority === "primary"),
+        ...intent.goals.filter((goal) => goal.priority === "secondary"),
+      ].map((goal) => goal.graphId);
+      const answers = goalAnswerIndex < 0 ? pausedDraft.answers : [
+        ...pausedDraft.answers.slice(0, goalAnswerIndex),
+        {
+          stepId: "goal-selection",
+          answeredAt: updatedAt,
+          value: { kind: "goals" as const, graphIds: orderedGoals },
+        },
+      ];
+      const updatedDraft: AssessmentDraft = {
+        ...pausedDraft,
+        updatedAt,
+        intentSeed: {
+          goals: intent.goals,
+          equipment: intent.equipment,
+          defaultSessionDemand: intent.defaultSessionDemand,
+          preferences: intent.preferences,
+          ...(intent.emphasisOverride ? { emphasisOverride: intent.emphasisOverride } : {}),
+        },
+        answers,
+        history: answers.map((answer) => answer.stepId),
+        revisitAnswers: [],
+        goalSelectionVersion: 2,
+        revision: pausedDraft.revision + 1,
+      };
+      nextAssessmentStep(updatedDraft, bundleFor(updatedDraft.catalogueVersion));
+      // Draft and intent have separate local writes. Save the non-authoritative
+      // draft first: interruption must never leave an old setup able to replace
+      // goals that were already saved. A failed intent write remains retryable.
+      await store.saveAssessmentDraft(updatedDraft);
+    }
     await store.putAthleteIntent(intent);
     return refresh({
       ...input,

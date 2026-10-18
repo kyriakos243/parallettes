@@ -223,7 +223,7 @@ export type TodayWorkoutPresentation = Readonly<{
 export type GoalPriorityChoice = "primary" | "secondary";
 
 export type GoalControlsPresentation = Readonly<{
-  title: "Goals & emphasis";
+  title: "Your goals";
   options: readonly Readonly<{
     graphId: GraphId;
     label: string;

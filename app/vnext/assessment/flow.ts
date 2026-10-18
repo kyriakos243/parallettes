@@ -50,7 +50,7 @@ const safetyStep: AssessmentStep = {
 const experienceStep: AssessmentStep = {
   id: "context-experience",
   kind: "experience",
-  title: "Relevant experience",
+  title: "Your experience",
   prompt: "How familiar are you with parallette support, compression, pushing or hand-balancing practice?",
 };
 
@@ -64,22 +64,22 @@ const inactivityStep: AssessmentStep = {
 const equipmentStep: AssessmentStep = {
   id: "equipment-selection",
   kind: "equipment",
-  title: "Available setup",
+  title: "Your equipment",
   prompt: "Which equipment can you safely use for placement and later sessions?",
 };
 
 const inversionStep: AssessmentStep = {
   id: "context-inversion",
   kind: "inversion",
-  title: "Inversion familiarity",
-  prompt: "What is the highest inversion exposure that currently feels familiar and controlled?",
+  title: "Being upside down",
+  prompt: "Which type of upside-down practice currently feels familiar and controlled?",
 };
 
 const reviewStep: AssessmentStep = {
   id: "assessment-review",
   kind: "review",
-  title: "Your provisional starting points",
-  prompt: "Review the estimates, restrictions and any short guided confirmation recommended next.",
+  title: "Your starting points",
+  prompt: "Review your goals and estimated starting points. You can check them with a guided test later.",
 };
 
 const answerFor = <Kind extends AssessmentAnswerValue["kind"]>(
@@ -235,7 +235,7 @@ const goalsStep = (policy: AssessmentPolicy): AssessmentStep => ({
   id: "goal-selection",
   kind: "goals",
   title: "Choose what matters most",
-  prompt: `Choose one to ${policy.maximumGoals} goals. The first is primary; irrelevant branches will be skipped.`,
+  prompt: "Choose your main goal and up to two supporting goals. We’ll focus the questions on what matters to you.",
   options: policy.goalOptions,
 });
 
@@ -303,6 +303,7 @@ export const createAssessmentDraft = (
   ];
   const intentSeed = input.existingIntent ? {
     goals: input.existingIntent.goals,
+    ...(input.existingIntent.emphasisOverride ? { emphasisOverride: input.existingIntent.emphasisOverride } : {}),
     equipment: input.existingIntent.equipment,
     defaultSessionDemand: input.existingIntent.defaultSessionDemand,
     preferences: input.existingIntent.preferences,
@@ -315,6 +316,7 @@ export const createAssessmentDraft = (
   const preferredGraphs = intentSeed.goals.map((goal) => goal.graphId);
   const draft: AssessmentDraft = {
     schemaVersion: VNEXT_ASSESSMENT_SCHEMA_VERSION,
+    goalSelectionVersion: 2,
     id: assessmentDraftId(input.id),
     athleteId: input.athleteId,
     policyId: VNEXT_ASSESSMENT_POLICY_ID,
@@ -417,10 +419,18 @@ export const answerAssessmentStep = (
   const step = nextAssessmentStep(draft, bundle, policy);
   assertAnswerMatchesStep(step, value, policy);
   const answer: AssessmentAnswerRecord = { stepId: step.id, answeredAt, value };
+  const previousChoice = draft.revisitAnswers?.find((item) => item.stepId === step.id);
+  // Reconfirm unchanged choices one at a time. An edit invalidates later choices,
+  // so a changed safety answer or goal cannot carry an obsolete route forward.
+  const revisitAnswers = previousChoice && JSON.stringify(previousChoice.value) === JSON.stringify(value)
+    ? draft.revisitAnswers?.filter((item) => item.stepId !== step.id)
+    : [];
   const updated: AssessmentDraft = {
     ...draft,
     updatedAt: answeredAt,
     answers: [...draft.answers, answer],
+    revisitAnswers,
+    ...(value.kind === "goals" ? { goalSelectionVersion: 2 as const } : {}),
     history: [...draft.history, step.id],
     revision: draft.revision + 1,
   };
@@ -442,6 +452,7 @@ export const goBackAssessment = (
     ...draft,
     updatedAt,
     answers: draft.answers.slice(0, -1),
+    revisitAnswers: [draft.answers[draft.answers.length - 1]!, ...(draft.revisitAnswers ?? [])],
     history: draft.history.slice(0, -1),
     revision: draft.revision + 1,
   };
@@ -469,6 +480,7 @@ export const editAssessmentAnswer = (
     committedAt: undefined,
     updatedAt,
     answers: draft.answers.slice(0, index),
+    revisitAnswers: [],
     history: draft.history.slice(0, index),
     revision: draft.revision + 1,
   };

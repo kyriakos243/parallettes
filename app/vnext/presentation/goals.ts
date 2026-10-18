@@ -33,7 +33,7 @@ export const buildGoalControls = (
     };
   });
   return {
-    title: "Goals & emphasis",
+    title: "Your goals",
     options,
     ...(intent.goals.find((goal) => goal.priority === "primary")?.graphId
       ? { primaryGraphId: intent.goals.find((goal) => goal.priority === "primary")!.graphId }
@@ -42,7 +42,7 @@ export const buildGoalControls = (
       .filter((goal) => goal.priority === "secondary")
       .map((goal) => goal.graphId),
     ...(intent.emphasisOverride ? { emphasis: intent.emphasisOverride } : {}),
-    authorityNotice: "You choose what matters. Evidence, prerequisites and current restrictions still decide which progression is safe.",
+    authorityNotice: "Your goals guide your workouts. Your current ability and comfort determine the steps you can train.",
     canUnlockSkills: false,
   };
 };
@@ -54,12 +54,15 @@ const assertGoalSelection = (
   const available = new Set(bundle.graphs.map((graph) => graph.id));
   const goalIds = selection.goals.map((goal) => goal.graphId);
   if (selection.goals.length < 1 || selection.goals.length > 3) {
-    throw new TypeError("Choose one to three goal families");
+    throw new TypeError("Choose one main goal and up to two supporting goals");
   }
   if (new Set(goalIds).size !== goalIds.length) throw new TypeError("A goal family can be selected only once");
   const primaryCount = selection.goals.filter((goal) => goal.priority === "primary").length;
   if (primaryCount !== 1) {
-    throw new TypeError("A goal selection requires exactly one primary goal");
+    throw new TypeError("Choose exactly one main goal");
+  }
+  if (selection.goals.some((goal) => goal.priority !== "primary" && goal.priority !== "secondary")) {
+    throw new TypeError("A selected goal must be a main or supporting goal");
   }
   if (selection.goals.some((goal) => !available.has(goal.graphId))) {
     throw new TypeError("Goals & emphasis references a graph outside the current catalogue");
@@ -105,7 +108,10 @@ export const applyGoalControlSelection = (input: Readonly<{
   return {
     ...intentWithoutEmphasis,
     updatedAt: input.updatedAt,
-    goals,
+    // The editor changes main/supporting goals only. Existing interests retain
+    // their intent and exact target unless the athlete explicitly selects one.
+    goals: [...goals, ...input.intent.goals.filter((goal) => goal.priority === "interest"
+      && !goals.some((selected) => selected.graphId === goal.graphId))],
     ...(input.selection.emphasis ? { emphasisOverride: input.selection.emphasis } : {}),
   };
 };

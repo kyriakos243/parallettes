@@ -70,6 +70,7 @@ export const assessmentGoalOptions = [
   goal(graphIds.verticalPushHspu, "HSPU", "Pike pressing now, with inversion-specific work only after safety gates.", true),
   goal(graphIds.pressToHandstand, "Press to handstand", "Support, compression and overhead prerequisites for later press work.", true),
   goal(graphIds.parallettePushing, "General parallette strength", "Foundational horizontal pushing and controlled range.", false),
+  goal(graphIds.transitions, "Transitions", "Connect skills smoothly, building the strength and control each move needs.", false),
 ] as const satisfies readonly AssessmentGoalOption[];
 
 export const commonPlacementAnchors = [
@@ -258,6 +259,9 @@ export const goalPlacementLadders = new Map<GraphId, readonly PlacementAnchor[]>
   [graphIds.verticalPushHspu, hspu],
   [graphIds.pressToHandstand, press],
   [graphIds.parallettePushing, pushing],
+  // Selecting this existing family checks common foundations only. Transition
+  // milestones still require their endpoint prerequisites and exact protocols.
+  [graphIds.transitions, []],
 ]);
 
 export const vNextAssessmentPolicy = {

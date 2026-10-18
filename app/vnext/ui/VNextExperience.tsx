@@ -62,7 +62,7 @@ export type VNextExperienceProps = Readonly<{
   busy?: boolean;
   initialView?: ViewId;
   onDemandChange?: (demand: SessionDemand) => void;
-  onGoalSelectionChange?: (selection: GoalControlSelection) => void;
+  onGoalSelectionChange?: (selection: GoalControlSelection) => void | Promise<void>;
   onAssessmentRequested?: (action: AssessmentEntryAction) => void;
   onStartWorkout?: () => void;
   workoutSwapOptions?: Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>;
@@ -402,8 +402,8 @@ const TodayView = ({
               <p>{today.reason}</p>
             </div>
             <div className="vnext-today-meta">
-              <div><span>Primary goal</span><strong>{today.primary?.familyLabel ?? "Purposeful practice"}</strong></div>
-              <div><span>Secondary</span><strong>{today.secondary?.familyLabel ?? "None today"}</strong></div>
+              <div><span>Main focus</span><strong>{today.primary?.familyLabel ?? "Purposeful practice"}</strong></div>
+              <div><span>Supporting focus</span><strong>{today.secondary?.familyLabel ?? "None today"}</strong></div>
               <div><span>Session</span><strong>{today.durationLabel ?? "Safe shorter session"}</strong></div>
               <div><span>Maintenance</span><strong>{today.maintenance.map((item) => item.familyLabel).join(", ") || "As needed"}</strong></div>
             </div>
@@ -585,31 +585,49 @@ const TodayView = ({
 
 const GoalControls = ({
   presentation,
+  busy = false,
   onGoalSelectionChange,
-  announce,
 }: Readonly<{
   presentation: GoalControlsPresentation;
-  onGoalSelectionChange?: (selection: GoalControlSelection) => void;
-  announce: (message: string) => void;
+  busy?: boolean;
+  onGoalSelectionChange?: (selection: GoalControlSelection) => void | Promise<void>;
 }>) => {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const [selection, setSelection] = useState<GoalControlSelection>(() =>
     initialGoalSelection(presentation));
-  useEffect(() => setSelection(initialGoalSelection(presentation)), [presentation]);
+  const editButton = useRef<HTMLButtonElement>(null);
+  const mainSelect = useRef<HTMLSelectElement>(null);
+  const returnFocus = useRef(false);
+  useEffect(() => {
+    if (!editing) setSelection(initialGoalSelection(presentation));
+  }, [presentation, editing]);
+  useEffect(() => {
+    if (editing) mainSelect.current?.focus();
+  }, [editing]);
+  useEffect(() => {
+    if (!editing && !saving && !busy && returnFocus.current) {
+      editButton.current?.focus();
+      returnFocus.current = false;
+    }
+  }, [editing, saving, busy]);
   const primary = selection.goals.find((goal) => goal.priority === "primary")?.graphId;
   const secondaries = selection.goals
     .filter((goal) => goal.priority === "secondary")
     .map((goal) => goal.graphId);
+  const savedPrimary = presentation.options.find((option) => option.graphId === presentation.primaryGraphId);
+  const savedSecondaries = presentation.options.filter((option) => presentation.secondaryGraphIds.includes(option.graphId));
   const emphasisEnabled = selection.emphasis !== undefined;
+  const locked = busy || saving;
 
-  const choosePrimary = (graphId: GraphId) => {
-    setSelection((current) => {
-      const wasPrimary = current.goals.some((goal) => goal.graphId === graphId
-        && goal.priority === "primary");
-      const remaining = current.goals.filter((goal) => goal.graphId !== graphId
-        && goal.priority !== "primary");
-      const goals = wasPrimary ? remaining : [{ graphId, priority: "primary" as const }, ...remaining];
-      return { goals, emphasis: undefined };
-    });
+  const choosePrimary = (graphId?: GraphId) => {
+    setSelection((current) => ({
+      goals: [
+        ...(graphId ? [{ graphId, priority: "primary" as const }] : []),
+        ...current.goals.filter((goal) => goal.graphId !== graphId && goal.priority === "secondary"),
+      ],
+    }));
   };
 
   const chooseSecondary = (graphId: GraphId) => {
@@ -618,7 +636,7 @@ const GoalControls = ({
       const selected = current.goals.some((goal) => goal.graphId === graphId && goal.priority === "secondary");
       const remaining = current.goals.filter((goal) => goal.graphId !== graphId);
       if (!selected && remaining.filter((goal) => goal.priority === "secondary").length >= 2) return current;
-      return { goals: selected ? remaining : [...remaining, { graphId, priority: "secondary" as const }], emphasis: undefined };
+      return { goals: selected ? remaining : [...remaining, { graphId, priority: "secondary" as const }] };
     });
   };
 
@@ -645,89 +663,108 @@ const GoalControls = ({
     });
   };
 
+  const closeEditor = () => {
+    returnFocus.current = true;
+    setEditing(false);
+    setSaveError("");
+  };
+  const save = async () => {
+    if (!onGoalSelectionChange || locked || !primary) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      await onGoalSelectionChange(selection);
+      closeEditor();
+    } catch {
+      setSaveError("Your changes could not be saved. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <section className="vnext-goals" aria-labelledby="vnext-goals-heading">
-      <div className="vnext-section-heading">
-        <p className="vnext-kicker">Your direction</p>
+      <div className="vnext-goals-heading">
         <h2 id="vnext-goals-heading">{presentation.title}</h2>
-      </div>
-      <fieldset>
-        <legend>Choose one primary goal and up to two secondary goals</legend>
-        <div className="vnext-goal-grid">
-          {presentation.options.map((option) => (
-            <div className="vnext-goal-option" key={option.graphId}>
-              <div><strong>{option.label}</strong><small>{option.description}</small></div>
-              <div className="vnext-goal-choice">
-                <button
-                  type="button"
-                  className="vnext-chip"
-                  aria-pressed={primary === option.graphId}
-                  aria-label={primary === option.graphId
-                    ? `Remove ${option.label} as primary goal`
-                    : `Set ${option.label} as primary goal`}
-                  onClick={() => choosePrimary(option.graphId)}
-                >
-                  Primary
-                </button>
-                <button
-                  type="button"
-                  className="vnext-chip"
-                  aria-pressed={secondaries.includes(option.graphId)}
-                  aria-label={secondaries.includes(option.graphId)
-                    ? `Remove ${option.label} as secondary goal`
-                    : `Add ${option.label} as secondary goal`}
-                  disabled={primary === option.graphId}
-                  onClick={() => chooseSecondary(option.graphId)}
-                >
-                  Secondary
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </fieldset>
-      <fieldset>
-        <legend>Optional emphasis</legend>
         <button
+          ref={editButton}
           type="button"
           className="vnext-chip"
-          aria-pressed={emphasisEnabled}
-          disabled={!primary}
-          onClick={toggleEmphasis}
-        >
-          {emphasisEnabled ? "Primary goal prioritised for now" : "System chooses the balance"}
-        </button>
-        {emphasisEnabled && secondaries.length > 0 && (
-          <div className="vnext-actions">
+          aria-expanded={editing}
+          aria-controls={editing ? "vnext-goal-editor" : undefined}
+          disabled={locked}
+          onClick={() => {
+            if (editing) closeEditor();
+            else {
+              setSelection(initialGoalSelection(presentation));
+              setSaveError("");
+              setEditing(true);
+            }
+          }}
+        >{editing ? "Cancel" : savedPrimary ? "Edit goals" : "Choose goals"}</button>
+      </div>
+      {savedPrimary ? <dl className="vnext-goal-summary">
+        <div><dt>Main goal</dt><dd>{savedPrimary.label}</dd></div>
+        <div><dt>Supporting goals</dt><dd>{savedSecondaries.length ? savedSecondaries.map((option) => option.label).join(" · ") : "None selected"}</dd></div>
+      </dl> : <p className="vnext-help">Choose a main goal to put its path first. You can add up to two supporting goals.</p>}
+      {editing && <div className="vnext-goal-editor" id="vnext-goal-editor">
+        <p className="vnext-help">Choose one main goal and up to two supporting goals.</p>
+        <label className="vnext-main-goal">Main goal
+          <select ref={mainSelect} value={primary ?? ""} disabled={locked} onChange={(event) => choosePrimary(event.target.value ? event.target.value as GraphId : undefined)}>
+            <option value="">Choose your main goal</option>
+            {presentation.options.map((option) => <option key={option.graphId} value={option.graphId}>{option.label}</option>)}
+          </select>
+        </label>
+        {primary && <p className="vnext-help">{presentation.options.find((option) => option.graphId === primary)?.description}</p>}
+        <fieldset disabled={locked}>
+          <legend>Supporting goals <span className="vnext-help">{secondaries.length} of 2 selected</span></legend>
+          <p className="vnext-help" id="vnext-supporting-goals-help">Optional. Uncheck a goal to make room for another.</p>
+          <div className="vnext-goal-grid">
+            {presentation.options.filter((option) => option.graphId !== primary).map((option) => <label className="vnext-supporting-goal" key={option.graphId}>
+              <input
+                type="checkbox"
+                checked={secondaries.includes(option.graphId)}
+                disabled={!secondaries.includes(option.graphId) && secondaries.length >= 2}
+                aria-describedby="vnext-supporting-goals-help"
+                onChange={() => chooseSecondary(option.graphId)}
+              />
+              <span><strong>{option.label}</strong><small>{option.description}</small>{option.selectedPriority === "interest" && <small>Previously saved as an interest</small>}</span>
+            </label>)}
+          </div>
+        </fieldset>
+        <details className="vnext-goal-emphasis">
+          <summary>Temporary training focus <span>(optional)</span></summary>
+          <p className="vnext-help">Let the app balance your goals, or give your main goal extra focus for now. Your current ability and comfort still guide each workout.</p>
+          <button
+            type="button"
+            className="vnext-chip"
+            aria-pressed={emphasisEnabled}
+            disabled={locked || !primary}
+            onClick={toggleEmphasis}
+          >{emphasisEnabled ? "Extra focus on my main goal" : "Let the app balance my goals"}</button>
+          {emphasisEnabled && secondaries.length > 0 && <div className="vnext-actions">
             {secondaries.map((graphId) => {
               const option = presentation.options.find((candidate) => candidate.graphId === graphId)!;
-              return (
-                <button
-                  type="button"
-                  className="vnext-chip"
-                  key={graphId}
-                  aria-pressed={selection.emphasis?.secondaryGraphId === graphId}
-                  onClick={() => chooseEmphasisSecondary(graphId)}
-                >
-                  Also emphasise {option.label}
-                </button>
-              );
+              return <button
+                type="button"
+                className="vnext-chip"
+                key={graphId}
+                aria-pressed={selection.emphasis?.secondaryGraphId === graphId}
+                disabled={locked}
+                onClick={() => chooseEmphasisSecondary(graphId)}
+              >Also focus on {option.label}</button>;
             })}
-          </div>
-        )}
-      </fieldset>
-      <p className="vnext-authority">{presentation.authorityNotice}</p>
-      <button
-        type="button"
-        className="vnext-submit"
-        disabled={!onGoalSelectionChange || !primary || selection.goals.length > 3}
-        onClick={() => {
-          onGoalSelectionChange?.(selection);
-          announce("Goals saved. Safe progression still comes from current evidence.");
-        }}
-      >
-        Save goals
-      </button>
+          </div>}
+        </details>
+        <p className="vnext-authority">{presentation.authorityNotice}</p>
+        {saveError && <p className="vnext-authority" role="alert">{saveError}</p>}
+        <div className="vnext-actions">
+          <button type="button" className="vnext-submit" disabled={locked || !onGoalSelectionChange || !primary || selection.goals.length > 3} onClick={() => { void save(); }}>
+            {saving ? "Saving goals…" : "Save goals"}
+          </button>
+          <button type="button" className="vnext-action" data-kind="secondary" disabled={locked} onClick={closeEditor}>Cancel</button>
+        </div>
+      </div>}
     </section>
   );
 };
@@ -780,12 +817,13 @@ const ProgressView = ({
   goals,
   assessment,
   restrictions,
+  busy = false,
   onGoalSelectionChange,
   onAssessmentRequested,
   onRestrictionRequested,
   announce,
 }: Readonly<Pick<VNextExperienceProps,
-  "progress" | "skillDetails" | "goals" | "assessment" | "restrictions"
+  "progress" | "skillDetails" | "goals" | "assessment" | "restrictions" | "busy"
   | "onGoalSelectionChange" | "onAssessmentRequested" | "onRestrictionRequested"> & {
   announce: (message: string) => void;
 }>) => {
@@ -875,8 +913,9 @@ const ProgressView = ({
             <h2 id="vnext-progress-heading">{progress.title}</h2>
             <p>{progress.intro}</p>
           </div>
+          <GoalControls presentation={goals} busy={busy} onGoalSelectionChange={onGoalSelectionChange} />
           <SkillRoadmap roadmaps={progress.roadmaps} />
-          <div className="vnext-section-heading"><h2>All skill families</h2><p>Review your current focus or update your goals below.</p></div>
+          <div className="vnext-section-heading"><h2>All skill families</h2><p>Explore your progress and next steps in each skill.</p></div>
           <div className="vnext-family-grid">
             {progress.families.map((family) => (
               <button
@@ -902,7 +941,6 @@ const ProgressView = ({
 
       {!detail && (
         <>
-          <GoalControls presentation={goals} onGoalSelectionChange={onGoalSelectionChange} announce={announce} />
           <AssessmentActions presentation={assessment} onAssessmentRequested={onAssessmentRequested} announce={announce} />
         </>
       )}
@@ -1042,6 +1080,7 @@ export const VNextExperience = ({
             progress={progress}
             skillDetails={skillDetails}
             goals={goals}
+            busy={busy}
             assessment={assessment}
             restrictions={restrictions}
             onGoalSelectionChange={onGoalSelectionChange}
