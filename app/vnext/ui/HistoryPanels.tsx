@@ -49,15 +49,22 @@ export const HistoryView = ({ sessions, selectedId }: { sessions: readonly VNext
   </section>;
 };
 
-export const WorkoutSavedSummary = ({ session, nextFocus, syncMessage, onHistory, onDone }: {
+export const WorkoutSavedSummary = ({ session, nextFocus, syncMessage, onHistory, onDone, active = true }: {
   session: VNextRecentSession;
+  active?: boolean;
   nextFocus: string;
   syncMessage: string;
   onHistory: () => void;
   onDone: () => void;
 }) => {
   const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { heading.current?.focus({ preventScroll: true }); heading.current?.scrollIntoView({ block: "start" }); }, [session.id]);
+  const focusedSession = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!active || focusedSession.current === session.id) return;
+    focusedSession.current = session.id;
+    heading.current?.focus({ preventScroll: true });
+    heading.current?.scrollIntoView({ block: "start" });
+  }, [session.id, active]);
   return <section className="vnext-saved-summary" aria-labelledby="vnext-saved-heading">
     <p className="vnext-kicker">Saved on this device</p>
     <h2 id="vnext-saved-heading" ref={heading} tabIndex={-1}>Workout saved</h2>

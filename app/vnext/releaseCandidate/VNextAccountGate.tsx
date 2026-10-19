@@ -16,6 +16,7 @@ export const VNEXT_RC_STORAGE_NAMESPACE = "vnext-rc";
 const identityKey = (namespace: string) => `parallette25-${namespace}-identity-v1`;
 const legacyAthleteKey = (namespace: string) => `parallette25-${namespace}-athlete-v1`;
 const workflowPrefixes = (namespace: string) => [
+  `parallette25-${namespace}-short-workout-v1:`,
   `parallette25-${namespace}-emphasis-v1:`,
   `parallette25-${namespace}-workout-recovery-v1:`,
   `parallette25-${namespace}-guided-recovery-v1:`,

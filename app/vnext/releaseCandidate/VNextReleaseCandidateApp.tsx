@@ -32,6 +32,7 @@ import { confirmedSyncFingerprint, trainingSyncMessage, type TrainingSyncStatus 
 import { AssessmentRunner } from "./AssessmentRunner";
 import { GuidedTestRunner, type GuidedTestFormResult } from "./GuidedTestRunner";
 import { CustomSessionBuilder, type VNextCustomSessionRequest } from "./CustomSessionBuilder";
+import { shortWorkoutPreferenceKey } from "./shortWorkoutPreferences";
 import { isMixedWorkoutPlan } from "../mixedWorkout";
 import { ReliableWorkoutRunner } from "./ReliableWorkoutRunner";
 import { MixedWorkoutRunner, recoverActiveWorkoutFacts as recoverMixedWorkoutFacts } from "./MixedWorkoutRunner";
@@ -1033,7 +1034,7 @@ const VNextAthleteApplication = ({
   }
 
   if (customOpen) {
-    return <CustomSessionBuilder goals={snapshot.presentations.goals} currentEquipment={snapshot.intent.equipment} defaultDemand={snapshot.intent.defaultSessionDemand} busy={busy} onClose={() => setCustomOpen(false)} onBuild={startCustomSession} />;
+    return <CustomSessionBuilder preferenceKey={shortWorkoutPreferenceKey(athleteId, storageNamespace)} goals={snapshot.presentations.goals} currentEquipment={snapshot.intent.equipment} defaultDemand={snapshot.intent.defaultSessionDemand} busy={busy} onClose={() => setCustomOpen(false)} onBuild={startCustomSession} />;
   }
 
   if (workoutOpen && plan) {

@@ -177,6 +177,10 @@ Assessment drafts add optional validated local-only `revisitAnswers` and `goalSe
 
 Explicit Progress goal changes reconcile a paused draft's intent seed and answered goal selection before saving Athlete Intent. Earlier safety/context answers remain; downstream answers that depended on the previous goals are discarded. Unanswered/targeted drafts retain their existing route/targets and receive the updated seed. Seed data includes existing target IDs, interests and valid emphasis. Draft-first persistence prevents a newly saved intent from coexisting with an obsolete goal answer. If the subsequent intent write fails, the local draft retains the user's explicit requested choice, the UI reports failure, and retry is supported. Focused fault-injection tests cover both write boundaries and exact native partial-commit recovery. This introduces no migration, production data rewrite or reset.
 
+### 5.12 Short-workout preference compatibility — 2026-10-19
+
+The optional localStorage key `parallette25-${storageNamespace}-short-workout-v1:${athleteId}` stores version 1, a supported 5/10/15/20-minute duration and a stable focus token. Graph IDs and sorted capacity IDs identify choices independently of translated labels or option order. Invalid/unavailable values fall back to current defaults, and inaccessible/full storage never blocks preview creation. The keyed builder separates athletes and release namespaces; existing account sign-out/deletion clearing includes this prefix. These convenience choices are not synced, included as observation evidence, or used to restore a workout. Equipment and effort continue to come from current profile defaults unless edited in the open form. Section scroll/disclosure memory exists only in React state. No IndexedDB version, immutable observation, migration, backup format, schema or API change is introduced.
+
 ## 6. Target Persistence and Sync
 
 ### 6.1 Static versioned definitions
