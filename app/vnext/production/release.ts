@@ -174,7 +174,8 @@ const ownerMediaApprovals = Object.entries(VNEXT_PHASE10_OWNER_APPROVED_MEDIA_FI
  * retained v1 deployment, recoverable D1 snapshot, exact additive schema,
  * coherent Worker authority switch and active rollback controls.
  * The owner approved experienced placement and the shorter questionnaire/check
- * correction, retaining exact evidence, safety gates, animations and recovery.
+ * correction and explicit repair of malformed pending attempt counts, retaining
+ * exact saved evidence, safety gates, animations and recovery.
  * The exact artifact below includes only these approved corrections. Fresh full and accounts backups passed
  * isolated restore and all 14 invariants; FileVault is on and temporary CLI
  * access is logged out. Worker/schema/authority remain unchanged. Historical
@@ -203,7 +204,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   },
   phase11ReleaseArtifact: {
     status: "frozen",
-    sourceFingerprint: "7c35af53fd3bb95e17da7c4f5d989b838cd6e8129fe81054ce5150b75ae7e55f",
+    sourceFingerprint: "d5ef0386f335c35fa071d31f31d50dc7692c405cdbc159b4aa9e7a4ce75fc0be",
   },
   preflight: [
     {
@@ -214,7 +215,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
     {
       id: "phase11-release-artifact-frozen",
       status: "passed",
-      evidence: "dist-set:7c35af53fd3bb95e17da7c4f5d989b838cd6e8129fe81054ce5150b75ae7e55f",
+      evidence: "dist-set:d5ef0386f335c35fa071d31f31d50dc7692c405cdbc159b4aa9e7a4ce75fc0be",
     },
     {
       id: "recoverable-production-snapshots-verified",
@@ -249,7 +250,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   ],
   productionGrant: {
     status: "granted",
-    releaseArtifactFingerprint: "7c35af53fd3bb95e17da7c4f5d989b838cd6e8129fe81054ce5150b75ae7e55f",
+    releaseArtifactFingerprint: "d5ef0386f335c35fa071d31f31d50dc7692c405cdbc159b4aa9e7a4ce75fc0be",
     authorizations: {
       deployCompatibleRelease: true,
       runIdempotentLiveMigration: true,

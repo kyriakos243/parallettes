@@ -183,6 +183,23 @@ try {
     app.input("Total attempts", String(app.protocol.metric.maximumAttempts)); app.click("Both counts");
     assert.deepEqual(app.commits[0].measurement, { value: app.protocol.metric.minimumSuccessful, unit: "attempts", attemptsTotal: app.protocol.metric.maximumAttempts });
   });
+  check("successful-attempts", (app) => {
+    app.props = { ...app.props, retryingExactObservation: true, onCorrectInvalidEntry: () => { app.correctRequested = true; } }; app.flush();
+    assert(!app.button("Retry saving this result"), "Known invalid entry must not offer an ineffective retry");
+    app.click("Correct saved entry"); assert.equal(app.correctRequested, true);
+    const old = { outcome: "not-yet", measurement: { value: 0, unit: "attempts", attemptsTotal: 0 }, qualityCriteriaSatisfied: false, safetyCriteriaSatisfied: false, notes: "Original note" };
+    app.props = { ...app.props, initialResult: old, retryingExactObservation: false, onCorrectInvalidEntry: undefined }; app.flush();
+    assert.equal(app.button("Save corrected entry").props.disabled, true);
+    assert.equal(app.commits.length, 0, "Opening correction never saves or guesses numbers");
+    app.input("Successful attempts", "2"); app.input("Total attempts", "3"); app.click("Save corrected entry");
+    assert.deepEqual(app.commits[0], { ...old, measurement: { value: 2, unit: "attempts", attemptsTotal: 3 } });
+  });
+  check("successful-attempts", (app) => {
+    app.props = { ...app.props, initialResult: { outcome: "not-yet", measurement: { value: 0, unit: "attempts", attemptsTotal: 0 }, qualityCriteriaSatisfied: false, safetyCriteriaSatisfied: false } }; app.flush();
+    app.click("No attempt made"); app.click("Save corrected entry");
+    assert.equal(app.commits[0].measurement, undefined, "No attempt is saved without fabricated zero-count measurement");
+    assert.equal(app.commits[0].outcome, "not-yet");
+  });
   check("range", (app) => {
     app.click("I met this target");
     assert.deepEqual(app.commits[0], { outcome: "clean", qualityCriteriaSatisfied: true, safetyCriteriaSatisfied: true });

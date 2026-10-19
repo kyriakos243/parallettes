@@ -25,6 +25,8 @@ type GuidedTestRunnerProps = Readonly<{
   error?: string;
   retryingExactObservation?: boolean;
   hasSavedChecks?: boolean;
+  initialResult?: GuidedTestFormResult;
+  onCorrectInvalidEntry?: () => void;
   onCommit: (result: GuidedTestFormResult) => void;
   onClose: () => void;
 }>;
@@ -36,16 +38,18 @@ const GuidedTestForm = ({
   error,
   retryingExactObservation = false,
   hasSavedChecks = false,
+  initialResult,
+  onCorrectInvalidEntry,
   onCommit,
   onClose,
 }: GuidedTestRunnerProps) => {
   const presentation = useMemo(() => guidedTestPresentation(offer, bundle), [offer, bundle]);
-  const [differentResult, setDifferentResult] = useState(false);
-  const [outcome, setOutcome] = useState<GuidedTestFormResult["outcome"]>();
-  const [measurementValue, setMeasurementValue] = useState("");
-  const [attemptsTotal, setAttemptsTotal] = useState("");
-  const [exertion, setExertion] = useState("");
-  const [notes, setNotes] = useState("");
+  const [differentResult, setDifferentResult] = useState(Boolean(initialResult));
+  const [outcome, setOutcome] = useState<GuidedTestFormResult["outcome"] | undefined>(initialResult?.outcome);
+  const [measurementValue, setMeasurementValue] = useState(initialResult?.measurement ? String(initialResult.measurement.value) : "");
+  const [attemptsTotal, setAttemptsTotal] = useState(initialResult?.measurement?.attemptsTotal === undefined ? "" : String(initialResult.measurement.attemptsTotal));
+  const [exertion, setExertion] = useState(initialResult?.perceivedExertion === undefined ? "" : String(initialResult.perceivedExertion));
+  const [notes, setNotes] = useState(initialResult?.notes ?? "");
   type HoldTimer = Readonly<{ stage: "idle" | "ready" | "holding" | "complete" | "interrupted"; remaining: number; run: number }>;
   const [holdTimer, setHoldTimer] = useState<HoldTimer>({ stage: "idle", remaining: 0, run: 0 });
   const holdTimerRef = useRef(holdTimer);
@@ -238,14 +242,16 @@ const GuidedTestForm = ({
 
         <div className="vnext-rc-anchor vnext-rc-guided-form vnext-quick-guided-result">
           <h2>How did it go?</h2>
-          {error && <p className="vnext-authority" role="alert">{error} Your result is kept for retry. You do not need to repeat the check.</p>}
+          {error && <p className="vnext-authority" role="alert">{onCorrectInvalidEntry ? "The saved entry needs a valid total attempt count. Use Correct saved entry below." : error} Your entry is kept. You do not need to repeat the check.</p>}
+          {initialResult && <p className="vnext-help">Correct the numbers from your original check. Nothing changes until you save. You do not need to perform it again.</p>}
           {retryingExactObservation ? (
             <>
-              <p>Your original result is ready to save. You do not need to fill this in again.</p>
-              <button type="button" className="vnext-submit" disabled={busy} onClick={() => {
+              <p>{onCorrectInvalidEntry ? "An older saved entry has a missing or invalid total attempt count. Review the entry to correct it." : "Your original result is ready to save. You do not need to fill this in again."}</p>
+              {onCorrectInvalidEntry && <button type="button" className="vnext-submit" disabled={busy} onClick={onCorrectInvalidEntry}>Correct saved entry</button>}
+              {!onCorrectInvalidEntry && <button type="button" className="vnext-submit" disabled={busy} onClick={() => {
                 // The coordinator ignores fresh form values while retrying and reuses its exact prepared observation.
                 saveResult(outcome ?? "not-yet", exactMeasurement);
-              }}>{busy ? "Saving…" : "Retry saving this result"}</button>
+              }}>{busy ? "Saving…" : "Retry saving this result"}</button>}
             </>
           ) : (
             <>
@@ -274,6 +280,7 @@ const GuidedTestForm = ({
               {differentResult && (
                 <>
                   {needsMeasurement && measuredFields}
+                  {isAttempts && <button type="button" className="vnext-action" data-kind="secondary" disabled={locked} onClick={() => { setMeasurementValue(""); setAttemptsTotal(""); setOutcome("not-yet"); }}>No attempt made</button>}
                   <fieldset disabled={locked}>
                     <legend>Your result</legend>
                     <div className="vnext-rc-answer-grid">
@@ -289,14 +296,14 @@ const GuidedTestForm = ({
                   </fieldset>
                   {outcome === "clean" && <p className="vnext-help">Saving confirms these are your actual results and every technique and safety point above was met.</p>}
                   {outcome === "clean" && !measurementPasses && <p className="vnext-help">Enter a result that meets the shown target, or choose Partial / Not yet.</p>}
-                  {hasMeasurementInput && !measurementIsValid && <p className="vnext-help">Check your numbers.{isAttempts ? " Include both counts; successes cannot exceed total attempts." : " Use a non-negative number."}</p>}
+                  {hasMeasurementInput && !measurementIsValid && <p className="vnext-help">Check your numbers.{isAttempts ? " Use whole counts and at least 1 total attempt. Successes cannot exceed total attempts. If you did not try it, choose No attempt made." : " Use a non-negative number."}</p>}
                   <button
                     type="button"
                     className="vnext-submit"
                     disabled={!canSave || !outcome || !measurementIsValid || !optionalInputValid || (outcome === "clean" && !measurementPasses)}
                     onClick={() => { if (outcome) saveResult(outcome, exactMeasurement); }}
-                  >{busy ? "Saving…" : outcome === "clean" ? "Confirm clean result" : "Save result"}</button>
-                  <button type="button" className="vnext-action" data-kind="secondary" disabled={locked} onClick={() => setDifferentResult(false)}>Back to quick result</button>
+                  >{busy ? "Saving…" : initialResult ? "Save corrected entry" : outcome === "clean" ? "Confirm clean result" : "Save result"}</button>
+                  {!initialResult && <button type="button" className="vnext-action" data-kind="secondary" disabled={locked} onClick={() => setDifferentResult(false)}>Back to quick result</button>}
                 </>
               )}
               <details className="vnext-quick-guided-details">
@@ -321,4 +328,4 @@ const GuidedTestForm = ({
 };
 
 // Automatic next-check navigation must never carry the previous check's form values forward.
-export const GuidedTestRunner = (props: GuidedTestRunnerProps) => <GuidedTestForm key={props.offer.protocolId} {...props} />;
+export const GuidedTestRunner = (props: GuidedTestRunnerProps) => <GuidedTestForm key={`${props.offer.protocolId}:${props.initialResult ? "correct" : "result"}`} {...props} />;

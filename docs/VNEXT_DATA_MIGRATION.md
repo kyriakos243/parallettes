@@ -189,6 +189,8 @@ Projection v9 may use current exact measured readiness plus the measured whiteli
 
 The saved-check summary is a read-only view of active guided observations from the current assessment day, filtered through the projected load sources so corrected/reset facts do not reappear. It records no invented activity time and creates no duplicate Session Record. Old v8 plans, records and weak/guided observations round-trip unchanged through export/import under policy 9. A frontend repair must preserve policy-2 draft reading, exact native histories and the measured/load semantics; do not downgrade over new work or restore old SQL over newer observations. No account reset, SQL migration, API deployment or data deletion is included.
 
+The iPhone review exposed an older pending guided envelope with blank attempt fields serialized as `0 / 0`; validation correctly rejected it, but exact-only recovery trapped the user. Recovery now identifies only malformed attempt measurements and offers explicit review of the original entry. Opening review changes no stored input. Saving corrected numbers or an explicit unattempted/not-yet result retains event, protocol, occasion and check timestamps and uses the normal append/gating path. Saved observations still require canonical equality; valid pending results remain exact-only. No count is inferred or rounded, and an unattempted result carries no invented measurement. The pending envelope schema and immutable contracts remain unchanged.
+
 ## 6. Target Persistence and Sync
 
 ### 6.1 Static versioned definitions

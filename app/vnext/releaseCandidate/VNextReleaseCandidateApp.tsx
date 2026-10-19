@@ -1,3 +1,4 @@
+import { correctInvalidGuidedAttemptResult, hasInvalidGuidedAttemptCount } from "../assessment/guidedRecovery";
 import { guidedObservationOccasionId } from "../assessment/evidence";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import {
@@ -321,6 +322,7 @@ const VNextAthleteApplication = ({
   const [restartSetupOpen, setRestartSetupOpen] = useState(false);
   const [restartForRestrictions, setRestartForRestrictions] = useState(false);
   const [guidedOffer, setGuidedOffer] = useState<GuidedTestOffer | undefined>(initialGuidedRecovery?.offer);
+  const [correctingGuidedEntry, setCorrectingGuidedEntry] = useState(false);
   const [guidedRecovery, setGuidedRecovery] = useState<GuidedRecovery | undefined>(initialGuidedRecovery);
   const [workoutRecovery, setWorkoutRecovery] = useState<WorkoutRecovery | undefined>(initialWorkoutRecovery);
   const [workoutSelections, setWorkoutSelections] = useState<Readonly<Partial<Record<PlanItemId, SafeWorkoutSwap>>>>(
@@ -669,6 +671,7 @@ const VNextAthleteApplication = ({
     guidedSubmissionLocked.current = true;
     try {
       persistGuidedRecovery(pending);
+      setCorrectingGuidedEntry(false);
     } catch (reason) {
       guidedSubmissionLocked.current = false;
       setError(reason instanceof Error ? reason.message : "The guided observation could not be retained for safe retry.");
@@ -707,7 +710,13 @@ const VNextAthleteApplication = ({
 
   const commitGuidedTest = (result: GuidedTestFormResult): void => {
     if (guidedRecovery) {
-      commitExactGuidedRecovery(guidedRecovery);
+      if (correctingGuidedEntry) {
+        try {
+          commitExactGuidedRecovery({ ...guidedRecovery, result: correctInvalidGuidedAttemptResult(guidedRecovery.result, result) });
+        } catch (reason) {
+          setError(reason instanceof Error ? reason.message : "Check the attempt counts before saving.");
+        }
+      } else commitExactGuidedRecovery(guidedRecovery);
       return;
     }
     if (!guidedOffer || !snapshot?.assessmentDraft) return;
@@ -1096,7 +1105,10 @@ const VNextAthleteApplication = ({
   }
 
   if (guidedOffer) {
-    return <GuidedTestRunner key={`${guidedOffer.protocolId}:${guidedRecovery?.result.eventId ?? "new"}`} offer={guidedOffer} bundle={bundleFor((guidedRecovery?.draft ?? snapshot.assessmentDraft)?.catalogueVersion ?? vNextDefinitionBundle.catalogueVersion)} busy={busy} error={error} retryingExactObservation={Boolean(guidedRecovery)} hasSavedChecks={Boolean(snapshot.assessmentReview?.checkedToday?.length)} onClose={() => {
+    return <GuidedTestRunner key={`${guidedOffer.protocolId}:${guidedRecovery?.result.eventId ?? "new"}:${correctingGuidedEntry ? "correct" : "retry"}`} offer={guidedOffer} bundle={bundleFor((guidedRecovery?.draft ?? snapshot.assessmentDraft)?.catalogueVersion ?? vNextDefinitionBundle.catalogueVersion)} busy={busy} error={error} retryingExactObservation={Boolean(guidedRecovery) && !correctingGuidedEntry} initialResult={correctingGuidedEntry ? guidedRecovery?.result : undefined} onCorrectInvalidEntry={guidedRecovery && hasInvalidGuidedAttemptCount(guidedRecovery.result) && !correctingGuidedEntry ? () => {
+      setCorrectingGuidedEntry(true);
+      setError(undefined);
+    } : undefined} hasSavedChecks={Boolean(snapshot.assessmentReview?.checkedToday?.length)} onClose={() => {
       setGuidedOffer(undefined);
       const draft = snapshot.assessmentDraft;
       if (!guidedRecovery && draft?.policyVersion === 2 && snapshot.assessmentReview) {

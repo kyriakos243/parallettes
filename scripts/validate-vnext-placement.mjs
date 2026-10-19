@@ -118,6 +118,26 @@ assert.ok(away.snapshot.assessmentReview.guidedTests.find(o=>o.protocolId==='bod
 const hs = await setup('handstand-balance','controlled-short-parallette-balance');
 assert.ok(hs.snapshot.assessmentReview.guidedTests.some(o=>o.protocolId==='handstand-balance-grounded-side-exit' && o.availability==='available'));
 assert.ok(!hs.snapshot.assessmentReview.guidedTests.some(o=>o.protocolId==='handstand-balance-controlled-short-parallette-balance' && o.availability==='available'));
+// A legacy blank / blank attempt form created 0 / 0, which cannot be saved.
+// Recovery permits explicit correction of that invalid input only, with the
+// original event/occasion/time retained and normal immutable retry checks intact.
+const { hasInvalidGuidedAttemptCount, correctInvalidGuidedAttemptResult } = load('app/vnext/assessment/guidedRecovery.ts');
+const original = { ...cleanInput(hs, 'handstand-balance-grounded-side-exit', 'not-yet'), measurement: { value: 0, unit: 'attempts', attemptsTotal: 0 } };
+assert.equal(hasInvalidGuidedAttemptCount(original), true);
+await assert.rejects(() => hs.runtime.commitGuidedTest({ athleteId: hs.athleteId, draft: hs.draft, result: original }), /Invalid guided evidence: Expected a positive safe integer/);
+assert.ok(!(await hs.store.readProjectionSources(hs.athleteId)).evidenceEvents.some(e => e.id === original.eventId), 'Invalid pending result was never appended');
+const fields = { outcome: 'not-yet', qualityCriteriaSatisfied: false, safetyCriteriaSatisfied: false };
+const corrected = correctInvalidGuidedAttemptResult(original, { ...fields, eventId: 'must-not-replace-original', occurredAt: now() });
+for (const field of ['eventId','protocolId','observationSessionId','occurredAt','recordedAt']) assert.equal(corrected[field], original[field]);
+assert.equal(corrected.measurement, undefined);
+assert.equal(original.measurement.attemptsTotal, 0, 'Preparing a correction must not mutate the retained original');
+assert.throws(() => correctInvalidGuidedAttemptResult(corrected, fields), /retried unchanged/);
+const repaired = await hs.runtime.commitGuidedTest({ athleteId: hs.athleteId, draft: hs.draft, result: corrected });
+const retried = await hs.runtime.commitGuidedTest({ athleteId: hs.athleteId, draft: hs.draft, result: corrected });
+assert.equal(retried.snapshot.sources.evidenceEvents.length, repaired.snapshot.sources.evidenceEvents.length);
+const divergent = correctInvalidGuidedAttemptResult(original, { ...fields, measurement: { value: 2, unit: 'attempts', attemptsTotal: 3 } });
+await assert.rejects(() => hs.runtime.commitGuidedTest({ athleteId: hs.athleteId, draft: hs.draft, result: divergent }), /differs/);
+assert.ok(!repaired.snapshot.state.nodeStates.some(n => n.milestone.nodeId === 'grounded-side-exit' && n.lifecycle === 'established'), 'Correcting uncompleted input cannot award a skill');
 const beginner = await setup('parallette-pushing');
 assert.equal(beginner.snapshot.state.nodeStates.find(n=>n.milestone.nodeId==='knee-push-up').lifecycle,'unknown');
 assert.ok(beginner.snapshot.generated.ok);
