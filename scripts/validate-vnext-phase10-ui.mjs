@@ -96,7 +96,7 @@ for (const [label, source] of Object.entries({
     `${label} flow uses a pointer-only non-interactive click target`);
 }
 includesAll(sources.assessment, ["<fieldset", "<legend", "type=\"radio\"", "type=\"checkbox\"", "Finish later"], "adaptive placement");
-includesAll(sources.guided, ["Exact test", "Target", "Equipment", "Assistance:", "Range:", "How did it go?", "quality criteria", "safety criteria", "role=\"alert\""], "guided confirmation");
+includesAll(sources.guided, ["Starting-point check", "Target", "Equipment", "Assistance", "Range", "How did it go?", "presentation.qualityCriteria", "presentation.safetyCriteria", "role=\"alert\""], "guided confirmation");
 includesAll(sources.workout, ["aria-label=\"Workout timer\"", "Save & close", "Finish early", "role=\"alert\"", "Up next:", "vnext-rc-session-progress"], "workout execution");
 includesAll(sources.custom, [
   "([5, 10, 15, 20] as const)",

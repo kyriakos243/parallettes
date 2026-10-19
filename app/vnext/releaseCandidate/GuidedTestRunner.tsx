@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type {
   DefinitionBundle,
   GuidedTestOffer,
@@ -6,7 +6,8 @@ import type {
 } from "../index";
 import { guidedTestPresentation } from "../assessment/presentation";
 import { VNextMotionGuide } from "../media/VNextMotionGuide";
-import "./placementSetup.css";
+import { useWorkoutClock } from "./useWorkoutClock";
+import "./quickGuided.css";
 
 export type GuidedTestFormResult = Readonly<{
   outcome: "clean" | "partial" | "not-yet" | "symptom";
@@ -17,71 +18,138 @@ export type GuidedTestFormResult = Readonly<{
   notes?: string;
 }>;
 
-export const GuidedTestRunner = ({
-  offer,
-  bundle,
-  busy = false,
-  error,
-  retryingExactObservation = false,
-  onCommit,
-  onClose,
-}: Readonly<{
+type GuidedTestRunnerProps = Readonly<{
   offer: GuidedTestOffer;
   bundle: DefinitionBundle;
   busy?: boolean;
   error?: string;
   retryingExactObservation?: boolean;
+  hasSavedChecks?: boolean;
   onCommit: (result: GuidedTestFormResult) => void;
   onClose: () => void;
-}>) => {
+}>;
+
+const GuidedTestForm = ({
+  offer,
+  bundle,
+  busy = false,
+  error,
+  retryingExactObservation = false,
+  hasSavedChecks = false,
+  onCommit,
+  onClose,
+}: GuidedTestRunnerProps) => {
   const presentation = useMemo(() => guidedTestPresentation(offer, bundle), [offer, bundle]);
-  const [outcome, setOutcome] = useState<GuidedTestFormResult["outcome"]>("not-yet");
+  const [differentResult, setDifferentResult] = useState(false);
+  const [outcome, setOutcome] = useState<GuidedTestFormResult["outcome"]>();
   const [measurementValue, setMeasurementValue] = useState("");
   const [attemptsTotal, setAttemptsTotal] = useState("");
-  const [quality, setQuality] = useState(false);
-  const [safety, setSafety] = useState(false);
   const [exertion, setExertion] = useState("");
   const [notes, setNotes] = useState("");
+  type HoldTimer = Readonly<{ stage: "idle" | "ready" | "holding" | "complete" | "interrupted"; remaining: number; run: number }>;
+  const [holdTimer, setHoldTimer] = useState<HoldTimer>({ stage: "idle", remaining: 0, run: 0 });
+  const holdTimerRef = useRef(holdTimer);
+  const changeHoldTimer = (next: HoldTimer): void => {
+    holdTimerRef.current = next;
+    setHoldTimer(next);
+  };
   const metric = presentation.metric;
+  const holdClock = useWorkoutClock({
+    running: (holdTimer.stage === "ready" || holdTimer.stage === "holding") && !busy && !retryingExactObservation,
+    intervalKey: holdTimer.run,
+    onSeconds: (seconds) => {
+      const current = holdTimerRef.current;
+      if (metric.kind !== "duration-seconds" || (current.stage !== "ready" && current.stage !== "holding")) return;
+      const remaining = Math.max(0, current.remaining - seconds);
+      if (remaining > 0) {
+        changeHoldTimer({ ...current, remaining });
+      } else {
+        // Start a fresh interval at the end of preparation. No preparation time
+        // or queued callback can count toward the continuous hold itself.
+        holdClock.stop();
+        changeHoldTimer({
+          stage: current.stage === "ready" ? "holding" : "complete",
+          remaining: current.stage === "ready" ? metric.minimum : 0,
+          run: current.run + 1,
+        });
+      }
+    },
+    onAutoPause: () => {
+      const current = holdTimerRef.current;
+      changeHoldTimer({ stage: "interrupted", remaining: 0, run: current.run + 1 });
+    },
+  });
+  const stopHoldTimer = (): void => {
+    holdClock.stop();
+    changeHoldTimer({ stage: "interrupted", remaining: 0, run: holdTimerRef.current.run + 1 });
+  };
   const needsMeasurement = metric.kind === "duration-seconds"
     || metric.kind === "repetitions"
     || metric.kind === "successful-attempts";
-  const parsedMeasurement = Number(measurementValue);
-  const parsedAttempts = Number(attemptsTotal);
+  const isAttempts = metric.kind === "successful-attempts";
   const measurement = (): ObservationMeasurement | undefined => {
-    if (!needsMeasurement || !Number.isFinite(parsedMeasurement) || parsedMeasurement < 0) return undefined;
-    if (metric.kind === "duration-seconds") return { value: parsedMeasurement, unit: "seconds" };
-    if (metric.kind === "repetitions") return { value: parsedMeasurement, unit: "repetitions" };
-    return Number.isSafeInteger(parsedMeasurement) && Number.isSafeInteger(parsedAttempts)
-      ? { value: parsedMeasurement, unit: "attempts", attemptsTotal: parsedAttempts }
+    if (!needsMeasurement || measurementValue.trim() === "") return undefined;
+    const value = Number(measurementValue);
+    if (!Number.isFinite(value) || value < 0) return undefined;
+    if (metric.kind === "duration-seconds") return { value, unit: "seconds" };
+    if (!Number.isSafeInteger(value)) return undefined;
+    if (metric.kind === "repetitions") return { value, unit: "repetitions" };
+    const total = Number(attemptsTotal);
+    return attemptsTotal.trim() !== "" && Number.isSafeInteger(total) && total >= 1 && total >= value
+      ? { value, unit: "attempts", attemptsTotal: total }
       : undefined;
   };
   const exactMeasurement = measurement();
+  const hasMeasurementInput = measurementValue.trim() !== "" || (isAttempts && attemptsTotal.trim() !== "");
+  const measurementIsValid = !needsMeasurement || !hasMeasurementInput || exactMeasurement !== undefined;
   const measurementPasses = !needsMeasurement || (exactMeasurement !== undefined && (
-    metric.kind === "duration-seconds"
-      ? exactMeasurement.unit === "seconds" && exactMeasurement.value >= metric.minimum
+    metric.kind === "duration-seconds" || metric.kind === "repetitions"
+      ? exactMeasurement.value >= metric.minimum
         && (metric.maximum === undefined || exactMeasurement.value <= metric.maximum)
-      : metric.kind === "repetitions"
-        ? exactMeasurement.unit === "repetitions" && exactMeasurement.value >= metric.minimum
-          && (metric.maximum === undefined || exactMeasurement.value <= metric.maximum)
-        : metric.kind === "successful-attempts"
-          ? exactMeasurement.unit === "attempts" && exactMeasurement.value >= metric.minimumSuccessful
-            && exactMeasurement.attemptsTotal !== undefined
-            && exactMeasurement.attemptsTotal >= exactMeasurement.value
-            && exactMeasurement.attemptsTotal <= metric.maximumAttempts
-          : true
-  ));
-  const cleanIsValid = outcome !== "clean" || (quality && safety && measurementPasses);
-  const metricRequirement = metric.kind === "duration-seconds"
-    ? `Hold for at least ${metric.minimum} seconds${metric.maximum === undefined ? "" : ` and no more than ${metric.maximum} seconds`}.`
-    : metric.kind === "repetitions"
-      ? `Complete at least ${metric.minimum} repetitions${metric.maximum === undefined ? "" : ` and no more than ${metric.maximum}`}.`
       : metric.kind === "successful-attempts"
-        ? `Complete at least ${metric.minimumSuccessful} successful attempts within no more than ${metric.maximumAttempts} total attempts.`
+        ? exactMeasurement.value >= metric.minimumSuccessful
+          && exactMeasurement.attemptsTotal !== undefined
+          && exactMeasurement.attemptsTotal <= metric.maximumAttempts
+        : true
+  ));
+  const targetMeasurement: ObservationMeasurement | undefined = metric.kind === "duration-seconds"
+    ? { value: metric.minimum, unit: "seconds" }
+    : metric.kind === "repetitions" ? { value: metric.minimum, unit: "repetitions" } : undefined;
+  const targetLabel = metric.kind === "duration-seconds"
+    ? `${metric.minimum} seconds`
+    : metric.kind === "repetitions" ? `${metric.minimum} reps` : "the shown target";
+  const metricRequirement = metric.kind === "duration-seconds"
+    ? `${metric.minimum}${metric.maximum === undefined ? "" : `–${metric.maximum}`} seconds`
+    : metric.kind === "repetitions"
+      ? `${metric.minimum}${metric.maximum === undefined ? "" : `–${metric.maximum}`} reps`
+      : metric.kind === "successful-attempts"
+        ? `${metric.minimumSuccessful} successful attempts within ${metric.maximumAttempts} total attempts`
         : metric.description;
-  const measurementMaximum = metric.kind === "duration-seconds" || metric.kind === "repetitions"
-    ? metric.maximum
-    : metric.kind === "successful-attempts" ? metric.maximumAttempts : undefined;
+  const exactResultLabel = metric.kind === "duration-seconds"
+    ? `I held exactly ${metric.minimum} seconds cleanly`
+    : metric.kind === "repetitions"
+      ? `I did exactly ${metric.minimum} clean reps`
+      : "I met this target cleanly";
+  const locked = busy || retryingExactObservation;
+  const canSave = !busy && offer.availability === "available";
+  const exertionValue = Number(exertion);
+  const optionalInputValid = exertion.trim() === ""
+    || (Number.isFinite(exertionValue) && exertionValue >= 1 && exertionValue <= 10);
+  const saveResult = (
+    resultOutcome: GuidedTestFormResult["outcome"],
+    resultMeasurement?: ObservationMeasurement,
+  ): void => {
+    holdClock.stop();
+    onCommit({
+      outcome: resultOutcome,
+      ...(resultMeasurement ? { measurement: resultMeasurement } : {}),
+      ...(exertion.trim() !== "" && optionalInputValid ? { perceivedExertion: exertionValue } : {}),
+      // Only a clean-result action explicitly attests to every displayed criterion.
+      qualityCriteriaSatisfied: resultOutcome === "clean",
+      safetyCriteriaSatisfied: resultOutcome === "clean",
+      ...(notes.trim() ? { notes: notes.trim() } : {}),
+    });
+  };
   const equipmentLabel = presentation.conditions.equipment
     .map((item) => item.split(":").at(-1)!.replaceAll("-", " "))
     .join(", ");
@@ -89,117 +157,168 @@ export const GuidedTestRunner = ({
     ?? presentation.exercise.media[0]?.reference;
   if (!mediaReference) throw new TypeError(`${presentation.exercise.name} has no renderable movement guide`);
 
+  const measuredFields = (
+    <div className="vnext-rc-field-row">
+      <label>
+        <span>{metric.kind === "duration-seconds" ? "Seconds completed" : metric.kind === "repetitions" ? "Reps completed" : "Successful attempts"}</span>
+        <input
+          type="number"
+          min={0}
+          step={metric.kind === "duration-seconds" ? "any" : "1"}
+          inputMode={metric.kind === "duration-seconds" ? "decimal" : "numeric"}
+          value={measurementValue}
+          disabled={locked}
+          onChange={(event) => setMeasurementValue(event.target.value)}
+        />
+      </label>
+      {isAttempts && (
+        <label>
+          <span>Total attempts</span>
+          <input type="number" min={1} step="1" inputMode="numeric" value={attemptsTotal} disabled={locked} onChange={(event) => setAttemptsTotal(event.target.value)} />
+        </label>
+      )}
+    </div>
+  );
+
   return (
-    <main className="vnext-experience vnext-rc-overlay" aria-labelledby="vnext-guided-title">
+    <main className="vnext-experience vnext-rc-overlay vnext-quick-guided" aria-labelledby="vnext-guided-title">
       <section className="vnext-rc-modal">
         <div className="vnext-rc-modal-header">
           <div>
-            <p className="vnext-kicker">Guided confirmation</p>
+            <p className="vnext-kicker">Starting-point check</p>
             <h1 id="vnext-guided-title">{presentation.exercise.name}</h1>
-            <p>Watch the movement, follow the target below, then record what you completed.</p>
           </div>
-          <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onClose}>Close</button>
+          <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => { holdClock.stop(); onClose(); }}>Back</button>
         </div>
 
-        <aside className="vnext-placement-preparation" aria-label="Before your check">
-          <strong>Prepare before you check</strong>
-          <p>Warm up first, set up the equipment and read the safety criteria. Rest between checks; continue later if you feel tired or your control changes. Stop if symptoms or instability appear.</p>
-        </aside>
+        {hasSavedChecks && !retryingExactObservation && <p className="vnext-help" role="status">Previous check saved. Rest before continuing. Back returns to your results so you can finish for today.</p>}
 
         <section className="vnext-rc-question-movement" aria-label={`${presentation.exercise.name} movement demonstration`}>
           <div className="vnext-rc-question-motion">
             <VNextMotionGuide preset={mediaReference} />
           </div>
           <div className="vnext-rc-question-copy">
-            <p className="vnext-kicker">Exact test</p>
+            <p className="vnext-quick-guided-target"><span>Target</span><strong>{metricRequirement}</strong></p>
             <p>{presentation.exercise.instructions.how}</p>
-            <div className="vnext-rc-test-facts">
-              <span><strong>Target</strong>{metricRequirement}</span>
-              <span><strong>Equipment</strong>{equipmentLabel || "No additional equipment"}</span>
-            </div>
-            <details open>
-              <summary>Setup, technique &amp; safety</summary>
-              <p><strong>Assistance:</strong> {presentation.conditions.assistance}</p>
-              <p><strong>Range:</strong> {presentation.conditions.range}</p>
-              <ul>{presentation.exercise.instructions.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul>
-              <h3>Quality criteria</h3>
-              <ul>{presentation.qualityCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul>
-              <h3>Safety criteria</h3>
-              <ul>{presentation.safetyCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul>
-              {presentation.exercise.safetyNotes.length > 0 && (
-                <p className="vnext-authority">{presentation.exercise.safetyNotes.join(" ")}</p>
-              )}
-              <p className="vnext-help">To confirm this ability, meet the target cleanly {presentation.confirmation.qualifyingObservations} time{presentation.confirmation.qualifyingObservations === 1 ? "" : "s"} across at least {presentation.confirmation.minimumDistinctSessions} separate session{presentation.confirmation.minimumDistinctSessions === 1 ? "" : "s"}.{presentation.confirmation.minimumDistinctSessions > 1 ? " Repeating it now does not replace a check on another occasion." : ""}</p>
-              <p className="vnext-authority">Stop if a safety criterion is not met. A preference or self-report cannot bypass this protocol.</p>
-            </details>
+            {metric.kind === "duration-seconds" && !retryingExactObservation && (
+              <div className="vnext-quick-guided-timer" aria-label="Optional hold timer">
+                {holdTimer.stage === "ready" || holdTimer.stage === "holding" ? (
+                  <>
+                    <p role="timer" aria-label={holdTimer.stage === "ready" ? "Get ready countdown" : "Hold time remaining"}>
+                      <span>{holdTimer.stage === "ready" ? "Get ready" : "Hold"}</span><strong>{holdTimer.remaining}s</strong>
+                    </p>
+                    <button type="button" className="vnext-action" data-kind="secondary" onClick={stopHoldTimer}>Stop timer</button>
+                  </>
+                ) : (
+                  <>
+                    {holdTimer.stage === "complete" && <p role="status">Timer finished. Only confirm below if you held continuously and met every technique and safety point.</p>}
+                    {holdTimer.stage === "interrupted" && <p role="status">Timer stopped. Nothing was saved. Use your own measured result, or restart later when rested. Interrupted time cannot be added together.</p>}
+                    <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || offer.availability !== "available"} onClick={() => {
+                      holdClock.stop();
+                      changeHoldTimer({ stage: "ready", remaining: 3, run: holdTimerRef.current.run + 1 });
+                    }}>{holdTimer.stage === "idle" ? `Use ${metric.minimum}-second timer` : "Start a new timer"}</button>
+                    {holdTimer.stage === "idle" && <p className="vnext-help">Optional · 3 seconds to get ready. Stops if you leave the app. Time alone never saves a result.</p>}
+                  </>
+                )}
+              </div>
+            )}
+            <p className="vnext-quick-guided-prepare">Warm up first. Rest between checks. Stop for pain, symptoms, instability or loss of control; continue later if tired.</p>
+            <dl className="vnext-quick-guided-conditions">
+              <div><dt>Equipment</dt><dd>{equipmentLabel || "No additional equipment"}</dd></div>
+              <div><dt>Assistance</dt><dd>{presentation.conditions.assistance}</dd></div>
+              <div><dt>Range</dt><dd>{presentation.conditions.range}</dd></div>
+            </dl>
+            <section className="vnext-quick-guided-criteria" aria-label="Technique and safety to confirm">
+              <h2>Keep it clean and safe</h2>
+              <ul>{[...new Set([...presentation.qualityCriteria, ...presentation.safetyCriteria])].map((criterion) => <li key={criterion}>{criterion}</li>)}</ul>
+              {presentation.exercise.safetyNotes.length > 0 && <p>{presentation.exercise.safetyNotes.join(" ")}</p>}
+            </section>
           </div>
         </section>
 
-        <div className="vnext-rc-anchor vnext-rc-guided-form">
-
-          {needsMeasurement && (
-            <div className="vnext-rc-field-row">
-              <label>
-                <span>{metric.kind === "duration-seconds" ? "Seconds" : metric.kind === "repetitions" ? "Repetitions" : "Successful attempts"}</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={measurementMaximum}
-                  step="1"
-                  inputMode="numeric"
-                  value={measurementValue}
-                  onChange={(event) => setMeasurementValue(event.target.value)}
-                />
-              </label>
-              {metric.kind === "successful-attempts" && (
-                <label><span>Total attempts (maximum {metric.maximumAttempts})</span><input type="number" min={1} max={metric.maximumAttempts} step="1" inputMode="numeric" value={attemptsTotal} onChange={(event) => setAttemptsTotal(event.target.value)} /></label>
-              )}
-            </div>
-          )}
-
-          <fieldset>
-            <legend>How did it go?</legend>
-            <div className="vnext-rc-answer-grid">
-              {([
-                ["clean", "Met the exact target cleanly"],
-                ["partial", "Partial or inconsistent"],
-                ["not-yet", "Not yet"],
-                ["symptom", "Symptoms or instability — stopped"],
-              ] as const).map(([value, label]) => (
-                <label className="vnext-rc-choice" key={value}><input type="radio" name="guided-outcome" checked={outcome === value} onChange={() => setOutcome(value)} /><span>{label}</span></label>
-              ))}
-            </div>
-          </fieldset>
-
-          <div className="vnext-rc-check-grid">
-            <label><input type="checkbox" checked={quality} onChange={(event) => setQuality(event.target.checked)} />All quality criteria were met</label>
-            <label><input type="checkbox" checked={safety} onChange={(event) => setSafety(event.target.checked)} />All safety criteria were met</label>
-          </div>
-          <div className="vnext-rc-field-row">
-            <label><span>Effort, 1–10 (optional)</span><input type="number" min="1" max="10" step="1" inputMode="numeric" value={exertion} onChange={(event) => setExertion(event.target.value)} /></label>
-            <label><span>Notes (optional)</span><input value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
-          </div>
+        <div className="vnext-rc-anchor vnext-rc-guided-form vnext-quick-guided-result">
+          <h2>How did it go?</h2>
           {error && <p className="vnext-authority" role="alert">{error} Your result is kept for retry. You do not need to repeat the check.</p>}
-          <button
-            type="button"
-            className="vnext-submit"
-            disabled={busy || offer.availability !== "available" || !cleanIsValid}
-            onClick={() => {
-              const perceivedExertion = Number(exertion);
-              onCommit({
-                outcome,
-                ...(exactMeasurement ? { measurement: exactMeasurement } : {}),
-                ...(Number.isFinite(perceivedExertion) && perceivedExertion >= 1 && perceivedExertion <= 10
-                  ? { perceivedExertion }
-                  : {}),
-                qualityCriteriaSatisfied: quality,
-                safetyCriteriaSatisfied: safety,
-                ...(notes.trim() ? { notes: notes.trim() } : {}),
-              });
-            }}
-          >{retryingExactObservation ? "Retry saving this result" : "Save check result"}</button>
+          {retryingExactObservation ? (
+            <>
+              <p>Your original result is ready to save. You do not need to fill this in again.</p>
+              <button type="button" className="vnext-submit" disabled={busy} onClick={() => {
+                // The coordinator ignores fresh form values while retrying and reuses its exact prepared observation.
+                saveResult(outcome ?? "not-yet", exactMeasurement);
+              }}>{busy ? "Saving…" : "Retry saving this result"}</button>
+            </>
+          ) : (
+            <>
+              {!differentResult && (
+                <>
+                  {isAttempts && measuredFields}
+                  <p id="vnext-guided-attestation" className="vnext-help">
+                    {isAttempts
+                      ? "Enter both counts, then confirm that every technique and safety point above was met."
+                      : `Tap below only if you completed ${targetMeasurement ? `exactly ${targetLabel}` : targetLabel} and met every technique and safety point above. Use Different result for anything else.`}
+                  </p>
+                  <button
+                    type="button"
+                    className="vnext-submit"
+                    aria-describedby="vnext-guided-attestation"
+                    disabled={!canSave || !optionalInputValid || (isAttempts && !measurementPasses)}
+                    onClick={() => saveResult("clean", isAttempts ? exactMeasurement : targetMeasurement)}
+                  >{busy ? "Saving…" : isAttempts ? "Both counts are correct and clean — save" : exactResultLabel}</button>
+                  <button type="button" className="vnext-action" data-kind="secondary" disabled={locked} onClick={() => {
+                    if (holdTimerRef.current.stage === "ready" || holdTimerRef.current.stage === "holding") stopHoldTimer();
+                    setDifferentResult(true);
+                  }}>Different result / not completed</button>
+                  <button type="button" className="vnext-action vnext-quick-guided-stop" data-kind="secondary" disabled={!canSave} onClick={() => saveResult("symptom")}>Pain or instability — I stopped</button>
+                </>
+              )}
+              {differentResult && (
+                <>
+                  {needsMeasurement && measuredFields}
+                  <fieldset disabled={locked}>
+                    <legend>Your result</legend>
+                    <div className="vnext-rc-answer-grid">
+                      {([
+                        ["clean", "Clean — all technique and safety points met"],
+                        ["partial", "Partial or inconsistent"],
+                        ["not-yet", "Not yet"],
+                        ["symptom", "Symptoms or instability — stopped"],
+                      ] as const).map(([value, label]) => (
+                        <label className="vnext-rc-choice" key={value}><input type="radio" name="guided-outcome" checked={outcome === value} onChange={() => setOutcome(value)} /><span>{label}</span></label>
+                      ))}
+                    </div>
+                  </fieldset>
+                  {outcome === "clean" && <p className="vnext-help">Saving confirms these are your actual results and every technique and safety point above was met.</p>}
+                  {outcome === "clean" && !measurementPasses && <p className="vnext-help">Enter a result that meets the shown target, or choose Partial / Not yet.</p>}
+                  {hasMeasurementInput && !measurementIsValid && <p className="vnext-help">Check your numbers.{isAttempts ? " Include both counts; successes cannot exceed total attempts." : " Use a non-negative number."}</p>}
+                  <button
+                    type="button"
+                    className="vnext-submit"
+                    disabled={!canSave || !outcome || !measurementIsValid || !optionalInputValid || (outcome === "clean" && !measurementPasses)}
+                    onClick={() => { if (outcome) saveResult(outcome, exactMeasurement); }}
+                  >{busy ? "Saving…" : outcome === "clean" ? "Confirm clean result" : "Save result"}</button>
+                  <button type="button" className="vnext-action" data-kind="secondary" disabled={locked} onClick={() => setDifferentResult(false)}>Back to quick result</button>
+                </>
+              )}
+              <details className="vnext-quick-guided-details">
+                <summary>Add a note or effort (optional)</summary>
+                <div className="vnext-rc-field-row">
+                  <label><span>Effort, 1–10</span><input type="number" min="1" max="10" step="1" inputMode="numeric" value={exertion} disabled={locked} onChange={(event) => setExertion(event.target.value)} /></label>
+                  <label><span>Note</span><input value={notes} disabled={locked} onChange={(event) => setNotes(event.target.value)} /></label>
+                </div>
+                {!optionalInputValid && <p className="vnext-help">Use an effort from 1 to 10, or leave it blank.</p>}
+              </details>
+            </>
+          )}
+          <details className="vnext-quick-guided-details">
+            <summary>More technique tips &amp; what this check means</summary>
+            <ul>{presentation.exercise.instructions.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul>
+            <p className="vnext-help">Full confirmation needs {presentation.confirmation.qualifyingObservations} clean result{presentation.confirmation.qualifyingObservations === 1 ? "" : "s"} across at least {presentation.confirmation.minimumDistinctSessions} separate session{presentation.confirmation.minimumDistinctSessions === 1 ? "" : "s"}.{presentation.confirmation.minimumDistinctSessions > 1 ? " Repeating it now does not replace a check on another occasion." : ""}</p>
+          </details>
         </div>
       </section>
     </main>
   );
 };
+
+// Automatic next-check navigation must never carry the previous check's form values forward.
+export const GuidedTestRunner = (props: GuidedTestRunnerProps) => <GuidedTestForm key={props.offer.protocolId} {...props} />;

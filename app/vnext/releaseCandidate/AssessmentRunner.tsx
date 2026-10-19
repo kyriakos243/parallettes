@@ -20,6 +20,10 @@ import {
 } from "../assessment/presentation";
 import { VNextMotionGuide } from "../media/VNextMotionGuide";
 import "./placementSetup.css";
+import { isQuickSetupContext } from "../assessment/quickSetup";
+import { selectedAssessmentGoals } from "../assessment/flow";
+import { QuickSetupContext } from "./QuickSetupContext";
+import { QuickPlacementReview } from "./QuickPlacementReview";
 
 const targetLabel = (metric: BenchmarkMetric): string => {
   if (metric.kind === "duration-seconds") return metric.maximum === metric.minimum
@@ -91,6 +95,8 @@ export type AssessmentRunnerProps = Readonly<{
   busy?: boolean;
   error?: string;
   onAnswer: (answer: AssessmentAnswerValue) => void;
+  onContextSubmit?: (answers: readonly AssessmentAnswerValue[]) => void;
+  onDeferSupporting?: () => void;
   onBack: () => void;
   onCommit: () => void;
   onClose: () => void;
@@ -120,8 +126,7 @@ const AnswerStep = ({
   const [inversion, setInversion] = useState<"none" | "supported" | "freestanding">(previous?.kind === "inversion" ? previous.familiarity : "none");
   const [placement, setPlacement] = useState<PlacementResponse>(previous?.kind === "anchor" ? previous.response : "not-sure");
   const [anchorBodyRegion, setAnchorBodyRegion] = useState(previous?.kind === "anchor" ? previous.bodyRegions?.join(", ") ?? "" : "");
-  const [selectedSkill, setSelectedSkill] = useState(previous?.kind === "skill-selection" ? previous.protocolId ?? "basics" : "");
-  const [skillResponse, setSkillResponse] = useState<"clean" | "not-sure" | undefined>(previous?.kind === "skill-selection" ? previous.response : undefined);
+  const [selectedSkill, setSelectedSkill] = useState(previous?.kind === "skill-selection" ? previous.protocolId ?? "basics" : step.kind === "skill-selection" ? step.options[0]?.protocolId ?? "basics" : "");
 
   const submit = (): void => {
     if (step.kind === "safety") {
@@ -140,11 +145,7 @@ const AnswerStep = ({
     else if (step.kind === "goals") onAnswer({ kind: "goals", graphIds: goals });
     else if (step.kind === "equipment") onAnswer({ kind: "equipment", equipment });
     else if (step.kind === "inversion") onAnswer({ kind: "inversion", familiarity: inversion });
-    else if (step.kind === "skill-selection") {
-      const protocolId = step.options.find((option) => option.protocolId === selectedSkill)?.protocolId;
-      if (selectedSkill !== "basics" && (!protocolId || !skillResponse)) return;
-      onAnswer({ kind: "skill-selection", graphId: step.graphId, ...(protocolId ? { protocolId } : {}), response: protocolId ? skillResponse! : "not-sure" });
-    } else if (step.kind === "anchor") {
+    else if (step.kind === "anchor") {
       onAnswer({
         kind: "anchor",
         response: placement,
@@ -161,9 +162,7 @@ const AnswerStep = ({
       ? goals.length >= 1 && goals.length <= 3
       : step.kind === "equipment"
         ? equipment.length > 0
-        : step.kind === "skill-selection"
-          ? selectedSkill === "basics" || (step.options.some((option) => option.protocolId === selectedSkill) && skillResponse !== undefined)
-          : step.kind === "anchor" && placement === "symptom"
+        : step.kind === "anchor" && placement === "symptom"
             ? anchorBodyRegion.trim().length > 0
             : step.kind !== "review";
 
@@ -302,7 +301,6 @@ const AnswerStep = ({
             <span>Choose a movement you already know</span>
             <select value={selectedSkill} onChange={(event) => {
               setSelectedSkill(event.target.value);
-              setSkillResponse(undefined);
             }}>
               <option value="" disabled>Select a familiar movement</option>
               <option value="basics">Start with the basics / I’m not sure</option>
@@ -338,20 +336,18 @@ const AnswerStep = ({
                   </details>
                 </div>
               </section>
-              <fieldset>
-                <legend>Based on your recent practice</legend>
-                <div className="vnext-rc-answer-grid">
-                  <Choice name="skill-response" checked={skillResponse === "clean"} label="I can do this cleanly now" onChange={() => setSkillResponse("clean")} />
-                  <Choice name="skill-response" checked={skillResponse === "not-sure"} label="Not sure — help me check" onChange={() => setSkillResponse("not-sure")} />
-                </div>
-              </fieldset>
-              <p className="vnext-authority">This is a starting estimate. A measured check helps choose your workout; skills still need their usual confirmation.</p>
+              <div className="vnext-placement-direct-actions">
+                <button type="button" className="vnext-submit" disabled={busy} onClick={() => onAnswer({ kind: "skill-selection", graphId: step.graphId, protocolId: selected.protocolId, response: "clean" })}>I can do this cleanly</button>
+                <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => onAnswer({ kind: "skill-selection", graphId: step.graphId, protocolId: selected.protocolId, response: "not-sure" })}>Not sure — help me check</button>
+              </div>
+              <p className="vnext-help">Choose from your recent practice. We’ll confirm the starting point with a check.</p>
             </>;
           })()}
         </div>
       )}
 
-      <button type="button" className="vnext-submit" disabled={busy || !valid} onClick={submit}>Continue</button>
+      {step.kind === "skill-selection" ? selectedSkill === "basics" && <button type="button" className="vnext-submit" disabled={busy} onClick={() => onAnswer({ kind: "skill-selection", graphId: step.graphId, response: "not-sure" })}>Find my starting point</button>
+        : <button type="button" className="vnext-submit" disabled={busy || !valid} onClick={submit}>Continue</button>}
     </>
   );
 };
@@ -364,6 +360,8 @@ export const AssessmentRunner = ({
   busy = false,
   error,
   onAnswer,
+  onContextSubmit,
+  onDeferSupporting,
   onBack,
   onCommit,
   onClose,
@@ -374,14 +372,18 @@ export const AssessmentRunner = ({
       <div className="vnext-rc-modal-header">
         <div>
           <p className="vnext-kicker">Find your starting point</p>
-          <h1 id="vnext-assessment-runner-title">{step.title}</h1>
-          <p>{step.kind === "review" && (review?.checkedToday?.length ?? 0) > 0 ? "Your results are saved. Review your starting practice below." : step.prompt}</p>
+          <h1 id="vnext-assessment-runner-title">{isQuickSetupContext(draft, step) && onContextSubmit ? "Before you start" : step.kind === "review" && draft.policyVersion === 2 ? review?.checkedToday?.length ? "Your checks are saved" : "Your next check" : step.title}</h1>
+          <p>{isQuickSetupContext(draft, step) && onContextSubmit ? "A quick update, then choose your starting movement." : step.kind === "review" && draft.policyVersion === 2 ? review?.checkedToday?.length ? "Your results help choose suitable practice." : "Follow the next useful check. You can stop at any time." : step.prompt}</p>
         </div>
-        <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onClose}>{draft.policyVersion === 2 ? "Continue later" : "Finish later"}</button>
+        <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onClose}>{isQuickSetupContext(draft, step) && onContextSubmit ? "Close setup" : draft.policyVersion === 2 ? "Continue later" : "Finish later"}</button>
       </div>
 
       {error && <p className="vnext-rc-message is-error" role="alert">{error}</p>}
-      {step.kind === "review" ? (
+      {isQuickSetupContext(draft, step) && onContextSubmit ? (
+        <QuickSetupContext key={`${draft.id}:${draft.revision}`} draft={draft} bundle={bundle} busy={busy} onSubmit={onContextSubmit} />
+      ) : step.kind === "review" && draft.policyVersion === 2 && review ? (
+        <QuickPlacementReview draft={draft} bundle={bundle} review={review} busy={busy} onCommit={onCommit} onGuidedTestRequested={onGuidedTestRequested} />
+      ) : step.kind === "review" ? (
         <div className="vnext-rc-review">
           {(() => {
             const answer = draft.answers.find((item) => item.value.kind === "goals")?.value;
@@ -456,12 +458,18 @@ export const AssessmentRunner = ({
             : "Save starting points"}</button>}
         </div>
       ) : (
-        <AnswerStep key={`${draft.id}:${draft.revision}:${step.id}`} draft={draft} step={step} bundle={bundle} busy={busy} onAnswer={onAnswer} />
+        <>
+          {step.kind === "skill-selection" && step.graphId !== selectedAssessmentGoals(draft)[0] && onDeferSupporting && <div className="vnext-placement-defer">
+            <p>Supporting skills are optional for now. Your saved goals stay the same.</p>
+            <button type="button" className="vnext-action" disabled={busy} onClick={onDeferSupporting}>Check my main goal first</button>
+          </div>}
+          <AnswerStep key={`${draft.id}:${draft.revision}:${step.id}`} draft={draft} step={step} bundle={bundle} busy={busy} onAnswer={onAnswer} />
+        </>
       )}
 
       <div className="vnext-actions">
-        {draft.status !== "committed" && <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || draft.answers.length === 0} onClick={onBack}>Back</button>}
-        <span className="vnext-help">{draft.status === "committed" ? "Your starting answers are saved." : "Answers are saved on this device when you tap Continue."}</span>
+        {draft.status !== "committed" && <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || draft.answers.length === 0 || (isQuickSetupContext(draft, step) && Boolean(onContextSubmit))} onClick={onBack}>Back</button>}
+        <span className="vnext-help">{draft.status === "committed" ? "Your starting answers are saved." : "Your choices are saved on this device when you continue."}</span>
       </div>
     </section>
   </main>

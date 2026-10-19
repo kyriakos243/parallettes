@@ -601,6 +601,22 @@ const VNextAthleteApplication = ({
     });
   };
 
+  const updateAssessmentContext = (answers: readonly AssessmentAnswerValue[]): void => {
+    if (!assessment) return;
+    runCommand(async () => {
+      setAssessment(await runtime.updateAssessmentContext({ draft: assessment.draft, answers }));
+      setMessage("Setup saved. Choose a movement you know.");
+    });
+  };
+
+  const deferSupportingAssessment = (): void => {
+    if (!assessment) return;
+    runCommand(async () => {
+      setAssessment(await runtime.deferSupportingAssessment({ draft: assessment.draft }));
+      setMessage("Your supporting goals are kept. Start with your main goal’s checks.");
+    });
+  };
+
   const backAssessment = (): void => {
     if (!assessment) return;
     runCommand(async () => {
@@ -671,9 +687,18 @@ const VNextAthleteApplication = ({
         setGuidedOffer(undefined);
         const draft = committed.snapshot.assessmentDraft;
         if (draft?.policyVersion === 2 && committed.snapshot.assessmentReview) {
-          setAssessment({ draft, step: nextAssessmentStep(draft, bundleFor(draft.catalogueVersion)), review: committed.snapshot.assessmentReview });
+          const review = committed.snapshot.assessmentReview;
+          const next = review.guidedTests.find((offer) => offer.availability === "available");
+          // Open instructions only. A saved clean result never starts a timer,
+          // awards the next check or removes the athlete’s choice to stop.
+          if (pending.result.outcome === "clean" && next && !review.nextPracticeLabels?.length) {
+            setAssessment(undefined);
+            setGuidedOffer(next);
+          } else {
+            setAssessment({ draft, step: nextAssessmentStep(draft, bundleFor(draft.catalogueVersion)), review });
+          }
         }
-        setMessage("Check saved. Your next workout has been updated. Repeated checks today count as one occasion.");
+        setMessage("Check saved. Rest before continuing; you can finish for today.");
       } finally {
         guidedSubmissionLocked.current = false;
       }
@@ -1071,7 +1096,13 @@ const VNextAthleteApplication = ({
   }
 
   if (guidedOffer) {
-    return <GuidedTestRunner offer={guidedOffer} bundle={bundleFor((guidedRecovery?.draft ?? snapshot.assessmentDraft)?.catalogueVersion ?? vNextDefinitionBundle.catalogueVersion)} busy={busy} error={error} retryingExactObservation={Boolean(guidedRecovery)} onClose={() => setGuidedOffer(undefined)} onCommit={commitGuidedTest} />;
+    return <GuidedTestRunner key={`${guidedOffer.protocolId}:${guidedRecovery?.result.eventId ?? "new"}`} offer={guidedOffer} bundle={bundleFor((guidedRecovery?.draft ?? snapshot.assessmentDraft)?.catalogueVersion ?? vNextDefinitionBundle.catalogueVersion)} busy={busy} error={error} retryingExactObservation={Boolean(guidedRecovery)} hasSavedChecks={Boolean(snapshot.assessmentReview?.checkedToday?.length)} onClose={() => {
+      setGuidedOffer(undefined);
+      const draft = snapshot.assessmentDraft;
+      if (!guidedRecovery && draft?.policyVersion === 2 && snapshot.assessmentReview) {
+        setAssessment({ draft, step: nextAssessmentStep(draft, bundleFor(draft.catalogueVersion)), review: snapshot.assessmentReview });
+      }
+    }} onCommit={commitGuidedTest} />;
   }
 
   if (restartSetupOpen) {
@@ -1092,7 +1123,7 @@ const VNextAthleteApplication = ({
     const review = assessment.review ?? (isAssessmentAtReview(assessment.draft, bundleFor(assessment.draft.catalogueVersion))
       ? buildAssessmentReview(assessment.draft, bundleFor(assessment.draft.catalogueVersion), snapshot.state)
       : undefined);
-    return <AssessmentRunner draft={assessment.draft} step={assessment.step} bundle={bundleFor(assessment.draft.catalogueVersion)} review={review} busy={busy} error={error} onAnswer={answerAssessment} onBack={backAssessment} onCommit={commitAssessment} onClose={() => runCommand(async () => {
+    return <AssessmentRunner draft={assessment.draft} step={assessment.step} bundle={bundleFor(assessment.draft.catalogueVersion)} review={review} busy={busy} error={error} onAnswer={answerAssessment} onContextSubmit={updateAssessmentContext} onDeferSupporting={deferSupportingAssessment} onBack={backAssessment} onCommit={commitAssessment} onClose={() => runCommand(async () => {
       setSnapshot(await runtime.refresh(refreshInput()));
       setAssessment(undefined);
       setMessage("");

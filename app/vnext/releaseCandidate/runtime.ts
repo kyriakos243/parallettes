@@ -1,4 +1,5 @@
 import { placementCheckSummary } from "../assessment/checkSummary";
+import { reviseQuickSetupContext, deferSupportingPlacement } from "../assessment/quickSetup";
 import {
   DOMAIN_SCHEMA_VERSION,
   parseStableId,
@@ -235,6 +236,15 @@ export type VNextRuntime = Readonly<{
     answeredAt?: IsoTimestamp;
   }>): Promise<VNextRuntimeAssessmentState>;
   backAssessment(input: Readonly<{
+    draft: AssessmentDraft;
+    updatedAt?: IsoTimestamp;
+  }>): Promise<VNextRuntimeAssessmentState>;
+  updateAssessmentContext(input: Readonly<{
+    draft: AssessmentDraft;
+    answers: readonly AssessmentAnswerValue[];
+    updatedAt?: IsoTimestamp;
+  }>): Promise<VNextRuntimeAssessmentState>;
+  deferSupportingAssessment(input: Readonly<{
     draft: AssessmentDraft;
     updatedAt?: IsoTimestamp;
   }>): Promise<VNextRuntimeAssessmentState>;
@@ -738,6 +748,23 @@ export const createVNextReleaseCandidateRuntime = (
     };
   };
 
+  const updateAssessmentContext: VNextRuntime["updateAssessmentContext"] = async (input) => {
+    const bundle = bundleFor(input.draft.catalogueVersion);
+    const at = strictlyAfterTimestamp(input.updatedAt ?? clock(), input.draft.updatedAt, "Setup context time");
+    const draft = reviseQuickSetupContext(input.draft, input.answers, at, bundle);
+    await store.saveAssessmentDraft(draft);
+    return { draft, step: nextAssessmentStep(draft, bundle) };
+  };
+
+  const deferSupportingAssessment: VNextRuntime["deferSupportingAssessment"] = async (input) => {
+    const bundle = bundleFor(input.draft.catalogueVersion);
+    const at = strictlyAfterTimestamp(input.updatedAt ?? clock(), input.draft.updatedAt, "Supporting choice time");
+    const draft = deferSupportingPlacement(input.draft, at, bundle);
+    await store.saveAssessmentDraft(draft);
+    const current = await refresh({ athleteId: draft.athleteId, asOf: at });
+    return { draft, step: nextAssessmentStep(draft, bundle), review: buildAssessmentReview(draft, bundle, current.state) };
+  };
+
   const backAssessment: VNextRuntime["backAssessment"] = async (input) => {
     const assessmentBundle = bundleFor(input.draft.catalogueVersion);
     const updatedAt = strictlyAfterTimestamp(
@@ -927,6 +954,8 @@ export const createVNextReleaseCandidateRuntime = (
     applyCopiedLegacyConversion,
     startAssessment,
     answerAssessment,
+    updateAssessmentContext,
+    deferSupportingAssessment,
     backAssessment,
     commitAssessment,
     commitGuidedTest,

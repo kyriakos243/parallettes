@@ -58,7 +58,7 @@
     "validate:vnext-roadmap": "node scripts/validate-vnext-roadmap.mjs",
     "validate:vnext-history": "node scripts/validate-vnext-history.mjs",
     "validate:vnext-navigation": "node scripts/validate-vnext-navigation.mjs && node scripts/validate-vnext-short-workout-preferences.mjs",
-    "validate:vnext-placement": "node scripts/validate-vnext-placement.mjs && node scripts/validate-vnext-placement-compatibility.mjs"
+    "validate:vnext-placement": "node scripts/validate-vnext-placement.mjs && node scripts/validate-vnext-placement-compatibility.mjs && node scripts/validate-vnext-quick-setup.mjs && node scripts/validate-vnext-quick-guided-ui.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.28.0",
