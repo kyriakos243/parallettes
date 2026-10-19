@@ -281,6 +281,9 @@ export const normalizeObservations = (input: NormalizationInput): NormalizationR
       continue;
     }
     const guidedProtocol = event.source === "guided-test" && event.benchmarkProtocolId !== undefined;
+    const exactProtocol = guidedProtocol && input.includeGuidedPrescriptionIdentity ? bundle.benchmarkProtocols.find((protocol) =>
+      protocol.id === event.benchmarkProtocolId && protocol.definitionVersion === event.benchmarkProtocolVersion) : undefined;
+    const exactExercise = exactProtocol && bundle.exercises.find((exercise) => exercise.id === exactProtocol.exerciseId);
     if (guidedProtocol && !event.observationSessionId) {
       issue(issues, "warning", projectionReasonCodes.missingTestContext, `Guided event ${event.id} cannot contribute to confirmation without a test occasion ID`, source);
     }
@@ -304,6 +307,8 @@ export const normalizeObservations = (input: NormalizationInput): NormalizationR
       ...(event.range ? { range: event.range } : {}),
       ...(event.perceivedExertion ? { perceivedExertion: event.perceivedExertion } : {}),
       participationSeconds: 0,
+      ...(exactProtocol && exactExercise ? { exerciseId: exactExercise.id, exerciseDefinitionVersion: exactExercise.definitionVersion,
+        prescriptionVariantId: exactProtocol.prescriptionVariantId } : {}),
       demand: resolveEventDemand(event, bundle),
       symptomOrInstability: event.outcome === "symptom",
     });

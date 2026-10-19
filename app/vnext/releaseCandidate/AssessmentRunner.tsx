@@ -5,6 +5,7 @@ import {
   type AssessmentDraft,
   type AssessmentReview,
   type AssessmentStep,
+  type BenchmarkMetric,
   type DefinitionBundle,
   type DemandDomain,
   type EquipmentId,
@@ -18,6 +19,38 @@ import {
   placementResponseOptions,
 } from "../assessment/presentation";
 import { VNextMotionGuide } from "../media/VNextMotionGuide";
+import "./placementSetup.css";
+import { isQuickSetupContext } from "../assessment/quickSetup";
+import { selectedAssessmentGoals } from "../assessment/flow";
+import { QuickSetupContext } from "./QuickSetupContext";
+import { QuickPlacementReview } from "./QuickPlacementReview";
+
+const targetLabel = (metric: BenchmarkMetric): string => {
+  if (metric.kind === "duration-seconds") return metric.maximum === metric.minimum
+    ? `${metric.minimum} seconds`
+    : metric.maximum === undefined
+      ? `At least ${metric.minimum} seconds`
+      : `${metric.minimum}–${metric.maximum} seconds`;
+  if (metric.kind === "repetitions") return metric.maximum === metric.minimum
+    ? `${metric.minimum} reps`
+    : metric.maximum === undefined
+      ? `At least ${metric.minimum} reps`
+      : `${metric.minimum}–${metric.maximum} reps`;
+  if (metric.kind === "successful-attempts") return `${metric.minimumSuccessful} successful attempts in up to ${metric.maximumAttempts} tries`;
+  return metric.description;
+};
+
+const blockerLabel = (blocker: string): string => ({
+  "missing-equipment": "Add the equipment you have in setup, or choose a movement you can practise with it.",
+  "active-restriction": "Your current restriction affects this movement. Choose an unaffected check or continue later.",
+  "inversion-not-familiar": "Build confidence with supported upside-down practice first.",
+  "reacclimation-required": "After time away, rebuild comfort and control before this check.",
+  "prerequisite-confirmation-needed": "Complete the earlier readiness checks before trying this movement.",
+  "placement-prerequisite-check-needed": "Complete the earlier readiness checks before trying this movement.",
+  "check-another-day": "This check needs another occasion. Rest and return on a different day.",
+  "exit-confirmation-needed": "Confirm the safe way out of this movement before trying it.",
+  "specialist-opt-in-required": "This check needs specialist guidance and an explicit choice to include specialist training.",
+}[blocker] ?? "Complete the earlier safety and readiness checks before trying this movement.");
 
 const labelFromId = (value: string): string => value
   .split(":").at(-1)!
@@ -62,6 +95,8 @@ export type AssessmentRunnerProps = Readonly<{
   busy?: boolean;
   error?: string;
   onAnswer: (answer: AssessmentAnswerValue) => void;
+  onContextSubmit?: (answers: readonly AssessmentAnswerValue[]) => void;
+  onDeferSupporting?: () => void;
   onBack: () => void;
   onCommit: () => void;
   onClose: () => void;
@@ -91,6 +126,7 @@ const AnswerStep = ({
   const [inversion, setInversion] = useState<"none" | "supported" | "freestanding">(previous?.kind === "inversion" ? previous.familiarity : "none");
   const [placement, setPlacement] = useState<PlacementResponse>(previous?.kind === "anchor" ? previous.response : "not-sure");
   const [anchorBodyRegion, setAnchorBodyRegion] = useState(previous?.kind === "anchor" ? previous.bodyRegions?.join(", ") ?? "" : "");
+  const [selectedSkill, setSelectedSkill] = useState(previous?.kind === "skill-selection" ? previous.protocolId ?? "basics" : step.kind === "skill-selection" ? step.options[0]?.protocolId ?? "basics" : "");
 
   const submit = (): void => {
     if (step.kind === "safety") {
@@ -127,8 +163,8 @@ const AnswerStep = ({
       : step.kind === "equipment"
         ? equipment.length > 0
         : step.kind === "anchor" && placement === "symptom"
-          ? anchorBodyRegion.trim().length > 0
-          : step.kind !== "review";
+            ? anchorBodyRegion.trim().length > 0
+            : step.kind !== "review";
 
   return (
     <>
@@ -232,6 +268,10 @@ const AnswerStep = ({
               <div className="vnext-rc-question-copy">
                 <p className="vnext-kicker">Watch this movement</p>
                 <h3>{anchor.exercise.name}</h3>
+                <div className="vnext-rc-test-facts">
+                  <span><strong>Target</strong>{targetLabel(anchor.protocol.metric)}</span>
+                  <span><strong>Assistance &amp; range</strong>{anchor.protocol.conditions.assistance} · {anchor.protocol.conditions.range}</span>
+                </div>
                 <p>{anchor.exercise.instructions.how}</p>
                 <details>
                   <summary>Technique tips</summary>
@@ -255,7 +295,59 @@ const AnswerStep = ({
         );
       })()}
 
-      <button type="button" className="vnext-submit" disabled={busy || !valid} onClick={submit}>Continue</button>
+      {step.kind === "skill-selection" && (
+        <div className="vnext-rc-anchor vnext-placement-picker">
+          <label className="vnext-rc-followup">
+            <span>Choose a movement you already know</span>
+            <select value={selectedSkill} onChange={(event) => {
+              setSelectedSkill(event.target.value);
+            }}>
+              <option value="" disabled>Select a familiar movement</option>
+              <option value="basics">Start with the basics / I’m not sure</option>
+              {step.options.map((option) => <option key={option.protocolId} value={option.protocolId}>{option.label}</option>)}
+            </select>
+          </label>
+
+          {(() => {
+            const selected = step.options.find((option) => option.protocolId === selectedSkill);
+            if (!selected) return selectedSkill === "basics"
+              ? <p className="vnext-authority">We’ll start with a simple check to find a comfortable starting point.</p>
+              : null;
+            const movement = assessmentAnchorPresentation({ id: step.id, kind: "anchor", title: selected.label, prompt: selected.prompt, anchor: selected }, bundle);
+            return <>
+              <section className="vnext-rc-question-movement" aria-label={`${movement.exercise.name} movement demonstration`}>
+                <div className="vnext-rc-question-motion">
+                  <VNextMotionGuide key={selected.protocolId} preset={motionReferenceFor(movement.exercise.media, movement.exercise.name)} />
+                </div>
+                <div className="vnext-rc-question-copy">
+                  <h3>{movement.exercise.name}</h3>
+                  <div className="vnext-rc-test-facts">
+                    <span><strong>Target</strong>{targetLabel(movement.protocol.metric)}</span>
+                    <span><strong>Assistance</strong>{movement.protocol.conditions.assistance}</span>
+                  </div>
+                  <p><strong>Range:</strong> {movement.protocol.conditions.range}</p>
+                  <p>{movement.exercise.instructions.how}</p>
+                  <details>
+                    <summary>Technique &amp; safety</summary>
+                    <ul>{movement.exercise.instructions.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul>
+                    <p><strong>A clean result means:</strong></p>
+                    <ul>{movement.protocol.qualityCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul>
+                    <ul>{movement.protocol.safetyCriteria.map((criterion) => <li key={criterion}>{criterion}</li>)}</ul>
+                  </details>
+                </div>
+              </section>
+              <div className="vnext-placement-direct-actions">
+                <button type="button" className="vnext-submit" disabled={busy} onClick={() => onAnswer({ kind: "skill-selection", graphId: step.graphId, protocolId: selected.protocolId, response: "clean" })}>I can do this cleanly</button>
+                <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => onAnswer({ kind: "skill-selection", graphId: step.graphId, protocolId: selected.protocolId, response: "not-sure" })}>Not sure — help me check</button>
+              </div>
+              <p className="vnext-help">Choose from your recent practice. We’ll confirm the starting point with a check.</p>
+            </>;
+          })()}
+        </div>
+      )}
+
+      {step.kind === "skill-selection" ? selectedSkill === "basics" && <button type="button" className="vnext-submit" disabled={busy} onClick={() => onAnswer({ kind: "skill-selection", graphId: step.graphId, response: "not-sure" })}>Find my starting point</button>
+        : <button type="button" className="vnext-submit" disabled={busy || !valid} onClick={submit}>Continue</button>}
     </>
   );
 };
@@ -268,6 +360,8 @@ export const AssessmentRunner = ({
   busy = false,
   error,
   onAnswer,
+  onContextSubmit,
+  onDeferSupporting,
   onBack,
   onCommit,
   onClose,
@@ -278,14 +372,18 @@ export const AssessmentRunner = ({
       <div className="vnext-rc-modal-header">
         <div>
           <p className="vnext-kicker">Find your starting point</p>
-          <h1 id="vnext-assessment-runner-title">{step.title}</h1>
-          <p>{step.prompt}</p>
+          <h1 id="vnext-assessment-runner-title">{isQuickSetupContext(draft, step) && onContextSubmit ? "Before you start" : step.kind === "review" && draft.policyVersion === 2 ? review?.checkedToday?.length ? "Your checks are saved" : "Your next check" : step.title}</h1>
+          <p>{isQuickSetupContext(draft, step) && onContextSubmit ? "A quick update, then choose your starting movement." : step.kind === "review" && draft.policyVersion === 2 ? review?.checkedToday?.length ? "Your results help choose suitable practice." : "Follow the next useful check. You can stop at any time." : step.prompt}</p>
         </div>
-        <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onClose}>Finish later</button>
+        <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onClose}>{isQuickSetupContext(draft, step) && onContextSubmit ? "Close setup" : draft.policyVersion === 2 ? "Continue later" : "Finish later"}</button>
       </div>
 
       {error && <p className="vnext-rc-message is-error" role="alert">{error}</p>}
-      {step.kind === "review" ? (
+      {isQuickSetupContext(draft, step) && onContextSubmit ? (
+        <QuickSetupContext key={`${draft.id}:${draft.revision}`} draft={draft} bundle={bundle} busy={busy} onSubmit={onContextSubmit} />
+      ) : step.kind === "review" && draft.policyVersion === 2 && review ? (
+        <QuickPlacementReview draft={draft} bundle={bundle} review={review} busy={busy} onCommit={onCommit} onGuidedTestRequested={onGuidedTestRequested} />
+      ) : step.kind === "review" ? (
         <div className="vnext-rc-review">
           {(() => {
             const answer = draft.answers.find((item) => item.value.kind === "goals")?.value;
@@ -301,11 +399,43 @@ export const AssessmentRunner = ({
               {legacyInterest && <p><strong>Saved interest:</strong> {label(legacyInterest)}. This setup was started in an earlier version. After saving, use Edit goals in Progress to make it a supporting goal.</p>}
             </div> : null;
           })()}
-          <p><strong>{review?.promptCount ?? draft.answers.length} answers</strong> · about {review?.estimatedMinutes ?? 1} minutes completed</p>
-          <p>{review?.completionMessage ?? "Your starting points are ready to save."}</p>
+          {!(review?.checkedToday?.length) && <>
+            <p><strong>{review?.promptCount ?? draft.answers.length} answers saved</strong></p>
+            <p>{review?.completionMessage ?? "Your starting points are ready to save."}</p>
+          </>}
+          {draft.policyVersion === 2 && review && <>
+            {review.provisional.length > 0 && !review.checkedToday?.length && <section className="vnext-placement-estimates" aria-labelledby="vnext-placement-estimates-title">
+              <h2 id="vnext-placement-estimates-title">Your starting estimates</h2>
+              <ul>{review.provisional.map((claim) => {
+                const protocol = bundle.benchmarkProtocols.find((item) => item.id === claim.protocolId);
+                return <li key={claim.protocolId}><strong>{protocol?.label ?? "Selected movement"}</strong><span>{claim.response === "clean" ? "You reported clean recent practice" : "You’d like help checking this"}</span></li>;
+              })}</ul>
+              <p className="vnext-help">These estimates do not mark skills as achieved. Checks help select useful practice while keeping the safety requirements.</p>
+            </section>}
+            {(review.checkedToday?.length ?? 0) > 0 && <section className="vnext-placement-estimates vnext-placement-saved-checks" aria-labelledby="vnext-placement-saved-checks-title">
+              <h2 id="vnext-placement-saved-checks-title">Today’s checks saved</h2>
+              <ul>{review.checkedToday!.map((check, index) => <li key={`${check.label}:${index}`}>
+                <strong>{check.label}</strong>
+                <span>{check.result}</span>
+                <span>Recorded: {check.target}</span>
+              </li>)}</ul>
+              <p className="vnext-help">Demanding checks count as today’s training. You do not need to repeat a full workout.</p>
+            </section>}
+            {(review.nextPracticeLabels?.length ?? 0) > 0 && <div className="vnext-placement-next-practice">
+              <p><strong>Starting practice:</strong> {review.nextPracticeLabels!.join(", ")}</p>
+              <p className="vnext-help">Used when recovered and current safety checks allow it. This is a starting level, not a confirmed achievement.</p>
+            </div>}
+            <p className="vnext-placement-check-progress" role="status">{review.checksComplete
+              ? "Your selected starting skills are checked."
+              : `${review.checkedCount ?? 0} starting skill${review.checkedCount === 1 ? "" : "s"} checked${review.remainingCheckCount === undefined ? "" : ` · ${review.remainingCheckCount} check${review.remainingCheckCount === 1 ? "" : "s"} still to work through`}. ${(review.checkedToday?.length ?? 0) > 0 ? "You can finish for today and continue another day." : "You can check now or continue with a cautious starting workout."}`}</p>
+            {draft.status === "committed" && (review.checkedToday?.length ?? 0) > 0 && <button type="button" className="vnext-submit" disabled={busy} onClick={onCommit}>Finish for today</button>}
+          </>}
           {(review?.guidedTests.length ?? 0) > 0 && (
             <section>
-              <h2>Optional skill checks</h2>
+              <h2>{draft.policyVersion === 2 ? "Check your starting point" : "Optional skill checks"}</h2>
+              {draft.policyVersion === 2 && <p className="vnext-help">{(review?.checkedToday?.length ?? 0) > 0
+                ? "Further checks are optional. You can finish for today. If you continue, rest first and follow each check’s safety criteria."
+                : "Start with the recommended check. We’ll use each result to choose what to check next. You can continue later."}</p>}
               <div className="vnext-assessment-list">
                 {review!.guidedTests.map((offer) => {
                   const test = guidedTestPresentation(offer, bundle);
@@ -315,23 +445,31 @@ export const AssessmentRunner = ({
                       <div className="vnext-assessment-action-motion" aria-label={`${test.exercise.name} movement demonstration`}>
                         <VNextMotionGuide preset={mediaReference} />
                       </div>
-                      <div><strong>{test.exercise.name}</strong><span>{offer.reason === "reconfirm-existing" ? "Check this skill again" : offer.reason === "resolve-uncertainty" ? "Find a clearer starting point" : "Confirm your starting point"}</span>{offer.blockers.map((blocker) => <span key={blocker}>{blocker}</span>)}</div>
-                      <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || offer.availability === "blocked" || !onGuidedTestRequested} onClick={() => onGuidedTestRequested?.(offer)}>{offer.availability === "blocked" ? "Unavailable today" : "Save & open check"}</button>
+                      <div>{draft.policyVersion === 2 && offer === review!.guidedTests.find((item) => item.availability === "available") && <p className="vnext-kicker">Recommended next</p>}<strong>{test.exercise.name}</strong><span>{targetLabel(test.metric)}</span><span>{offer.reason === "reconfirm-existing" ? "Check this skill again" : offer.reason === "resolve-uncertainty" ? "Find a clearer starting point" : "Confirm your starting point"}</span>{offer.blockers.map((blocker) => <span key={blocker}>{blockerLabel(blocker)}</span>)}</div>
+                      <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || offer.availability === "blocked" || !onGuidedTestRequested} onClick={() => onGuidedTestRequested?.(offer)}>{offer.availability === "blocked" ? "Unavailable today" : draft.status === "committed" ? "Open check" : "Save & open check"}</button>
                     </article>
                   );
                 })}
               </div>
             </section>
           )}
-          <button type="button" className="vnext-submit" disabled={busy} onClick={onCommit}>Save starting points</button>
+          {!(draft.policyVersion === 2 && draft.status === "committed" && (review?.checkedToday?.length ?? 0) > 0) && <button type="button" className="vnext-submit" disabled={busy} onClick={onCommit}>{draft.policyVersion === 2
+            ? draft.status === "committed" ? "See my workout" : "Save & see my workout"
+            : "Save starting points"}</button>}
         </div>
       ) : (
-        <AnswerStep key={`${draft.id}:${draft.revision}:${step.id}`} draft={draft} step={step} bundle={bundle} busy={busy} onAnswer={onAnswer} />
+        <>
+          {step.kind === "skill-selection" && step.graphId !== selectedAssessmentGoals(draft)[0] && onDeferSupporting && <div className="vnext-placement-defer">
+            <p>Supporting skills are optional for now. Your saved goals stay the same.</p>
+            <button type="button" className="vnext-action" disabled={busy} onClick={onDeferSupporting}>Check my main goal first</button>
+          </div>}
+          <AnswerStep key={`${draft.id}:${draft.revision}:${step.id}`} draft={draft} step={step} bundle={bundle} busy={busy} onAnswer={onAnswer} />
+        </>
       )}
 
       <div className="vnext-actions">
-        <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || draft.answers.length === 0} onClick={onBack}>Back</button>
-        <span className="vnext-help">Answers are saved on this device when you tap Continue.</span>
+        {draft.status !== "committed" && <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || draft.answers.length === 0 || (isQuickSetupContext(draft, step) && Boolean(onContextSubmit))} onClick={onBack}>Back</button>}
+        <span className="vnext-help">{draft.status === "committed" ? "Your starting answers are saved." : "Your choices are saved on this device when you continue."}</span>
       </div>
     </section>
   </main>

@@ -1,3 +1,5 @@
+import { placementCheckSummary } from "../assessment/checkSummary";
+import { reviseQuickSetupContext, deferSupportingPlacement } from "../assessment/quickSetup";
 import {
   DOMAIN_SCHEMA_VERSION,
   parseStableId,
@@ -100,6 +102,7 @@ export type VNextRuntimeCatalogue = Readonly<{
   bundle: DefinitionBundle;
   history: readonly DefinitionBundle[];
   projectionPolicy: ProjectionPolicy;
+  placementVersion?: 2;
   generateSession?: typeof generateVNextSession;
   generateCustomSession?: typeof generateVNextCustomSession;
 }>;
@@ -233,6 +236,15 @@ export type VNextRuntime = Readonly<{
     answeredAt?: IsoTimestamp;
   }>): Promise<VNextRuntimeAssessmentState>;
   backAssessment(input: Readonly<{
+    draft: AssessmentDraft;
+    updatedAt?: IsoTimestamp;
+  }>): Promise<VNextRuntimeAssessmentState>;
+  updateAssessmentContext(input: Readonly<{
+    draft: AssessmentDraft;
+    answers: readonly AssessmentAnswerValue[];
+    updatedAt?: IsoTimestamp;
+  }>): Promise<VNextRuntimeAssessmentState>;
+  deferSupportingAssessment(input: Readonly<{
     draft: AssessmentDraft;
     updatedAt?: IsoTimestamp;
   }>): Promise<VNextRuntimeAssessmentState>;
@@ -496,7 +508,8 @@ export const createVNextReleaseCandidateRuntime = (
     const assessmentDraft = await store.readAssessmentDraft(input.athleteId) ?? undefined;
     const assessmentReview = assessmentDraft
       && isAssessmentAtReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion))
-      ? buildAssessmentReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state)
+      ? { ...buildAssessmentReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state),
+        ...placementCheckSummary(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state, sources.evidenceEvents) }
       : undefined;
     const progressInput = {
       bundle: vNextDefinitionBundle,
@@ -513,6 +526,7 @@ export const createVNextReleaseCandidateRuntime = (
       today: buildTodayWorkoutPresentation({ bundle: vNextDefinitionBundle, generated }),
       goals: buildGoalControls(vNextDefinitionBundle, intent),
       assessment: buildAssessmentEntryPoints({
+        ...(catalogue.placementVersion ? { placementVersion: catalogue.placementVersion } : {}),
         bundle: vNextDefinitionBundle,
         state,
         intent,
@@ -683,6 +697,7 @@ export const createVNextReleaseCandidateRuntime = (
       ? "targeted-reconfirmation"
       : "new-placement";
     const draft = createAssessmentDraft({
+      ...(catalogue.placementVersion ? { placementVersion: catalogue.placementVersion } : {}),
       id: input.draftId ?? idFactory({
         kind: "assessment-draft",
         athleteId: input.athleteId,
@@ -731,6 +746,23 @@ export const createVNextReleaseCandidateRuntime = (
         review: buildAssessmentReview(draft, assessmentBundle, reviewState),
       } : {}),
     };
+  };
+
+  const updateAssessmentContext: VNextRuntime["updateAssessmentContext"] = async (input) => {
+    const bundle = bundleFor(input.draft.catalogueVersion);
+    const at = strictlyAfterTimestamp(input.updatedAt ?? clock(), input.draft.updatedAt, "Setup context time");
+    const draft = reviseQuickSetupContext(input.draft, input.answers, at, bundle);
+    await store.saveAssessmentDraft(draft);
+    return { draft, step: nextAssessmentStep(draft, bundle) };
+  };
+
+  const deferSupportingAssessment: VNextRuntime["deferSupportingAssessment"] = async (input) => {
+    const bundle = bundleFor(input.draft.catalogueVersion);
+    const at = strictlyAfterTimestamp(input.updatedAt ?? clock(), input.draft.updatedAt, "Supporting choice time");
+    const draft = deferSupportingPlacement(input.draft, at, bundle);
+    await store.saveAssessmentDraft(draft);
+    const current = await refresh({ athleteId: draft.athleteId, asOf: at });
+    return { draft, step: nextAssessmentStep(draft, bundle), review: buildAssessmentReview(draft, bundle, current.state) };
   };
 
   const backAssessment: VNextRuntime["backAssessment"] = async (input) => {
@@ -826,6 +858,7 @@ export const createVNextReleaseCandidateRuntime = (
       assessmentBundle,
       before.state,
       input.result,
+      before.sources.evidenceEvents.find((event) => event.id === input.result.eventId),
     );
     await persistGuidedTestEvidence(store, event);
     return {
@@ -921,6 +954,8 @@ export const createVNextReleaseCandidateRuntime = (
     applyCopiedLegacyConversion,
     startAssessment,
     answerAssessment,
+    updateAssessmentContext,
+    deferSupportingAssessment,
     backAssessment,
     commitAssessment,
     commitGuidedTest,

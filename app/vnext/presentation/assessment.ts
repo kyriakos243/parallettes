@@ -21,6 +21,9 @@ const blockerMessage = (blocker: string): string => blocker === "missing-equipme
         ? "Use gradual reacclimation before this inversion test."
         : blocker === "prerequisite-confirmation-needed"
           ? "Confirm the earlier safe step first."
+          : blocker === "check-another-day" ? "You have already practised this today. Continue on a later day."
+          : blocker === "exit-confirmation-needed" ? "Confirm the safe wall-height exit first."
+          : blocker === "specialist-opt-in-required" ? "This optional skill requires specialist training to be enabled."
           : "This check is not currently available.";
 
 const protocolFor = (
@@ -153,9 +156,9 @@ export const buildAssessmentEntryPoints = (
     kind: "reassessment",
     label: hasExistingFinding ? "Review my current starting point" : "Find my starting point",
     description: hasExistingFinding
-      ? "Update your restrictions and check the skills that need attention."
+      ? input.placementVersion === 2 ? "Workouts feel too easy? Update your starting skills and confirm what you can do. Your history stays." : "Update your restrictions and check the skills that need attention."
       : "Answer a few questions to help choose suitable exercises. You can finish later.",
-    mode: hasExistingFinding ? "targeted-reconfirmation" : "new-placement",
+    mode: hasExistingFinding && input.placementVersion !== 2 ? "targeted-reconfirmation" : "new-placement",
     protocolIds: [],
     availability: "available",
     blockers: [],

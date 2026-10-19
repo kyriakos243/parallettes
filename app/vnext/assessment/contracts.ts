@@ -56,6 +56,7 @@ export type AssessmentAnswerValue =
   | Readonly<{ kind: "goals"; graphIds: readonly GraphId[] }>
   | Readonly<{ kind: "equipment"; equipment: readonly EquipmentId[] }>
   | Readonly<{ kind: "inversion"; familiarity: InversionFamiliarity }>
+  | Readonly<{ kind: "skill-selection"; graphId: GraphId; protocolId?: BenchmarkProtocolId; response: "clean" | "not-sure" }>
   | Readonly<{
     kind: "anchor";
     response: PlacementResponse;
@@ -132,6 +133,7 @@ export type AssessmentStep =
   | Readonly<{ id: "goal-selection"; kind: "goals"; title: string; prompt: string; options: readonly AssessmentGoalOption[] }>
   | Readonly<{ id: "equipment-selection"; kind: "equipment"; title: string; prompt: string }>
   | Readonly<{ id: "context-inversion"; kind: "inversion"; title: string; prompt: string }>
+  | Readonly<{ id: string; kind: "skill-selection"; title: string; prompt: string; graphId: GraphId; options: readonly PlacementAnchor[] }>
   | Readonly<{ id: string; kind: "anchor"; title: string; prompt: string; anchor: PlacementAnchor }>
   | Readonly<{ id: "assessment-review"; kind: "review"; title: string; prompt: string }>;
 
@@ -156,6 +158,11 @@ export type AssessmentReview = Readonly<{
   guidedTests: readonly GuidedTestOffer[];
   restrictionReported: boolean;
   completionMessage: string;
+  checkedToday?: readonly Readonly<{ label: string; result: string; target: string }>[];
+  nextPracticeLabels?: readonly string[];
+  checkedCount?: number;
+  remainingCheckCount?: number;
+  checksComplete?: boolean;
 }>;
 
 export type GuidedTestResultInput = Readonly<{
@@ -214,6 +221,11 @@ const assertAnswerValue = (value: AssessmentAnswerValue, label: string): void =>
     if (value.notes !== undefined && (typeof value.notes !== "string" || value.notes.trim() === "")) throw new TypeError(`Invalid ${label} notes`);
     return;
   }
+  if (value.kind === "skill-selection") {
+    if (!isStableId(value.graphId) || (value.protocolId !== undefined && !isStableId(value.protocolId))
+      || !["clean", "not-sure"].includes(value.response) || (!value.protocolId && value.response !== "not-sure")) throw new TypeError(`Invalid ${label} skill selection`);
+    return;
+  }
   if (value.kind === "experience") {
     if (!["new", "some", "experienced"].includes(value.experience)) throw new TypeError(`Invalid ${label} experience`);
     return;
@@ -252,7 +264,7 @@ export const assertAssessmentDraft = (
   if (!value || typeof value !== "object") throw new TypeError("Invalid assessment draft");
   if (value.schemaVersion !== VNEXT_ASSESSMENT_SCHEMA_VERSION
     || value.policyId !== VNEXT_ASSESSMENT_POLICY_ID
-    || value.policyVersion !== VNEXT_ASSESSMENT_POLICY_VERSION) {
+    || ![VNEXT_ASSESSMENT_POLICY_VERSION, 2].includes(value.policyVersion)) {
     throw new TypeError("Unsupported assessment draft version");
   }
   if (!isStableId(value.id) || !isStableId(value.athleteId)) throw new TypeError("Invalid assessment identity");
@@ -321,6 +333,7 @@ export const assertAssessmentDraft = (
   }
   for (const answer of allAnswers) {
     assertAnswerValue(answer.value, `assessment answer ${answer.stepId}`);
+    if (answer.value.kind === "skill-selection" && value.policyVersion !== 2) throw new TypeError("Skill choices require placement policy 2");
     if (!isCanonicalIsoTimestamp(answer.answeredAt)
       || Date.parse(answer.answeredAt) < Date.parse(value.createdAt)
       || Date.parse(answer.answeredAt) > Date.parse(value.updatedAt)) {
@@ -331,6 +344,13 @@ export const assertAssessmentDraft = (
     if (bundle.catalogueVersion !== value.catalogueVersion) throw new TypeError("Assessment catalogue is unavailable");
     const protocols = new Set(bundle.benchmarkProtocols.map((protocol) => protocol.id));
     if (value.targetedProtocolIds.some((id) => !protocols.has(id))) throw new TypeError("Assessment targets an unknown protocol");
+    for (const answer of allAnswers) {
+      if (answer.value.kind !== "skill-selection") continue;
+      const choice = answer.value;
+      const protocol = bundle.benchmarkProtocols.find((item) => item.id === choice.protocolId);
+      if (choice.protocolId && (!protocol || protocol.subject.kind !== "milestone" || protocol.subject.milestone.graphId !== choice.graphId)) throw new TypeError("Invalid placement skill protocol");
+      if (answer.stepId !== `skill-${choice.graphId}`) throw new TypeError("Invalid placement skill step");
+    }
     const graphs = new Set(bundle.graphs.map((graph) => graph.id));
     if (goalKeys.some((id) => !graphs.has(id))) throw new TypeError("Assessment intent uses an unknown graph");
   }

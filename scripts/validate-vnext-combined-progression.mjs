@@ -152,7 +152,7 @@ for (const letter of "BCDEF") assert(mediaSource.includes(`registerMotionGuides(
   `Combined media entry omits exact literal registration or retains a generator fallback ${letter}`);
 const productionSource = source("app/vnext/production/VNextProductionApp.tsx");
 assert(productionSource.includes('import "./combinedProgressionMedia"')
-  && productionSource.includes("catalogue: combinedProgressionCatalogue")
+  && productionSource.includes("catalogue: experiencedPlacementCatalogue")
   && productionSource.includes("evaluatePlanMedia: evaluateCombinedProgressionPlanMedia"),
 "Production does not select one coherent combined release");
 const uiSource = source("app/vnext/releaseCandidate/VNextReleaseCandidateApp.tsx");

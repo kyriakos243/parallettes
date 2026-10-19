@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { correctInvalidGuidedAttemptResult, hasInvalidGuidedAttemptCount } from "../assessment/guidedRecovery";
+import { guidedObservationOccasionId } from "../assessment/evidence";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import {
   buildAssessmentReview,
   buildTodayWorkoutPresentation,
@@ -320,6 +322,7 @@ const VNextAthleteApplication = ({
   const [restartSetupOpen, setRestartSetupOpen] = useState(false);
   const [restartForRestrictions, setRestartForRestrictions] = useState(false);
   const [guidedOffer, setGuidedOffer] = useState<GuidedTestOffer | undefined>(initialGuidedRecovery?.offer);
+  const [correctingGuidedEntry, setCorrectingGuidedEntry] = useState(false);
   const [guidedRecovery, setGuidedRecovery] = useState<GuidedRecovery | undefined>(initialGuidedRecovery);
   const [workoutRecovery, setWorkoutRecovery] = useState<WorkoutRecovery | undefined>(initialWorkoutRecovery);
   const [workoutSelections, setWorkoutSelections] = useState<Readonly<Partial<Record<PlanItemId, SafeWorkoutSwap>>>>(
@@ -507,6 +510,19 @@ const VNextAthleteApplication = ({
     return () => document.removeEventListener("visibilitychange", refreshVisiblePlan);
   }, [assessment, deployment.kind, guidedOffer, identity.mode, refreshInput, runCommand, runtime, snapshot, workoutRecovery]);
 
+  const placementScreenKey = guidedOffer ? `guided:${guidedOffer.protocolId}`
+    : assessment ? `assessment:${assessment.draft.id}:${assessment.draft.revision}:${assessment.review?.checkedToday?.length ?? 0}` : "browse";
+  const previousPlacementScreen = useRef(placementScreenKey);
+  useLayoutEffect(() => {
+    if (previousPlacementScreen.current !== placementScreenKey) {
+      window.scrollTo({ top: 0, behavior: "instant" });
+      const heading = document.getElementById("vnext-assessment-runner-title") ?? document.getElementById("vnext-guided-title");
+      heading?.setAttribute("tabindex", "-1");
+      heading?.focus({ preventScroll: true });
+    }
+    previousPlacementScreen.current = placementScreenKey;
+  }, [placementScreenKey]);
+
   const sessionHistory = useMemo(() => snapshot ? buildSessionHistory(snapshot.sources, vNextDefinitionBundles) : [], [snapshot, vNextDefinitionBundles]);
   const syncMessage = trainingSyncMessage({ account: identity.mode === "account", online, fingerprint: snapshot?.sources.sourceFingerprint, status: syncStatus });
 
@@ -587,6 +603,22 @@ const VNextAthleteApplication = ({
     });
   };
 
+  const updateAssessmentContext = (answers: readonly AssessmentAnswerValue[]): void => {
+    if (!assessment) return;
+    runCommand(async () => {
+      setAssessment(await runtime.updateAssessmentContext({ draft: assessment.draft, answers }));
+      setMessage("Setup saved. Choose a movement you know.");
+    });
+  };
+
+  const deferSupportingAssessment = (): void => {
+    if (!assessment) return;
+    runCommand(async () => {
+      setAssessment(await runtime.deferSupportingAssessment({ draft: assessment.draft }));
+      setMessage("Your supporting goals are kept. Start with your main goal’s checks.");
+    });
+  };
+
   const backAssessment = (): void => {
     if (!assessment) return;
     runCommand(async () => {
@@ -602,6 +634,12 @@ const VNextAthleteApplication = ({
   const commitAssessment = (): void => {
     if (!assessment) return;
     runCommand(async () => {
+      if (assessment.draft.status === "committed") {
+        setSnapshot(await runtime.refresh(refreshInput()));
+        setAssessment(undefined);
+        setMessage("Your workout uses your saved checks and current readiness. Rest first if the checks felt demanding.");
+        return;
+      }
       const committed = await commitAssessmentDraft(assessment.draft);
       setSnapshot(committed.snapshot);
       setAssessment(undefined);
@@ -614,10 +652,14 @@ const VNextAthleteApplication = ({
   const openGuidedTestFromReview = (offer: GuidedTestOffer): void => {
     if (!assessment) return;
     runCommand(async () => {
-      const committed = await commitAssessmentDraft(assessment.draft);
+      const committed = assessment.draft.status === "committed"
+        ? { snapshot: await runtime.refresh(refreshInput()), clearedRestrictions: 0 }
+        : await commitAssessmentDraft(assessment.draft);
+      const currentOffer = committed.snapshot.assessmentReview?.guidedTests.find((item) => item.protocolId === offer.protocolId && item.availability === "available");
+      if (!currentOffer) throw new Error("This check is no longer available. Return to your starting points for the next safe check.");
       setSnapshot(committed.snapshot);
       setAssessment(undefined);
-      setGuidedOffer(offer);
+      setGuidedOffer(currentOffer);
       setMessage(committed.clearedRestrictions > 0
         ? "Placement was saved and current restriction feedback cleared. The exact guided confirmation protocol is ready."
         : "Placement was saved first. The exact guided confirmation protocol is ready.");
@@ -629,6 +671,7 @@ const VNextAthleteApplication = ({
     guidedSubmissionLocked.current = true;
     try {
       persistGuidedRecovery(pending);
+      setCorrectingGuidedEntry(false);
     } catch (reason) {
       guidedSubmissionLocked.current = false;
       setError(reason instanceof Error ? reason.message : "The guided observation could not be retained for safe retry.");
@@ -645,7 +688,20 @@ const VNextAthleteApplication = ({
         setSnapshot(committed.snapshot);
         clearGuidedRecovery();
         setGuidedOffer(undefined);
-        setMessage("Test result saved. Check Progress to see your updated starting point.");
+        const draft = committed.snapshot.assessmentDraft;
+        if (draft?.policyVersion === 2 && committed.snapshot.assessmentReview) {
+          const review = committed.snapshot.assessmentReview;
+          const next = review.guidedTests.find((offer) => offer.availability === "available");
+          // Open instructions only. A saved clean result never starts a timer,
+          // awards the next check or removes the athlete’s choice to stop.
+          if (pending.result.outcome === "clean" && next && !review.nextPracticeLabels?.length) {
+            setAssessment(undefined);
+            setGuidedOffer(next);
+          } else {
+            setAssessment({ draft, step: nextAssessmentStep(draft, bundleFor(draft.catalogueVersion)), review });
+          }
+        }
+        setMessage("Check saved. Rest before continuing; you can finish for today.");
       } finally {
         guidedSubmissionLocked.current = false;
       }
@@ -654,7 +710,13 @@ const VNextAthleteApplication = ({
 
   const commitGuidedTest = (result: GuidedTestFormResult): void => {
     if (guidedRecovery) {
-      commitExactGuidedRecovery(guidedRecovery);
+      if (correctingGuidedEntry) {
+        try {
+          commitExactGuidedRecovery({ ...guidedRecovery, result: correctInvalidGuidedAttemptResult(guidedRecovery.result, result) });
+        } catch (reason) {
+          setError(reason instanceof Error ? reason.message : "Check the attempt counts before saving.");
+        }
+      } else commitExactGuidedRecovery(guidedRecovery);
       return;
     }
     if (!guidedOffer || !snapshot?.assessmentDraft) return;
@@ -666,7 +728,7 @@ const VNextAthleteApplication = ({
       offer: guidedOffer,
       result: {
         eventId: `guided-event-${crypto.randomUUID()}`,
-        observationSessionId: `guided-observation-${crypto.randomUUID()}`,
+        observationSessionId: guidedObservationOccasionId(athleteId, occurredAt),
         occurredAt,
         recordedAt: occurredAt,
         protocolId: guidedOffer.protocolId,
@@ -1043,7 +1105,16 @@ const VNextAthleteApplication = ({
   }
 
   if (guidedOffer) {
-    return <GuidedTestRunner offer={guidedOffer} bundle={bundleFor((guidedRecovery?.draft ?? snapshot.assessmentDraft)?.catalogueVersion ?? vNextDefinitionBundle.catalogueVersion)} busy={busy} error={error} retryingExactObservation={Boolean(guidedRecovery)} onClose={() => setGuidedOffer(undefined)} onCommit={commitGuidedTest} />;
+    return <GuidedTestRunner key={`${guidedOffer.protocolId}:${guidedRecovery?.result.eventId ?? "new"}:${correctingGuidedEntry ? "correct" : "retry"}`} offer={guidedOffer} bundle={bundleFor((guidedRecovery?.draft ?? snapshot.assessmentDraft)?.catalogueVersion ?? vNextDefinitionBundle.catalogueVersion)} busy={busy} error={error} retryingExactObservation={Boolean(guidedRecovery) && !correctingGuidedEntry} initialResult={correctingGuidedEntry ? guidedRecovery?.result : undefined} onCorrectInvalidEntry={guidedRecovery && hasInvalidGuidedAttemptCount(guidedRecovery.result) && !correctingGuidedEntry ? () => {
+      setCorrectingGuidedEntry(true);
+      setError(undefined);
+    } : undefined} hasSavedChecks={Boolean(snapshot.assessmentReview?.checkedToday?.length)} onClose={() => {
+      setGuidedOffer(undefined);
+      const draft = snapshot.assessmentDraft;
+      if (!guidedRecovery && draft?.policyVersion === 2 && snapshot.assessmentReview) {
+        setAssessment({ draft, step: nextAssessmentStep(draft, bundleFor(draft.catalogueVersion)), review: snapshot.assessmentReview });
+      }
+    }} onCommit={commitGuidedTest} />;
   }
 
   if (restartSetupOpen) {
@@ -1064,7 +1135,7 @@ const VNextAthleteApplication = ({
     const review = assessment.review ?? (isAssessmentAtReview(assessment.draft, bundleFor(assessment.draft.catalogueVersion))
       ? buildAssessmentReview(assessment.draft, bundleFor(assessment.draft.catalogueVersion), snapshot.state)
       : undefined);
-    return <AssessmentRunner draft={assessment.draft} step={assessment.step} bundle={bundleFor(assessment.draft.catalogueVersion)} review={review} busy={busy} error={error} onAnswer={answerAssessment} onBack={backAssessment} onCommit={commitAssessment} onClose={() => runCommand(async () => {
+    return <AssessmentRunner draft={assessment.draft} step={assessment.step} bundle={bundleFor(assessment.draft.catalogueVersion)} review={review} busy={busy} error={error} onAnswer={answerAssessment} onContextSubmit={updateAssessmentContext} onDeferSupporting={deferSupportingAssessment} onBack={backAssessment} onCommit={commitAssessment} onClose={() => runCommand(async () => {
       setSnapshot(await runtime.refresh(refreshInput()));
       setAssessment(undefined);
       setMessage("");
@@ -1093,9 +1164,17 @@ const VNextAthleteApplication = ({
     }
   };
   const workflowLocked = Boolean(workoutRecovery || guidedRecovery);
-  const todayPresentation = workoutRecovery
+  const baseTodayPresentation = workoutRecovery
     ? buildTodayWorkoutPresentation({ bundle: workoutBundle, generated: workoutRecovery.generated }, workoutRecovery.selections)
     : buildTodayWorkoutPresentation({ bundle: vNextDefinitionBundle, generated: snapshot.generated }, workoutSelections);
+  const checksToday = !workoutRecovery && (snapshot.assessmentReview?.checkedToday?.length ?? 0) > 0;
+  const startingPractice = snapshot.assessmentReview?.nextPracticeLabels ?? [];
+  const todayPresentation = checksToday ? { ...baseTodayPresentation,
+    ...(baseTodayPresentation.focus ? { focus: { ...baseTodayPresentation.focus, label: "Optional practice after checks" } } : {}),
+    startActionLabel: "Review optional practice",
+    placementMessage: `Today’s checks are saved and count toward your training load. You can finish for today.${startingPractice.length ? ` Starting practice: ${startingPractice.join(", ")}, when recovered and current safety checks allow it.` : " Continue the remaining checks when ready."} Any practice below is optional and respects the load already recorded.`,
+  } : baseTodayPresentation;
+
   const completionPresentation = executionFacts && workoutRecovery
     ? buildWorkoutCompletionPresentation({
       bundle: workoutBundle,
@@ -1136,6 +1215,17 @@ const VNextAthleteApplication = ({
             <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => { setRestartForRestrictions(false); setRestartSetupOpen(true); }}>Start over</button>
           </div>
         </section>
+        ) : !workflowLocked && snapshot.assessmentDraft?.policyVersion === 2 && snapshot.assessmentReview && !snapshot.assessmentReview.checksComplete ? (
+          <section className="vnext-panel vnext-rc-saved-setup" aria-label="Starting-point checks">
+            <p><strong>Confirm your starting point</strong><br />A few relevant checks help match the workout to what you can do. Some skills need another day’s confirmation.</p>
+            <button type="button" className="vnext-action" disabled={busy} onClick={() => runCommand(async () => {
+              const current = await runtime.refresh(refreshInput());
+              const draft = current.assessmentDraft;
+              if (!draft || !current.assessmentReview) return;
+              setSnapshot(current);
+              setAssessment({ draft, step: nextAssessmentStep(draft, bundleFor(draft.catalogueVersion)), review: current.assessmentReview });
+            })}>Continue checks</button>
+          </section>
         ) : undefined}
         progress={snapshot.presentations.progress}
         skillDetails={snapshot.presentations.skillDetails}

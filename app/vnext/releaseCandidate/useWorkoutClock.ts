@@ -88,7 +88,7 @@ export const useWorkoutClock = (options: Readonly<{
       // Unsupported/denied/low-power cases keep the same safe pause policy.
     });
     return () => { disposed = true; releaseLock(); };
-  }, [options.running]);
+  }, [options.running, options.intervalKey]);
 
   return { stop, isActive: () => control.current?.isActive() ?? false, screenAwake };
 };

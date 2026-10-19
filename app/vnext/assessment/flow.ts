@@ -1,6 +1,7 @@
 import {
   DOMAIN_SCHEMA_VERSION,
   parseStableId,
+  parseDefinitionVersion,
   type AthleteIntent,
   type BenchmarkProtocol,
   type BenchmarkProtocolId,
@@ -11,6 +12,7 @@ import {
   type GraphId,
 } from "../contracts";
 import { graphIds } from "../definitions/ids";
+import { canonicalJson } from "../persistence/canonical";
 import {
   VNEXT_ASSESSMENT_POLICY_ID,
   VNEXT_ASSESSMENT_POLICY_VERSION,
@@ -38,6 +40,7 @@ export type CreateAssessmentDraftInput = Readonly<{
   existingState?: DerivedAthleteState;
   mode?: AssessmentDraft["mode"];
   initialEquipment?: readonly EquipmentId[];
+  placementVersion?: 2;
 }>;
 
 const safetyStep: AssessmentStep = {
@@ -320,7 +323,7 @@ export const createAssessmentDraft = (
     id: assessmentDraftId(input.id),
     athleteId: input.athleteId,
     policyId: VNEXT_ASSESSMENT_POLICY_ID,
-    policyVersion: VNEXT_ASSESSMENT_POLICY_VERSION,
+    policyVersion: input.placementVersion ? parseDefinitionVersion(input.placementVersion) : VNEXT_ASSESSMENT_POLICY_VERSION,
     catalogueVersion: input.bundle.catalogueVersion,
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
@@ -357,6 +360,23 @@ export const nextAssessmentStep = (
   const needsInversion = policy.goalOptions.some((goal) =>
     selectedGoals.includes(goal.graphId) && goal.requiresInversionContext);
   if (needsInversion && !answerFor(draft, "inversion")) return inversionStep;
+  if (draft.policyVersion === 2) {
+    for (const graphId of selectedGoals) {
+      if (draft.answers.some((answer) => answer.stepId === `skill-${graphId}`)) continue;
+      const graph = bundle.graphs.find((item) => item.id === graphId)!;
+      const options = graph.nodes.filter((node) => node.implementationStatus === "available"
+        && (node.programmingBoundary !== "specialist" || draft.intentSeed.preferences.specialistOptIn))
+        .flatMap((node) => {
+          const protocol = bundle.benchmarkProtocols.find((item) => node.benchmarkProtocolIds.includes(item.id)
+            && item.subject.kind === "milestone" && item.subject.milestone.nodeId === node.id);
+          return protocol && equipmentAvailable(draft, protocol) ? [placementAnchorForProtocol(protocol, graph.label)] : [];
+        });
+      return { id: `skill-${graphId}`, kind: "skill-selection", graphId, options,
+        title: `${graph.label}: your starting point`,
+        prompt: "Choose a variation you already practise cleanly. Watch the guide to compare; don’t attempt a new skill here." };
+    }
+    return { ...reviewStep, prompt: "These short checks help choose your first workout. You can save now and continue checking later." };
+  }
   for (const anchor of policy.commonAnchors) {
     if (!anchorCanBeAsked(draft, anchor, bundle)) continue;
     if (!anchorByProtocol(draft, anchor.protocolId, policy)) {
@@ -377,6 +397,10 @@ const assertAnswerMatchesStep = (
   policy: AssessmentPolicy,
 ): void => {
   if (step.kind === "review" || step.kind !== value.kind) throw new TypeError(`Answer does not match ${step.id}`);
+  if (value.kind === "skill-selection") {
+    if (step.kind !== "skill-selection" || value.graphId !== step.graphId
+      || (value.protocolId && !step.options.some((option) => option.protocolId === value.protocolId))) throw new TypeError("Choose a shown skill for this goal");
+  }
   if (value.kind === "safety") {
     if (value.severity === "none") return;
     if (!value.demandDomains?.length || !value.bodyRegions?.length) {
@@ -422,7 +446,7 @@ export const answerAssessmentStep = (
   const previousChoice = draft.revisitAnswers?.find((item) => item.stepId === step.id);
   // Reconfirm unchanged choices one at a time. An edit invalidates later choices,
   // so a changed safety answer or goal cannot carry an obsolete route forward.
-  const revisitAnswers = previousChoice && JSON.stringify(previousChoice.value) === JSON.stringify(value)
+  const revisitAnswers = previousChoice && canonicalJson(previousChoice.value) === canonicalJson(value)
     ? draft.revisitAnswers?.filter((item) => item.stepId !== step.id)
     : [];
   const updated: AssessmentDraft = {
@@ -499,15 +523,32 @@ export const assessmentPromptTiming = (draft: AssessmentDraft): Readonly<{
   };
 };
 
+const placementAnchorForProtocol = (protocol: BenchmarkProtocol, familyLabel?: string): PlacementAnchor => ({
+  id: `skill-${protocol.subject.kind === "milestone" ? protocol.subject.milestone.graphId : protocol.id}`,
+  label: protocol.label,
+  prompt: familyLabel ?? protocol.label,
+  protocolId: protocol.id,
+  stage: "goal",
+  ...(protocol.subject.kind === "milestone" ? { goalGraphId: protocol.subject.milestone.graphId } : {}),
+  inversionExposure: "none", // Actual test admission derives demand from the exact prescription.
+});
+
 export const protocolAnswerRecords = (
   draft: AssessmentDraft,
   policy: AssessmentPolicy = vNextAssessmentPolicy,
+  bundle?: DefinitionBundle,
 ): readonly Readonly<{
   anchor: PlacementAnchor;
   answer: AssessmentAnswerRecord & Readonly<{ value: Extract<AssessmentAnswerValue, { kind: "anchor" }> }>;
 }>[] => {
   const anchors = new Map(allAssessmentAnchors(policy).map((anchor) => [anchor.id, anchor]));
   return draft.answers.flatMap((answer) => {
+    if (draft.policyVersion === 2 && answer.value.kind === "skill-selection" && answer.value.protocolId) {
+      if (!bundle) throw new TypeError("Placement policy 2 requires its native definitions");
+      const protocol = protocolById(bundle, answer.value.protocolId);
+      const anchor = placementAnchorForProtocol(protocol);
+      return [{ anchor, answer: { ...answer, value: { kind: "anchor" as const, response: answer.value.response } } }];
+    }
     const anchor = anchors.get(answer.stepId);
     return anchor && answer.value.kind === "anchor"
       ? [{ anchor, answer: answer as AssessmentAnswerRecord & Readonly<{ value: Extract<AssessmentAnswerValue, { kind: "anchor" }> }> }]
