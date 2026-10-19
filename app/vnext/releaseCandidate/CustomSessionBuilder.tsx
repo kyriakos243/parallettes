@@ -10,6 +10,12 @@ import {
   type SessionDemand,
   type VNextCustomSessionMinutes,
 } from "../index";
+import {
+  readShortWorkoutPreferences,
+  rememberShortWorkoutPreferences,
+  shortWorkoutFocusToken,
+  type ShortWorkoutPreferences,
+} from "./shortWorkoutPreferences";
 
 export type VNextCustomSessionRequest = Readonly<{
   minutes: VNextCustomSessionMinutes;
@@ -34,21 +40,29 @@ const equipmentOptions = [
   { id: parseStableId("equipment", "wall"), label: "Wall" },
 ] as const;
 
-export const CustomSessionBuilder = ({
-  goals,
-  currentEquipment,
-  defaultDemand,
-  busy,
-  onClose,
-  onBuild,
-}: Readonly<{
+type CustomSessionBuilderProps = Readonly<{
   goals: GoalControlsPresentation;
   currentEquipment: readonly EquipmentId[];
   defaultDemand: SessionDemand;
+  preferenceKey?: string;
   busy?: boolean;
   onClose: () => void;
   onBuild: (request: VNextCustomSessionRequest) => void;
-}>) => {
+}>;
+
+// Account changes remount the form, including its current equipment/effort.
+export const CustomSessionBuilder = (props: CustomSessionBuilderProps) =>
+  <CustomSessionForm key={props.preferenceKey ?? "temporary"} {...props} />;
+
+const CustomSessionForm = ({
+  goals,
+  currentEquipment,
+  defaultDemand,
+  preferenceKey,
+  busy,
+  onClose,
+  onBuild,
+}: CustomSessionBuilderProps) => {
   const focusOptions: readonly VNextCustomSessionFocus[] = [
     { kind: "general", label: "General / balanced" },
     {
@@ -69,11 +83,22 @@ export const CustomSessionBuilder = ({
       graphId: option.graphId,
     })),
   ];
-  const initialGraphId = goals.primaryGraphId ?? goals.options[0]!.graphId;
-  const initialFocusIndex = focusOptions.findIndex((focus) =>
+  const initialGraphId = goals.primaryGraphId ?? goals.options[0]?.graphId;
+  const initialFocus = focusOptions.find((focus) =>
     focus.kind === "graph" && focus.graphId === initialGraphId);
-  const [minutes, setMinutes] = useState<VNextCustomSessionMinutes>(5);
-  const [focusIndex, setFocusIndex] = useState(Math.max(0, initialFocusIndex));
+  const defaultFocus = initialFocus ?? focusOptions[0]!;
+  const [preferences, setPreferences] = useState<ShortWorkoutPreferences>(() => readShortWorkoutPreferences(
+    preferenceKey,
+    { minutes: 5, focusToken: shortWorkoutFocusToken(defaultFocus) },
+    focusOptions.map(shortWorkoutFocusToken),
+  ));
+  const { minutes } = preferences;
+  const focus = focusOptions.find((option) => shortWorkoutFocusToken(option) === preferences.focusToken) ?? defaultFocus;
+  const focusToken = shortWorkoutFocusToken(focus);
+  const remember = (next: ShortWorkoutPreferences) => {
+    setPreferences(next);
+    rememberShortWorkoutPreferences(preferenceKey, next);
+  };
   const [equipment, setEquipment] = useState<readonly EquipmentId[]>(currentEquipment);
   const [demand, setDemand] = useState<SessionDemand>(defaultDemand);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -96,14 +121,17 @@ export const CustomSessionBuilder = ({
         <fieldset>
           <legend>Duration</legend>
           <div className="vnext-custom-choice-row">
-            {([5, 10, 15, 20] as const).map((value) => <button key={value} type="button" aria-pressed={minutes === value} onClick={() => setMinutes(value)}>{value} min</button>)}
+            {([5, 10, 15, 20] as const).map((value) => <button key={value} type="button" aria-pressed={minutes === value} onClick={() => remember({ minutes: value, focusToken })}>{value} min</button>)}
           </div>
         </fieldset>
 
         <label>
           <span>Focus</span>
-          <select value={focusIndex} onChange={(event) => setFocusIndex(Number(event.target.value))}>
-            {focusOptions.map((option, index) => <option key={`${option.kind}-${option.label}`} value={index}>{option.label}</option>)}
+          <select value={focusToken} onChange={(event) => {
+            const next = event.target.value;
+            if (focusOptions.some((option) => shortWorkoutFocusToken(option) === next)) remember({ minutes, focusToken: next });
+          }}>
+            {focusOptions.map((option) => <option key={shortWorkoutFocusToken(option)} value={shortWorkoutFocusToken(option)}>{option.label}</option>)}
           </select>
         </label>
 
@@ -132,7 +160,7 @@ export const CustomSessionBuilder = ({
 
         </details>
         {equipment.length === 0 && <p role="alert">Choose at least one available training space or piece of equipment.</p>}
-        <button type="button" className="vnext-submit" disabled={busy || equipment.length === 0} onClick={() => onBuild({ minutes, focus: focusOptions[focusIndex]!, equipment, demand })}>
+        <button type="button" className="vnext-submit" disabled={busy || equipment.length === 0} onClick={() => onBuild({ minutes, focus, equipment, demand })}>
           Preview {minutes}-minute workout
         </button>
       </section>

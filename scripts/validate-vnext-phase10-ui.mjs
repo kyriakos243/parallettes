@@ -47,7 +47,7 @@ assert(!sources.html.includes("user-scalable=no"), "The viewport prevents user z
 // Final athlete surface semantics and trust copy.
 includesAll(sources.experience, [
   '<main className="vnext-experience" aria-labelledby="vnext-app-title">',
-  '<nav className="vnext-nav" aria-label="Training sections">',
+  '<nav className="vnext-nav vnext-section-navigation" aria-label="Training sections">',
   'role="status" aria-live="polite"',
   'Today’s focus',
   'Main focus',

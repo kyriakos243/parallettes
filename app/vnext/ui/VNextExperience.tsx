@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { GraphId, PlanItemId, SessionDemand } from "../contracts";
 import { VNextMotionGuide } from "../media/VNextMotionGuide";
 import { SkillRoadmap } from "./SkillRoadmap";
+import { useSectionNavigation } from "./sectionNavigation";
 import { HistoryView, WorkoutSavedSummary } from "./HistoryPanels";
 import type { VNextRecentSession } from "./sessionHistory";
 export type { VNextRecentSession } from "./sessionHistory";
@@ -130,9 +131,11 @@ const RestrictionNotice = ({
 }: Readonly<{
   presentation: RestrictionPresentation;
   onRestrictionRequested?: () => void;
-}>) => presentation.hasActiveRestrictions ? (
-  <section className="vnext-restriction" aria-labelledby="vnext-restriction-title">
-    <h3 id="vnext-restriction-title">Current training adjustment</h3>
+}>) => {
+  const titleId = useId();
+  return presentation.hasActiveRestrictions ? (
+  <section className="vnext-restriction" aria-labelledby={titleId}>
+    <h3 id={titleId}>Current training adjustment</h3>
     <p>{presentation.summary}</p>
     {presentation.items.map((item) => (
       <div key={item.sourceKey}>
@@ -148,6 +151,7 @@ const RestrictionNotice = ({
     )}
   </section>
 ) : null;
+};
 
 const previewPhaseLabel = (label: string): string => ({
   Preparation: "Warm-up", "Preparation rounds": "Warm-up",
@@ -158,6 +162,7 @@ const previewPhaseLabel = (label: string): string => ({
 }[label] ?? label);
 
 const TodayView = ({
+  active = true,
   today,
   restrictions,
   completion,
@@ -182,6 +187,7 @@ const TodayView = ({
   | "workoutSwapOptions" | "workoutSelections" | "onWorkoutSwap" | "onCustomSessionRequested"
   | "onDiscardWorkout" | "onEndRecoveredWorkout" | "onWorkoutReviewSubmitted" | "onRestrictionRequested" | "workoutStartBlocker"
   | "workoutOrigin" | "workoutRecoveryStage"> & {
+  active?: boolean;
   announce: (message: string) => void;
 }>) => {
   const [reviewIndex, setReviewIndex] = useState(0);
@@ -192,7 +198,7 @@ const TodayView = ({
   const completionHeading = useRef<HTMLHeadingElement>(null);
   const reviewing = Boolean(completion);
   useEffect(() => {
-    if (!reviewing) return;
+    if (!reviewing || !active) return;
     completionHeading.current?.focus({ preventScroll: true });
     completionHeading.current?.scrollIntoView({ block: "start", behavior: "instant" });
   }, [reviewing]);
@@ -278,7 +284,7 @@ const TodayView = ({
           {currentReviewPrompt && currentReviewDraft && (
               <article className="vnext-review-item" key={currentReviewPrompt.planItemId}>
                 <div className="vnext-review-motion" role="img" aria-label={`${currentReviewPrompt.exerciseName} movement guide`}>
-                  <VNextMotionGuide preset={currentReviewPrompt.mediaReference} />
+                  {active && <VNextMotionGuide preset={currentReviewPrompt.mediaReference} />}
                 </div>
                 <div className="vnext-review-copy">
                   <div className="vnext-review-item-heading">
@@ -523,7 +529,7 @@ const TodayView = ({
                   <article className="vnext-plan-item" key={block.planItemId}>
                     <span className="vnext-plan-index" aria-hidden="true">{index + 1}</span>
                     <div className="vnext-plan-motion" role="img" aria-label={`${exerciseName} movement guide`}>
-                      {mediaReference ? <VNextMotionGuide preset={mediaReference} /> : <span>Guide unavailable</span>}
+                      {active && (mediaReference ? <VNextMotionGuide preset={mediaReference} /> : <span>Guide unavailable</span>)}
                     </div>
                     <div className="vnext-plan-copy">
                       <p className="vnext-kicker">{previewPhaseLabel(block.blockLabel)}{block.blockLabel.endsWith("rounds") ? " · alternating sets" : ""}</p>
@@ -1014,7 +1020,7 @@ export const VNextExperience = ({
         ? `Your ${workoutOrigin === "custom" ? "Custom Session" : "workout"} preview is ready to review.`
         : "Today’s workout is ready.";
   const [historySelection, setHistorySelection] = useState<string>();
-  const [view, setView] = useState<ViewId>(initialView);
+  const { section: view, changeSection: setView, hasVisited } = useSectionNavigation(initialView);
   const previousSavedId = useRef(savedWorkout?.id);
   useEffect(() => {
     if (savedWorkout) setView("today");
@@ -1046,22 +1052,24 @@ export const VNextExperience = ({
             </div>
             <h1 id="vnext-app-title" className="vnext-visually-hidden">Parallette25</h1>
           </div>
-          <nav className="vnext-nav" aria-label="Training sections">
-            <button type="button" aria-pressed={view === "today"} onClick={() => changeView("today")}>Today</button>
-            <button type="button" aria-pressed={view === "progress"} onClick={() => changeView("progress")}>Progress &amp; Goals</button>
-            <button type="button" aria-pressed={view === "history"} onClick={() => changeView("history")}>History</button>
+          <nav className="vnext-nav vnext-section-navigation" aria-label="Training sections">
+            <button type="button" aria-pressed={view === "today"} onClick={() => changeView("today")}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10 12 3l9 7v11h-6v-7H9v7H3Z" /></svg><span>Today</span></button>
+            <button type="button" aria-pressed={view === "progress"} onClick={() => changeView("progress")} aria-label="Progress & Goals"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20v-5m7 5V9m7 11V3M3 21h18" /></svg><span className="vnext-nav-long-label">Progress &amp; Goals</span><span className="vnext-nav-short-label">Progress</span></button>
+            <button type="button" aria-pressed={view === "history"} onClick={() => changeView("history")}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2 7M3 4v7h7m2-4v6l4 2" /></svg><span>History</span></button>
           </nav>
         </header>
         <p className="vnext-live-status vnext-visually-hidden" role="status" aria-live="polite">{statusMessage}</p>
-        {view === "today" && savedWorkout && !completion && !workoutRecoveryStage && <WorkoutSavedSummary
+        <div className="vnext-tab-panel" hidden={view !== "today"}>
+        {savedWorkout && !completion && !workoutRecoveryStage && <WorkoutSavedSummary
           session={savedWorkout}
+          active={view === "today"}
           syncMessage={syncMessage}
           nextFocus={today.status === "ready" && today.focus ? `${today.focus.label}. Return when you’re ready to train.` : "Check Today for your current options and any comfort updates."}
           onDone={() => onDismissSummary?.()}
           onHistory={() => { setHistorySelection(savedWorkout.id); changeView("history"); onDismissSummary?.(); }}
         />}
-        {view === "today" ? (
-          <TodayView
+        {hasVisited("today") && <TodayView
+            active={view === "today"}
             today={today}
             restrictions={restrictions}
             completion={completion}
@@ -1081,9 +1089,10 @@ export const VNextExperience = ({
             onWorkoutReviewSubmitted={onWorkoutReviewSubmitted}
             onRestrictionRequested={onRestrictionRequested}
             announce={announce}
-          />
-        ) : view === "progress" ? (
-          <ProgressView
+          />}
+        </div>
+        <div className="vnext-tab-panel" hidden={view !== "progress"}>
+          {hasVisited("progress") && <ProgressView
             progress={progress}
             skillDetails={skillDetails}
             goals={goals}
@@ -1094,10 +1103,11 @@ export const VNextExperience = ({
             onAssessmentRequested={onAssessmentRequested}
             onRestrictionRequested={onRestrictionRequested}
             announce={announce}
-          />
-        ) : (
-          <HistoryView sessions={recentSessions} selectedId={historySelection} />
-        )}
+          />}
+        </div>
+        <div className="vnext-tab-panel" hidden={view !== "history"}>
+          {hasVisited("history") && <HistoryView sessions={recentSessions} selectedId={historySelection} />}
+        </div>
       </div>
     </main>
   );
