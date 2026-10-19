@@ -1,6 +1,7 @@
 import {
   DEMAND_DOMAINS,
   DOMAIN_SCHEMA_VERSION,
+  parseStableId,
   type AthleteEvidenceEvent,
   type BenchmarkProtocol,
   type BenchmarkSubject,
@@ -825,6 +826,13 @@ const deriveFamilyState = (
       if (node.implementationStatus === "missing-content") reasons.push(projectionReasonCodes.missingContent);
       if (node.programmingBoundary === "specialist" && !specialistOptIn) reasons.push(projectionReasonCodes.specialistOptInRequired);
 
+      const entry = policy.measuredPlacementEntries?.find((rule) => milestoneKey(rule.milestone) === key);
+      const measuredPractice = (state.lifecycle === "demonstrated" || state.lifecycle === "established") && state.confidence === "current"
+        && node.programmingBoundary === "automatic" && Boolean(entry?.readinessProtocolIds.every((id) => {
+          const protocol = bundle.benchmarkProtocols.find((item) => item.id === id);
+          const status = protocol && protocolStatuses.get(`${protocol.id}@${protocol.definitionVersion}`);
+          return protocol?.subject.kind === "capacity-facet" && status?.demonstrated && status.confidence === "current";
+        }));
       const contentAvailable = node.implementationStatus === "available";
       const programmingAvailable = node.programmingBoundary !== "specialist" || specialistOptIn;
       if (!established && graphReady && contentAvailable && programmingAvailable) {
@@ -840,8 +848,8 @@ const deriveFamilyState = (
         });
       } else if (
         (state.lifecycle === "estimated" || state.lifecycle === "developing"
-          || state.lifecycle === "demonstrated" || (!established && graphReady))
-        && graphReady
+          || state.lifecycle === "demonstrated" || measuredPractice || (!established && graphReady))
+        && (graphReady || measuredPractice)
         && node.implementationStatus === "available"
         && (node.programmingBoundary !== "specialist" || specialistOptIn)
       ) {
@@ -849,7 +857,7 @@ const deriveFamilyState = (
           milestone,
           reasonCodes: state.lifecycle === "estimated" || state.lifecycle === "developing"
             ? state.reasonCodes
-            : [projectionReasonCodes.eligibleFrontier],
+            : measuredPractice && !graphReady ? [parseStableId("reason", "measured-placement-practice")] : [projectionReasonCodes.eligibleFrontier],
           depth,
           branch: branchByNode.get(key)!,
           priority: 1,
@@ -1053,7 +1061,7 @@ export const evaluateTrainability = (
   evaluateTrainabilityInternal(input, true);
 
 export const projectAthleteState = (input: ProjectionInput): ProjectionResult => {
-  const normalization = normalizeObservations(input);
+  const normalization = normalizeObservations({ ...input, includeGuidedPrescriptionIdentity: Boolean(input.policy.measuredPlacementEntries) });
   const issues = [...normalization.issues];
   const asOfMs = Date.parse(input.asOf);
   const bundles = new Map(input.definitionBundles.map((bundle) => [bundle.catalogueVersion, bundle] as const));

@@ -1,6 +1,7 @@
+import { experiencedPlacementCatalogue } from "./experiencedPlacement";
 import { useEffect, useMemo, useState } from "react";
 import "./combinedProgressionMedia";
-import { combinedProgressionCatalogue, evaluateCombinedProgressionPlanMedia } from "./combinedProgressionRelease";
+import { evaluateCombinedProgressionPlanMedia } from "./combinedProgressionRelease";
 import { generateMixedVNextSession, generateMixedVNextCustomSession } from "../planning/mixed";
 import { isStableId, parseStableId, type VNextShadowStore } from "../index";
 import {
@@ -167,7 +168,7 @@ const prepareProductionAthlete = async ({
 
 const PRODUCTION_DEPLOYMENT: VNextApplicationDeployment = {
   kind: "production",
-  catalogue: combinedProgressionCatalogue,
+  catalogue: experiencedPlacementCatalogue,
   workoutGenerators: { generateSession: generateMixedVNextSession, generateCustomSession: generateMixedVNextCustomSession },
   evaluatePlanMedia: evaluateCombinedProgressionPlanMedia,
   productKicker: "Parallette25",

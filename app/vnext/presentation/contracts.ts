@@ -190,6 +190,8 @@ export type TodayFocusPresentation = Readonly<{
 }>;
 
 export type TodayWorkoutPresentation = Readonly<{
+  startActionLabel?: string;
+  placementMessage?: string;
   title: "Today's Workout";
   status: "ready" | "unavailable";
   focus?: TodayFocusPresentation;
@@ -270,6 +272,7 @@ export type AssessmentEntryPresentation = Readonly<{
 }>;
 
 export type AssessmentEntryInput = Readonly<{
+  placementVersion?: 2;
   bundle: DefinitionBundle;
   state: DerivedAthleteState;
   intent: AthleteIntent;

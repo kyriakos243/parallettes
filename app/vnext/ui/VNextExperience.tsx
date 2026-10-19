@@ -427,6 +427,7 @@ const TodayView = ({
             </p>
           </section>
 
+          {today.placementMessage && <p className="vnext-panel" role="status">{today.placementMessage}</p>}
           {!completion && <div className="vnext-primary-workout-actions" aria-label="Workout actions">
             <button
               type="button"
@@ -445,7 +446,7 @@ const TodayView = ({
                 ? `Resume ${workoutOrigin === "custom" ? "Custom Session" : "today’s workout"}`
                 : workoutRecoveryStage === "preview"
                   ? `Review ${workoutOrigin === "custom" ? "Custom Session" : "today’s workout"}`
-                  : "Start today’s workout"}
+                  : today.startActionLabel ?? "Start today’s workout"}
             </button>
             {onEndRecoveredWorkout && workoutRecoveryStage === "active" && (
               <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onEndRecoveredWorkout}>

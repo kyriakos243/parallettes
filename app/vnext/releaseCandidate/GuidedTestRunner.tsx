@@ -6,6 +6,7 @@ import type {
 } from "../index";
 import { guidedTestPresentation } from "../assessment/presentation";
 import { VNextMotionGuide } from "../media/VNextMotionGuide";
+import "./placementSetup.css";
 
 export type GuidedTestFormResult = Readonly<{
   outcome: "clean" | "partial" | "not-yet" | "symptom";
@@ -95,10 +96,15 @@ export const GuidedTestRunner = ({
           <div>
             <p className="vnext-kicker">Guided confirmation</p>
             <h1 id="vnext-guided-title">{presentation.exercise.name}</h1>
-            <p>Watch the complete movement, then record one honest attempt.</p>
+            <p>Watch the movement, follow the target below, then record what you completed.</p>
           </div>
           <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onClose}>Close</button>
         </div>
+
+        <aside className="vnext-placement-preparation" aria-label="Before your check">
+          <strong>Prepare before you check</strong>
+          <p>Warm up first, set up the equipment and read the safety criteria. Rest between checks; continue later if you feel tired or your control changes. Stop if symptoms or instability appear.</p>
+        </aside>
 
         <section className="vnext-rc-question-movement" aria-label={`${presentation.exercise.name} movement demonstration`}>
           <div className="vnext-rc-question-motion">
@@ -123,7 +129,7 @@ export const GuidedTestRunner = ({
               {presentation.exercise.safetyNotes.length > 0 && (
                 <p className="vnext-authority">{presentation.exercise.safetyNotes.join(" ")}</p>
               )}
-              <p className="vnext-help">Confirmation policy: {presentation.confirmation.qualifyingObservations} qualifying observation{presentation.confirmation.qualifyingObservations === 1 ? "" : "s"} across at least {presentation.confirmation.minimumDistinctSessions} distinct session{presentation.confirmation.minimumDistinctSessions === 1 ? "" : "s"}.</p>
+              <p className="vnext-help">To confirm this ability, meet the target cleanly {presentation.confirmation.qualifyingObservations} time{presentation.confirmation.qualifyingObservations === 1 ? "" : "s"} across at least {presentation.confirmation.minimumDistinctSessions} separate session{presentation.confirmation.minimumDistinctSessions === 1 ? "" : "s"}.{presentation.confirmation.minimumDistinctSessions > 1 ? " Repeating it now does not replace a check on another occasion." : ""}</p>
               <p className="vnext-authority">Stop if a safety criterion is not met. A preference or self-report cannot bypass this protocol.</p>
             </details>
           </div>
@@ -152,7 +158,7 @@ export const GuidedTestRunner = ({
           )}
 
           <fieldset>
-            <legend>Observed outcome</legend>
+            <legend>How did it go?</legend>
             <div className="vnext-rc-answer-grid">
               {([
                 ["clean", "Met the exact target cleanly"],
@@ -173,7 +179,7 @@ export const GuidedTestRunner = ({
             <label><span>Effort, 1–10 (optional)</span><input type="number" min="1" max="10" step="1" inputMode="numeric" value={exertion} onChange={(event) => setExertion(event.target.value)} /></label>
             <label><span>Notes (optional)</span><input value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
           </div>
-          {error && <p className="vnext-authority" role="alert">{error} The exact observation identity and result remain retained for retry.</p>}
+          {error && <p className="vnext-authority" role="alert">{error} Your result is kept for retry. You do not need to repeat the check.</p>}
           <button
             type="button"
             className="vnext-submit"
@@ -191,7 +197,7 @@ export const GuidedTestRunner = ({
                 ...(notes.trim() ? { notes: notes.trim() } : {}),
               });
             }}
-          >{retryingExactObservation ? "Retry same guided observation" : "Save guided observation"}</button>
+          >{retryingExactObservation ? "Retry saving this result" : "Save check result"}</button>
         </div>
       </section>
     </main>

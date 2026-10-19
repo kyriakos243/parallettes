@@ -36,7 +36,7 @@
     "validate:vnext-phase11:ux": "node scripts/validate-vnext-phase11-ux.mjs",
     "render:vnext-phase10-media-review": "node scripts/render-vnext-phase10-media-review.mjs",
     "review:vnext-phase10-motion": "node scripts/build-vnext-phase10-motion-review.mjs",
-    "validate": "node scripts/validate-program.mjs && node scripts/validate-progression.mjs && node scripts/validate-assessment.mjs && node scripts/validate-custom.mjs && node scripts/validate-motion-guides.mjs && node scripts/validate-profile.mjs && node scripts/validate-profile-worker.mjs && node scripts/validate-vnext-domain.mjs && node scripts/validate-vnext-phase2.mjs && node scripts/validate-vnext-phase3.mjs && node scripts/validate-vnext-phase4.mjs && node scripts/validate-vnext-phase5.mjs && node scripts/validate-vnext-phase6.mjs && node scripts/validate-vnext-phase7.mjs && node scripts/validate-vnext-phase8.mjs && node scripts/validate-vnext-phase9.mjs && pnpm validate:vnext-phase10 && pnpm validate:vnext-phase11 && pnpm validate:vnext-batch-a && pnpm validate:vnext-batch-b && pnpm validate:vnext-batch-c && pnpm validate:vnext-batch-d && pnpm validate:vnext-batch-e && pnpm validate:vnext-batch-f && pnpm validate:vnext-combined-progression && pnpm validate:vnext-mixed-workout && pnpm validate:vnext-roadmap && pnpm validate:vnext-history && pnpm validate:vnext-navigation",
+    "validate": "node scripts/validate-program.mjs && node scripts/validate-progression.mjs && node scripts/validate-assessment.mjs && node scripts/validate-custom.mjs && node scripts/validate-motion-guides.mjs && node scripts/validate-profile.mjs && node scripts/validate-profile-worker.mjs && node scripts/validate-vnext-domain.mjs && node scripts/validate-vnext-phase2.mjs && node scripts/validate-vnext-phase3.mjs && node scripts/validate-vnext-phase4.mjs && node scripts/validate-vnext-phase5.mjs && node scripts/validate-vnext-phase6.mjs && node scripts/validate-vnext-phase7.mjs && node scripts/validate-vnext-phase8.mjs && node scripts/validate-vnext-phase9.mjs && pnpm validate:vnext-phase10 && pnpm validate:vnext-phase11 && pnpm validate:vnext-batch-a && pnpm validate:vnext-batch-b && pnpm validate:vnext-batch-c && pnpm validate:vnext-batch-d && pnpm validate:vnext-batch-e && pnpm validate:vnext-batch-f && pnpm validate:vnext-combined-progression && pnpm validate:vnext-mixed-workout && pnpm validate:vnext-roadmap && pnpm validate:vnext-history && pnpm validate:vnext-navigation && pnpm validate:vnext-placement",
     "typecheck": "tsc --noEmit",
     "check": "pnpm validate && pnpm typecheck",
     "preview": "vite preview",
@@ -57,7 +57,8 @@
     "validate:vnext-mixed-workout": "node scripts/validate-vnext-mixed-workout.mjs && node scripts/validate-vnext-mixed-runner.mjs",
     "validate:vnext-roadmap": "node scripts/validate-vnext-roadmap.mjs",
     "validate:vnext-history": "node scripts/validate-vnext-history.mjs",
-    "validate:vnext-navigation": "node scripts/validate-vnext-navigation.mjs && node scripts/validate-vnext-short-workout-preferences.mjs"
+    "validate:vnext-navigation": "node scripts/validate-vnext-navigation.mjs && node scripts/validate-vnext-short-workout-preferences.mjs",
+    "validate:vnext-placement": "node scripts/validate-vnext-placement.mjs && node scripts/validate-vnext-placement-compatibility.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.28.0",

@@ -21,7 +21,7 @@ import {
   type SessionRecord,
 } from "../contracts";
 import type { VNextShadowStore } from "../persistence/contracts";
-import { sha256 } from "../persistence/canonical";
+import { canonicalJson, sha256 } from "../persistence/canonical";
 import { validateAthleteEvidenceEvent, validateSessionRecord } from "../validation";
 import {
   assessmentPromptTiming,
@@ -42,6 +42,21 @@ import {
   type WorkoutReviewPrompt,
 } from "./contracts";
 import { vNextAssessmentPolicy } from "./policy";
+import { placementEntryRuleFor, placementReadinessSatisfied, placementSubjectDemonstrated } from "../placementEntry";
+import { milestoneBenchmarkId } from "../definitions/ids";
+
+const placementRule = (draft: AssessmentDraft, protocol: BenchmarkProtocol) => {
+  if (draft.policyVersion !== 2 || !draft.answers.some((answer) => answer.value.kind === "inactivity" && answer.value.inactivity === "active")
+    || !draft.answers.some((answer) => answer.value.kind === "skill-selection" && answer.value.protocolId === protocol.id && answer.value.response === "clean")) return undefined;
+  return placementEntryRuleFor(protocol.subject);
+};
+
+/** One UTC calendar day is one guided occasion, across reloads, retries and devices. */
+export const guidedObservationOccasionId = (athleteId: string, occurredAt: string): string => {
+  if (!isCanonicalIsoTimestamp(occurredAt)) throw new TypeError("Invalid guided occasion time");
+  return `guided-day-${athleteId}-${occurredAt.slice(0, 10)}`;
+};
+
 
 const protocolById = (bundle: DefinitionBundle, id: string): BenchmarkProtocol => {
   const protocol = bundle.benchmarkProtocols.find((candidate) => candidate.id === id);
@@ -119,7 +134,7 @@ const restrictionDomains = (
       for (const domain of answer.value.demandDomains ?? []) domains.add(domain);
     }
   }
-  for (const { anchor, answer } of protocolAnswerRecords(draft)) {
+  for (const { anchor, answer } of protocolAnswerRecords(draft, undefined, bundle)) {
     if (answer.value.response !== "symptom") continue;
     for (const domain of demandDomainsForAssessmentProtocol(bundle, anchor.protocolId)) domains.add(domain);
   }
@@ -140,7 +155,7 @@ const availabilityFor = (
   const restricted = restrictionDomains(draft, bundle, state);
   if (demands.some((domain) => restricted.has(domain))) blockers.push("active-restriction");
   const inversion = draft.answers.find((answer) => answer.value.kind === "inversion")?.value;
-  const anchor = protocolAnswerRecords(draft).find((item) => item.anchor.protocolId === protocol.id)?.anchor;
+  const anchor = protocolAnswerRecords(draft, undefined, bundle).find((item) => item.anchor.protocolId === protocol.id)?.anchor;
   if (anchor?.inversionExposure === "full"
     && inversion?.kind === "inversion" && inversion.familiarity === "none") blockers.push("inversion-not-familiar");
   const inactivity = draft.answers.find((answer) => answer.value.kind === "inactivity")?.value;
@@ -153,13 +168,91 @@ const availabilityFor = (
     item.milestone.graphId === milestone.graphId
     && item.milestone.nodeId === milestone.nodeId) : undefined;
   const reconfirmingEstablished = reason === "reconfirm-existing" && existingFinding?.lifecycle === "established";
-  if (!protocolPrerequisitesSatisfied(protocol, bundle, state, reconfirmingEstablished)) {
+  const entryReady = placementReadinessSatisfied(placementRule(draft, protocol), bundle, state);
+  if (!entryReady && !protocolPrerequisitesSatisfied(protocol, bundle, state, reconfirmingEstablished)) {
     blockers.push("prerequisite-confirmation-needed");
+  }
+  if (draft.policyVersion === 2) {
+    const exercise = bundle.exercises.find((item) => item.id === protocol.exerciseId);
+    const variant = exercise?.prescriptionVariants.find((item) => item.id === protocol.prescriptionVariantId);
+    const fullInversion = variant?.demand["inversion-technical"] === "high";
+    if (fullInversion && inversion?.kind === "inversion" && inversion.familiarity === "none") blockers.push("inversion-not-familiar");
+    if (fullInversion && inactivity?.kind === "inactivity" && inactivity.inactivity !== "active") blockers.push("reacclimation-required");
+    // Capacity protocols are not a back door around the handstand exit graph.
+    if (protocol.subject.kind === "capacity-facet" && fullInversion) {
+      const exit = bundle.benchmarkProtocols.find((item) => item.id === milestoneBenchmarkId("handstand-balance", "wall-height-side-exit"));
+      if (!exit || !stateSatisfiesSubject(exit.subject, state)) blockers.push("exit-confirmation-needed");
+    }
+    if (state?.recentLoad.exposures.some((item) => item.exerciseId === protocol.exerciseId
+      && item.occurredAt.slice(0, 10) === state.asOf.slice(0, 10))) blockers.push("check-another-day");
+    const node = protocol.subject.kind === "milestone" ? bundle.graphs.find((item) => item.id === milestone?.graphId)
+      ?.nodes.find((item) => protocol.subject.kind === "milestone" && item.id === protocol.subject.milestone.nodeId) : undefined;
+    if (node?.programmingBoundary === "specialist" && !draft.intentSeed.preferences.specialistOptIn) blockers.push("specialist-opt-in-required");
   }
   return { availability: blockers.length ? "blocked" : "available", blockers: [...new Set(blockers)].sort() };
 };
 
 const offerKey = (offer: Pick<GuidedTestOffer, "protocolId">): string => offer.protocolId;
+
+/** Dependency-ordered checks for the selected goal only; no fabricated predecessor evidence. */
+const placementReviewChecks = (draft: AssessmentDraft, bundle: DefinitionBundle, state?: DerivedAthleteState) => {
+  const roots = draft.mode === "targeted-reconfirmation"
+    ? draft.targetedProtocolIds.map((id) => protocolById(bundle, id))
+    : selectedAssessmentGoals(draft).flatMap((graphId) => {
+      const answer = draft.answers.find((item) => item.value.kind === "skill-selection" && item.value.graphId === graphId)?.value;
+      const id = answer?.kind === "skill-selection" ? answer.protocolId : undefined;
+      const graph = bundle.graphs.find((item) => item.id === graphId);
+      const first = graph?.nodes.find((node) => node.implementationStatus === "available" && node.programmingBoundary === "automatic");
+      const protocol = id ? protocolById(bundle, id) : bundle.benchmarkProtocols.find((item) => first?.benchmarkProtocolIds.includes(item.id));
+      return protocol ? [protocol] : [];
+    });
+  const candidates: GuidedTestOffer[] = [];
+  const seen = new Set<string>();
+  const completed = (protocol: BenchmarkProtocol, measured: boolean) => measured
+    ? placementSubjectDemonstrated(protocol.subject, state) : stateSatisfiesSubject(protocol.subject, state);
+  const forRef = (ref: PrerequisiteRef): BenchmarkProtocol | undefined => ref.kind === "benchmark"
+    ? bundle.benchmarkProtocols.find((item) => item.id === ref.benchmarkProtocolId)
+    : bundle.benchmarkProtocols.find((item) => subjectKey(item.subject) === subjectKey(ref.kind === "milestone"
+      ? { kind: "milestone", milestone: ref.milestone } : { kind: "capacity-facet", capacity: ref.capacity }));
+  const visit = (protocol: BenchmarkProtocol, measured = false): void => {
+    if (completed(protocol, measured) || seen.has(protocol.id)) return;
+    seen.add(protocol.id);
+    const entry = placementRule(draft, protocol);
+    if (entry) {
+      entry.readinessProtocolIds.forEach((id) => visit(protocolById(bundle, id), true));
+    } else if (protocol.subject.kind === "milestone") {
+      const milestone = protocol.subject.milestone;
+      const node = bundle.graphs.find((graph) => graph.id === milestone.graphId)?.nodes.find((item) => item.id === milestone.nodeId);
+      for (const ref of node?.prerequisiteRule?.allOf ?? []) { const next = forRef(ref); if (next) visit(next); }
+      const any = node?.prerequisiteRule?.anyOf ?? [];
+      if (any.length && !any.some((ref) => prerequisiteSatisfied(ref, bundle, state))) {
+        const options = any.map(forRef).filter((item): item is BenchmarkProtocol => Boolean(item));
+        const next = options.find((item) => availabilityFor(draft, bundle, item, state, "confirm-provisional").availability === "available") ?? options[0];
+        if (next) visit(next);
+      }
+    } else {
+      const exercise = bundle.exercises.find((item) => item.id === protocol.exerciseId);
+      const variant = exercise?.prescriptionVariants.find((item) => item.id === protocol.prescriptionVariantId);
+      if (variant?.demand["inversion-technical"] === "high") {
+        const exit = bundle.benchmarkProtocols.find((item) => item.id === milestoneBenchmarkId("handstand-balance", "wall-height-side-exit"));
+        if (exit) visit(exit);
+      }
+    }
+    const reason = draft.mode === "targeted-reconfirmation" ? "reconfirm-existing" as const : "confirm-provisional" as const;
+    candidates.push({ protocolId: protocol.id, subject: protocol.subject, label: protocol.label, reason,
+      ...availabilityFor(draft, bundle, protocol, state, reason) });
+  };
+  let checkedCount = 0;
+  for (const root of roots) {
+    const measured = Boolean(placementRule(draft, root));
+    if (completed(root, measured)) checkedCount++;
+    else visit(root, measured);
+  }
+  // Stable ordering retains goal/dependency priority rather than alphabetically burying useful checks.
+  const guidedTests = candidates.sort((a, b) => Number(a.availability === "blocked") - Number(b.availability === "blocked"))
+    .slice(0, vNextAssessmentPolicy.maximumGuidedTestsPerReview);
+  return { guidedTests, checkedCount, remainingCheckCount: candidates.length, checksComplete: checkedCount === roots.length };
+};
 
 export const buildAssessmentReview = (
   draft: AssessmentDraft,
@@ -168,7 +261,7 @@ export const buildAssessmentReview = (
 ): AssessmentReview => {
   assertAssessmentDraft(draft, bundle);
   if (!isAssessmentAtReview(draft, bundle)) throw new TypeError("Assessment is not ready for review");
-  const provisional = protocolAnswerRecords(draft).map(({ anchor, answer }) => ({
+  const provisional = protocolAnswerRecords(draft, undefined, bundle).map(({ anchor, answer }) => ({
     protocolId: anchor.protocolId,
     subject: protocolById(bundle, anchor.protocolId).subject,
     response: answer.value.response,
@@ -185,7 +278,7 @@ export const buildAssessmentReview = (
       && !selectedGoals.has(protocol.subject.milestone.graphId)) continue;
     candidates.push({ protocol, reason: "reconfirm-existing", priority: 0 });
   }
-  for (const { anchor, answer } of protocolAnswerRecords(draft)) {
+  for (const { anchor, answer } of protocolAnswerRecords(draft, undefined, bundle)) {
     if (answer.value.response === "symptom" || answer.value.response === "not-yet") continue;
     const reason = answer.value.response === "not-sure" || answer.value.response === "partial"
       ? "resolve-uncertainty" as const
@@ -223,8 +316,11 @@ export const buildAssessmentReview = (
     ...timing,
     provisional,
     guidedTests,
+    ...(draft.policyVersion === 2 ? placementReviewChecks(draft, bundle, state) : {}),
     restrictionReported,
-    completionMessage: draft.mode === "targeted-reconfirmation"
+    completionMessage: draft.policyVersion === 2
+      ? "Your answers are estimates. Start with the available checks below; each saved result updates your workout. A checked ordinary variation becomes your starting practice when recovered, without claiming harder skills. Some skills need confirmation on another day. Stop when tired or uncomfortable; you can continue later."
+      : draft.mode === "targeted-reconfirmation"
       ? "Only the skills that need a fresh check are shown. Your achievements are kept."
       : "These are starting estimates. Guided checks and qualifying training confirm your skills.",
   };
@@ -263,7 +359,7 @@ export const buildAssessmentEvidence = async (
       ...(safety.value.notes ? { notes: safety.value.notes } : {}),
     });
   }
-  for (const { anchor, answer } of protocolAnswerRecords(draft)) {
+  for (const { anchor, answer } of protocolAnswerRecords(draft, undefined, bundle)) {
     const protocol = protocolById(bundle, anchor.protocolId);
     events.push({
       schemaVersion: DOMAIN_SCHEMA_VERSION,
@@ -377,11 +473,12 @@ export const createGuidedTestEvidence = (
   bundle: DefinitionBundle,
   state: DerivedAthleteState | undefined,
   input: GuidedTestResultInput,
+  existingEvent?: AthleteEvidenceEvent,
 ): AthleteEvidenceEvent => {
   const offer = buildAssessmentReview(draft, bundle, state).guidedTests.find((candidate) =>
     candidate.protocolId === input.protocolId);
-  if (!offer) throw new TypeError("Guided result was not offered by the current assessment review");
-  if (offer.availability !== "available") throw new TypeError(`Guided test is blocked: ${offer.blockers.join(", ")}`);
+  if (!existingEvent && !offer) throw new TypeError("Guided result was not offered by the current assessment review");
+  if (!existingEvent && offer?.availability !== "available") throw new TypeError(`Guided test is blocked: ${offer?.blockers.join(", ")}`);
   if (!isCanonicalIsoTimestamp(input.occurredAt) || !isCanonicalIsoTimestamp(input.recordedAt)
     || Date.parse(input.recordedAt) < Date.parse(input.occurredAt)) {
     throw new TypeError("Guided test timestamps must be canonical and ordered");
@@ -414,6 +511,7 @@ export const createGuidedTestEvidence = (
   };
   const result = validateAthleteEvidenceEvent(event);
   if (!result.valid) throw new TypeError(`Invalid guided evidence: ${result.issues.map((issue) => issue.message).join("; ")}`);
+  if (existingEvent && canonicalJson(existingEvent) !== canonicalJson(event)) throw new TypeError("Guided retry differs from its saved observation");
   return event;
 };
 

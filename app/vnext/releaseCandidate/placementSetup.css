@@ -1,0 +1,25 @@
+.vnext-placement-picker > .vnext-help { margin: 0; }
+.vnext-placement-picker select { width: 100%; min-width: 0; min-height: 48px; font-size: 16px; }
+.vnext-placement-estimates { padding: 14px; border: 1px solid #dce5e0; border-radius: 14px; background: #f7faf8; }
+.vnext-placement-estimates h2 { margin: 0 0 12px; font-size: 18px; }
+.vnext-placement-estimates ul { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.vnext-placement-estimates li { display: grid; gap: 3px; }
+.vnext-placement-estimates li span { color: #536963; font-size: 13px; line-height: 1.45; }
+.vnext-placement-estimates > p { margin-bottom: 0; }
+.vnext-placement-saved-checks li + li { padding-top: 10px; border-top: 1px solid #dce5e0; }
+.vnext-placement-next-practice { padding: 0 2px; }
+.vnext-placement-next-practice p { margin: 0; line-height: 1.5; }
+.vnext-placement-next-practice p + p { margin-top: 6px; }
+.vnext-placement-check-progress,
+.vnext-placement-preparation { margin: 0; padding: 13px 14px; border-radius: 12px; color: #285c4d; background: #eaf7f3; line-height: 1.5; }
+.vnext-placement-preparation p { margin: 5px 0 0; }
+.vnext-placement-picker .vnext-rc-question-motion { min-height: 300px; }
+.vnext-placement-picker .vnext-rc-question-motion svg { max-height: 350px; }
+@media (max-width: 600px) {
+  .vnext-placement-picker .vnext-rc-question-motion { min-height: min(300px, 36svh); }
+  .vnext-placement-picker .vnext-rc-question-motion svg { max-height: min(340px, 40svh); }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .vnext-placement-picker .vnext-rc-question-motion { min-height: 190px; }
+  .vnext-placement-picker .vnext-rc-question-motion svg { max-height: 260px; }
+}

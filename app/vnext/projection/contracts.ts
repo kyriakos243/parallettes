@@ -99,6 +99,8 @@ export type ProjectionPolicy = Readonly<{
   mechanicalPredecessorRules: readonly MechanicalPredecessorRule[];
   /** Explicit only; equal subject IDs never imply cross-version equivalence. */
   subjectVersionCompatibilityRules: readonly SubjectVersionCompatibilityRule[];
+  /** Own demonstrated ordinary practice only; never graph prerequisite eligibility. */
+  measuredPlacementEntries?: readonly import("../placementEntry").PlacementEntryRule[];
 }>;
 
 export type TrainabilityRequest = Readonly<{
@@ -122,7 +124,7 @@ export type ProjectionInput = Readonly<{
 export type NormalizationInput = Pick<
   ProjectionInput,
   "athleteId" | "asOf" | "definitionBundles" | "evidenceEvents" | "sessionPlans" | "sessionRecords"
->;
+> & Readonly<{ includeGuidedPrescriptionIdentity?: boolean }>;
 
 export type NormalizationResult = Readonly<{
   observations: readonly NormalizedObservation[];

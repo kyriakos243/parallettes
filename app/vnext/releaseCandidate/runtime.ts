@@ -1,3 +1,4 @@
+import { placementCheckSummary } from "../assessment/checkSummary";
 import {
   DOMAIN_SCHEMA_VERSION,
   parseStableId,
@@ -100,6 +101,7 @@ export type VNextRuntimeCatalogue = Readonly<{
   bundle: DefinitionBundle;
   history: readonly DefinitionBundle[];
   projectionPolicy: ProjectionPolicy;
+  placementVersion?: 2;
   generateSession?: typeof generateVNextSession;
   generateCustomSession?: typeof generateVNextCustomSession;
 }>;
@@ -496,7 +498,8 @@ export const createVNextReleaseCandidateRuntime = (
     const assessmentDraft = await store.readAssessmentDraft(input.athleteId) ?? undefined;
     const assessmentReview = assessmentDraft
       && isAssessmentAtReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion))
-      ? buildAssessmentReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state)
+      ? { ...buildAssessmentReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state),
+        ...placementCheckSummary(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state, sources.evidenceEvents) }
       : undefined;
     const progressInput = {
       bundle: vNextDefinitionBundle,
@@ -513,6 +516,7 @@ export const createVNextReleaseCandidateRuntime = (
       today: buildTodayWorkoutPresentation({ bundle: vNextDefinitionBundle, generated }),
       goals: buildGoalControls(vNextDefinitionBundle, intent),
       assessment: buildAssessmentEntryPoints({
+        ...(catalogue.placementVersion ? { placementVersion: catalogue.placementVersion } : {}),
         bundle: vNextDefinitionBundle,
         state,
         intent,
@@ -683,6 +687,7 @@ export const createVNextReleaseCandidateRuntime = (
       ? "targeted-reconfirmation"
       : "new-placement";
     const draft = createAssessmentDraft({
+      ...(catalogue.placementVersion ? { placementVersion: catalogue.placementVersion } : {}),
       id: input.draftId ?? idFactory({
         kind: "assessment-draft",
         athleteId: input.athleteId,
@@ -826,6 +831,7 @@ export const createVNextReleaseCandidateRuntime = (
       assessmentBundle,
       before.state,
       input.result,
+      before.sources.evidenceEvents.find((event) => event.id === input.result.eventId),
     );
     await persistGuidedTestEvidence(store, event);
     return {
