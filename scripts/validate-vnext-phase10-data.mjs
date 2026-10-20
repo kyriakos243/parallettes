@@ -647,7 +647,7 @@ const cloudRequest = (path, init = {}, origin = allowedOrigin) => new Request(`$
   ...init,
   headers: { origin, ...(init.headers ?? {}) },
 });
-const emptySync = { schemaVersion: 1, cursor: 0, upload: [], limit: 20 };
+const emptySync = { schemaVersion: 1, readerVersion: 2, cursor: 0, upload: [], limit: 20 };
 const unauthenticated = await worker.fetch(cloudRequest("/vnext/shadow/sync", {
   method: "POST",
   headers: { "content-type": "application/json" },
@@ -786,7 +786,7 @@ assert(serviceWorker.includes('const CACHE_CHANNEL = "__PWA_CACHE_CHANNEL__";')
   && serviceWorker.includes("key.startsWith(CACHE_PREFIX)")
   && serviceWorker.includes('const VNEXT_RC_PATH = "/parallettes/vnext-rc/";')
   && serviceWorker.includes('CACHE_CHANNEL === "v1" && requestUrl.pathname.startsWith(VNEXT_RC_PATH)')
-  && !serviceWorker.includes("self.skipWaiting("),
+  && serviceWorker.includes('event.data.type === "P25_APPLY_UPDATE"') && serviceWorker.includes("clients.length !== 1"),
 "Service worker lost lane-isolated caches, parent-RC exclusion or safe waiting activation");
 assert(distValidator.includes('P25_PWA_VARIANT ?? "v1"')
   && distValidator.includes('P25_PWA_CACHE_CHANNEL ?? "v1"')

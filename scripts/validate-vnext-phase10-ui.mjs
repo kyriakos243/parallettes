@@ -188,7 +188,8 @@ includesAll(sources.sw, [
   'event.request.mode === "navigate"',
   'new Request(url, { cache: "reload" })',
 ], "service worker");
-assert(!/\bself\.skipWaiting\s*\(/u.test(sources.sw), "The service worker can replace an active workout without waiting");
+assert(sources.sw.includes('event.data.type === "P25_APPLY_UPDATE"') && sources.sw.includes("clients.length !== 1"),
+  "Service-worker activation must require an explicit request from the sole app window");
 
 if (failures.length > 0) {
   console.error(`vNext Phase 10 UI/accessibility/PWA validation failed with ${failures.length} issue(s):`);

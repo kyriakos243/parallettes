@@ -73,6 +73,7 @@ export type VNextExperienceProps = Readonly<{
   initialView?: ViewId;
   onDemandChange?: (demand: SessionDemand) => void;
   onGoalSelectionChange?: (selection: GoalControlSelection) => void | Promise<void>;
+  onGoalEditingChange?: (editing: boolean) => void;
   onAssessmentRequested?: (action: AssessmentEntryAction) => void;
   onStartWorkout?: () => void;
   workoutSwapOptions?: Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>;
@@ -648,10 +649,12 @@ const GoalControls = ({
   presentation,
   busy = false,
   onGoalSelectionChange,
+  onGoalEditingChange,
 }: Readonly<{
   presentation: GoalControlsPresentation;
   busy?: boolean;
   onGoalSelectionChange?: (selection: GoalControlSelection) => void | Promise<void>;
+  onGoalEditingChange?: (editing: boolean) => void;
 }>) => {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -661,6 +664,7 @@ const GoalControls = ({
   const editButton = useRef<HTMLButtonElement>(null);
   const mainSelect = useRef<HTMLSelectElement>(null);
   const returnFocus = useRef(false);
+  useEffect(() => () => onGoalEditingChange?.(false), [onGoalEditingChange]);
   useEffect(() => {
     if (!editing) setSelection(initialGoalSelection(presentation));
   }, [presentation, editing]);
@@ -726,6 +730,7 @@ const GoalControls = ({
 
   const closeEditor = () => {
     returnFocus.current = true;
+    onGoalEditingChange?.(false);
     setEditing(false);
     setSaveError("");
   };
@@ -759,6 +764,7 @@ const GoalControls = ({
             else {
               setSelection(initialGoalSelection(presentation));
               setSaveError("");
+              onGoalEditingChange?.(true);
               setEditing(true);
             }
           }}
@@ -880,12 +886,13 @@ const ProgressView = ({
   restrictions,
   busy = false,
   onGoalSelectionChange,
+  onGoalEditingChange,
   onAssessmentRequested,
   onRestrictionRequested,
   announce,
 }: Readonly<Pick<VNextExperienceProps,
   "progress" | "skillDetails" | "goals" | "assessment" | "restrictions" | "busy"
-  | "onGoalSelectionChange" | "onAssessmentRequested" | "onRestrictionRequested"> & {
+  | "onGoalSelectionChange" | "onGoalEditingChange" | "onAssessmentRequested" | "onRestrictionRequested"> & {
   announce: (message: string) => void;
 }>) => {
   const [selectedGraphId, setSelectedGraphId] = useState<GraphId>();
@@ -974,7 +981,7 @@ const ProgressView = ({
             <h2 id="vnext-progress-heading">{progress.title}</h2>
             <p>{progress.intro}</p>
           </div>
-          <GoalControls presentation={goals} busy={busy} onGoalSelectionChange={onGoalSelectionChange} />
+          <GoalControls presentation={goals} busy={busy} onGoalSelectionChange={onGoalSelectionChange} onGoalEditingChange={onGoalEditingChange} />
           <SkillRoadmap roadmaps={progress.roadmaps} />
           <div className="vnext-section-heading"><h2>All skill families</h2><p>Explore your progress and next steps in each skill.</p></div>
           <div className="vnext-family-grid">
@@ -1038,6 +1045,7 @@ export const VNextExperience = ({
   initialView = "today",
   onDemandChange,
   onGoalSelectionChange,
+  onGoalEditingChange,
   onAssessmentRequested,
   onStartWorkout,
   workoutSwapOptions,
@@ -1142,6 +1150,7 @@ export const VNextExperience = ({
             assessment={assessment}
             restrictions={restrictions}
             onGoalSelectionChange={onGoalSelectionChange}
+            onGoalEditingChange={onGoalEditingChange}
             onAssessmentRequested={onAssessmentRequested}
             onRestrictionRequested={onRestrictionRequested}
             announce={announce}

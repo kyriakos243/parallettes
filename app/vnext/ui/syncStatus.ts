@@ -1,5 +1,5 @@
 export type TrainingSyncStatus = Readonly<{
-  phase: "idle" | "syncing" | "synced" | "waiting" | "error";
+  phase: "idle" | "syncing" | "synced" | "waiting" | "error" | "update-required";
   fingerprint?: string;
   confirmedAt?: string;
 }>;
@@ -11,6 +11,7 @@ export const trainingSyncMessage = (input: {
   status: TrainingSyncStatus;
 }): string => {
   if (!input.account) return "Saved on this device. Set up an account to sync across devices.";
+  if (input.status.phase === "update-required") return "Saved on this device. Update the app to resume sync. Until then, this device may not show your latest training from other devices.";
   if (input.status.phase === "error") return "Saved on this device. Sync needs attention — open account or try Sync now.";
   if (!input.online) return "Saved on this device · Offline. Sync will retry when you reconnect.";
   if (input.status.phase === "syncing") return "Saved on this device · Syncing…";

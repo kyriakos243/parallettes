@@ -1476,7 +1476,7 @@ const cloudRequest = (path, init = {}) => new Request(`${endpoint}${path}`, {
 const cloudPost = (path, body, token) => cloudRequest(path, {
   method: "POST",
   headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
-  body: JSON.stringify(body),
+  body: JSON.stringify(path === "/vnext/shadow/sync" ? { ...body, readerVersion: 2 } : body),
 });
 let registrationFixtureIp = 0;
 const registerCloudAthlete = async (username, password) => {

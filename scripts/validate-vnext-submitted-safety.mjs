@@ -34,11 +34,10 @@ const assertRestricted = snapshot => {
 };
 try {
   const f=await fixture();
-  const initialIntent=canonicalJson(f.started.snapshot.intent);
   let current=await f.runtime.updateAssessmentContext({draft:f.started.assessment.draft,answers:context(positive)});
   let snapshot=await f.runtime.refresh({athleteId:f.athleteId,asOf:f.started.assessment.draft.createdAt});
   assertRestricted(snapshot);
-  assert.equal(canonicalJson(snapshot.intent),initialIntent,'Safety submission must not commit unfinished goals or placement');
+  assert.deepEqual(snapshot.intent.goals,[{graphId:'planche',priority:'primary'}],'Explicit submitted goals apply independently of unfinished placement');
   assert.equal(snapshot.sources.evidenceEvents.length,1);
   assert.equal(snapshot.sources.evidenceEvents[0].type,'restriction_reported');
   const exactReport=canonicalJson(snapshot.sources.evidenceEvents[0]);

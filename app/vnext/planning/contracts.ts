@@ -129,6 +129,8 @@ export type GenerateSessionInput = Readonly<{
   /** Equal inputs and seed produce byte-identical planning output. */
   seed?: string;
   previousEmphasis?: PreviousEmphasis;
+  /** Current generator only. Native saved-plan readers keep their original ordering. */
+  preferUnfinishedTargets?: boolean;
 }>;
 
 export type PlannedTrainability = Readonly<{

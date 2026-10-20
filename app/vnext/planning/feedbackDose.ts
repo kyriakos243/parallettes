@@ -13,8 +13,9 @@ import { projectionReasonCodes } from "../projection/policy";
  * their native authored meaning. Removed load is never filled with other work.
  * Version 3 uses the same dose calculation with current retained-difficulty
  * guidance. Its separate immutable identity keeps native v2 replay unchanged.
+ * Version 4 retains that dose and records the unfinished-first focus policy.
  */
-const applyDose = (input: GenerateSessionInput, generated: GeneratedSession, policyVersion: 2 | 3): GeneratedSession => {
+const applyDose = (input: GenerateSessionInput, generated: GeneratedSession, policyVersion: 2 | 3 | 4): GeneratedSession => {
   if (!generated.ok || !generated.plan) return generated;
   const original = generated.plan;
   const version = parseDefinitionVersion(policyVersion);
@@ -30,7 +31,7 @@ const applyDose = (input: GenerateSessionInput, generated: GeneratedSession, pol
         : "This gentle preparation or recovery keeps its planned time. Current safety checks still apply." } };
     }
     const structured = structureWorkoutItem(item, input.bundle);
-    const retainedDifficulty = policyVersion === 3
+    const retainedDifficulty = policyVersion >= 3
       && evaluation.reasonCodes.includes(projectionReasonCodes.repeatedDifficultPerformance);
     const recoveryAdvice = retainedDifficulty
       ? " Recent workouts have repeatedly felt too hard or unfinished. Keep this smaller dose until two complete workouts feel Easy or Right, or an exact reassessment confirms readiness. If it is still too hard, choose Easier or a safe easier variation."
@@ -95,3 +96,15 @@ export const generateTrainingQualitySessionPlan = (input: GenerateSessionInput):
 export const generateTrainingQualityCustomPlan = (input: GenerateSessionInput, minutes: VNextCustomSessionMinutes,
   contentFilter?: VNextCustomContentFilter): GeneratedSession =>
   applyDose(input, generateMixedVNextCustomSession(input, minutes, contentFilter), 3);
+
+/** New recommendations only; generator 3 remains available for native replay. */
+export const generateProgressionSessionPlan = (input: GenerateSessionInput): GeneratedSession => {
+  const current = { ...input, preferUnfinishedTargets: true };
+  return applyDose(current, generateMixedVNextSession(current), 4);
+};
+
+export const generateProgressionCustomPlan = (input: GenerateSessionInput, minutes: VNextCustomSessionMinutes,
+  contentFilter?: VNextCustomContentFilter): GeneratedSession => {
+  const current = { ...input, preferUnfinishedTargets: true };
+  return applyDose(current, generateMixedVNextCustomSession(current, minutes, contentFilter), 4);
+};

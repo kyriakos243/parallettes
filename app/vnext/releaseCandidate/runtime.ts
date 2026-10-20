@@ -18,6 +18,7 @@ import {
 } from "../contracts";
 import {
   answerAssessmentStep,
+  buildAssessmentIntent,
   buildAssessmentReview,
   commitAssessment as persistAssessmentCommit,
   createAssessmentDraft,
@@ -437,9 +438,38 @@ export const createVNextReleaseCandidateRuntime = (
   }
   const bundleFor = (version: DefinitionVersion) => runtimeDefinitionBundle(catalogue, version);
 
-  const persistSavedAssessmentRestriction = async (athleteId: AthleteId): Promise<AssessmentDraft | null> => {
+  const persistSubmittedAssessmentContext = async (draft: AssessmentDraft): Promise<void> => {
+    if (draft.status !== "in-progress") return;
+    const current = (await store.readProjectionSources(draft.athleteId)).intent;
+    if (!current) return;
+    // Only submitted context is authority. Later placement answers and Back
+    // navigation must not give an older goal/equipment choice a newer timestamp.
+    const newerAnswer = (kind: "goals" | "equipment") => draft.answers.find((answer) =>
+      answer.value.kind === kind && Date.parse(answer.answeredAt) > Date.parse(current.updatedAt));
+    const goals = newerAnswer("goals");
+    const equipment = newerAnswer("equipment");
+    if (!goals && !equipment) return;
+    const selected = buildAssessmentIntent(draft);
+    const { emphasisOverride: currentFocus, ...withoutFocus } = current;
+    const focus = goals ? selected.emphasisOverride : currentFocus;
+    const updatedAt = [goals?.answeredAt, equipment?.answeredAt]
+      .filter((at): at is IsoTimestamp => at !== undefined)
+      .sort().at(-1)!;
+    await store.putAthleteIntent({
+      ...withoutFocus,
+      updatedAt,
+      goals: goals ? selected.goals : current.goals,
+      equipment: equipment ? selected.equipment : current.equipment,
+      ...(focus ? { emphasisOverride: focus } : {}),
+    });
+  };
+
+  const persistSavedAssessmentSubmissions = async (athleteId: AthleteId): Promise<AssessmentDraft | null> => {
     const draft = await store.readAssessmentDraft(athleteId);
-    if (draft) await persistSubmittedAssessmentRestriction(store, draft, bundleFor(draft.catalogueVersion));
+    if (draft) {
+      await persistSubmittedAssessmentRestriction(store, draft, bundleFor(draft.catalogueVersion));
+      await persistSubmittedAssessmentContext(draft);
+    }
     return draft;
   };
 
@@ -447,7 +477,7 @@ export const createVNextReleaseCandidateRuntime = (
     // Preserve a previously submitted report before Back, edits or restart can
     // remove it. Save the new answer first so an interrupted evidence append
     // remains retryable from the durable draft, including after an offline reload.
-    const previous = await persistSavedAssessmentRestriction(draft.athleteId);
+    const previous = await persistSavedAssessmentSubmissions(draft.athleteId);
     // An append can fail after its draft was saved. Retrying the same submission
     // from the still-visible form must reuse that original answer time/identity.
     const retryShape = (value: AssessmentDraft) => ({
@@ -459,7 +489,7 @@ export const createVNextReleaseCandidateRuntime = (
     if (previous?.id === draft.id && previous.revision === draft.revision
       && canonicalJson(retryShape(previous)) === canonicalJson(retryShape(draft))) return previous;
     await store.saveAssessmentDraft(draft);
-    return (await persistSavedAssessmentRestriction(draft.athleteId))!;
+    return (await persistSavedAssessmentSubmissions(draft.athleteId))!;
   };
   const clock = dependencies.clock ?? defaultClock;
   const idFactory = dependencies.idFactory ?? defaultIdFactory;
@@ -470,7 +500,7 @@ export const createVNextReleaseCandidateRuntime = (
   ): Promise<VNextRuntimeSnapshot> => {
     // A positive safety answer takes effect before any plan is returned. Failure
     // to save it rejects refresh rather than falling back to unrestricted work.
-    const savedDraft = await persistSavedAssessmentRestriction(input.athleteId);
+    const savedDraft = await persistSavedAssessmentSubmissions(input.athleteId);
     const sources = await store.readProjectionSources(input.athleteId);
     const intent = sources.intent;
     if (!intent) {
@@ -862,7 +892,10 @@ export const createVNextReleaseCandidateRuntime = (
     });
     const review = buildAssessmentReview(input.draft, assessmentBundle, before.state, vNextProjectionPolicy,
       input.draft.status === "committed" ? before.intent.equipment : undefined);
-    const committed = await persistAssessmentCommit(store, input.draft, assessmentBundle);
+    // Refresh has independently saved explicitly submitted goals/equipment.
+    // Finishing placement cannot re-date and reapply an older context over a
+    // newer Progress or synced intent. Native observation bytes stay unchanged.
+    const committed = await persistAssessmentCommit(store, input.draft, assessmentBundle, { persistIntent: false });
     const safetyAnswer = input.draft.answers.find(
       (answer) => answer.value.kind === "safety",
     );

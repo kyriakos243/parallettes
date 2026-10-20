@@ -40,6 +40,13 @@ const precache = async () => {
   const urls = [...new Set([...shell, ...manifest.assets.map(appUrl)])];
   const cache = await caches.open(CACHE);
   await cache.addAll(urls.map((url) => new Request(url, { cache: "reload" })));
+  const cachedManifest = await (await cache.match(assetManifestUrl.href)).json();
+  const cachedHtml = await (await cache.match(base.href)).text();
+  if (cachedManifest.buildId !== BUILD_ID || cachedManifest.channel !== CACHE_CHANNEL
+    || !cachedHtml.includes(`<meta name="p25-build-id" content="${BUILD_ID}"`)) {
+    await caches.delete(CACHE);
+    throw new Error("The update changed during download. Keep the previous complete version.");
+  }
 };
 
 self.addEventListener("install", (event) => {
@@ -49,12 +56,43 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
+  // Keep old hashed assets while any older page may still be open. Claiming
+  // does not reload pages; only the page that requested an update reloads.
+  event.waitUntil(self.clients.claim());
+});
+
+const appClients = async () => (await self.clients.matchAll({ type: "window", includeUncontrolled: true }))
+  .filter((client) => {
+    const url = new URL(client.url);
+    return url.origin === base.origin && url.pathname.startsWith(base.pathname)
+      && !(CACHE_CHANNEL === "v1" && url.pathname.startsWith(VNEXT_RC_PATH));
+  });
+
+self.addEventListener("message", (event) => {
+  const port = event.ports?.[0];
+  if (!port || !event.source?.id) return;
   event.waitUntil((async () => {
-    const keys = await caches.keys();
-    await Promise.all(keys
-      .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE)
-      .map((key) => caches.delete(key)));
-    await self.clients.claim();
+    const clients = await appClients();
+    if (!clients.some((client) => client.id === event.source.id)) return;
+    if (event.data?.type === "P25_UPDATE_VERSION") {
+      port.postMessage({ buildId: BUILD_ID });
+      return;
+    }
+    if (event.data?.buildId !== BUILD_ID) { port.postMessage({ status: "changed" }); return; }
+    if (clients.length !== 1 || clients[0].id !== event.source.id) {
+      port.postMessage({ status: "other-windows" });
+      return;
+    }
+    if (event.data.type === "P25_APPLY_UPDATE") {
+      // Only an explicit safe-screen request, with no other app window open.
+      await self.skipWaiting();
+      port.postMessage({ status: "accepted", buildId: BUILD_ID });
+    } else if (event.data.type === "P25_RELEASE_OLD_CACHES") {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE)
+        .map((key) => caches.delete(key)));
+      port.postMessage({ status: "accepted" });
+    }
   })());
 });
 
@@ -67,12 +105,15 @@ self.addEventListener("fetch", (event) => {
   if (event.request.mode === "navigate") {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE);
+      // An installed worker serves its own complete shell, including offline.
+      // Mixing a new HTML shell into the old build can break lazy imports.
+      const shellResponse = await cache.match(base.href);
+      if (shellResponse) return shellResponse;
       try {
         const response = await fetch(event.request);
-        if (response.ok) await cache.put(base.href, response.clone());
         return response;
       } catch {
-        return (await cache.match(base.href)) ?? Response.error();
+        return Response.error();
       }
     })());
     return;
@@ -81,11 +122,13 @@ self.addEventListener("fetch", (event) => {
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const cached = await cache.match(event.request);
-    if (cached) {
-      event.waitUntil(fetch(event.request).then(async (response) => {
-        if (response.ok) await cache.put(event.request, response.clone());
-      }).catch(() => undefined));
-      return cached;
+    if (cached) return cached;
+    // A page opened during activation may still reference the prior build.
+    for (const key of await caches.keys()) {
+      if (key.startsWith(CACHE_PREFIX) && key !== CACHE) {
+        const retained = await (await caches.open(key)).match(event.request);
+        if (retained) return retained;
+      }
     }
 
     const response = await fetch(event.request);

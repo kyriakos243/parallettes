@@ -43,6 +43,7 @@ export const planningReasonCodes = {
   exactDuration: reason("planning-exact-duration"),
   shorterSafetyException: reason("planning-shorter-safety-exception"),
   noSafeRelevantCandidate: reason("planning-no-safe-relevant-candidate"),
+  recoveryRequired: reason("planning-recovery-required"),
   invalidInput: reason("planning-invalid-input"),
   projectionTooOld: reason("planning-projection-too-old"),
   referenceInvalid: reason("planning-reference-invalid"),

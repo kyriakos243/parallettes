@@ -996,7 +996,7 @@ assert(serviceWorker.includes('const CACHE_CHANNEL = "__PWA_CACHE_CHANNEL__";')
   && serviceWorker.includes("key.startsWith(CACHE_PREFIX)")
   && serviceWorker.includes('const VNEXT_RC_PATH = "/parallettes/vnext-rc/";')
   && serviceWorker.includes('CACHE_CHANNEL === "v1" && requestUrl.pathname.startsWith(VNEXT_RC_PATH)')
-  && !serviceWorker.includes("self.skipWaiting("),
+  && serviceWorker.includes('event.data.type === "P25_APPLY_UPDATE"') && serviceWorker.includes("clients.length !== 1"),
 "Service worker lost channel isolation, parent RC exclusion, scoped cleanup or safe waiting updates");
 assert(distValidator.indexOf("writeFileSync(assetManifestPath")
   < distValidator.indexOf("writeFileSync(builtWorkerPath"),

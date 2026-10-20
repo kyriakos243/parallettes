@@ -487,6 +487,7 @@ export const commitAssessment = async (
   store: VNextShadowStore,
   draft: AssessmentDraft,
   bundle: DefinitionBundle,
+  options: Readonly<{ persistIntent?: boolean }> = {},
 ): Promise<Readonly<{
   draft: AssessmentDraft;
   review: AssessmentReview;
@@ -504,7 +505,9 @@ export const commitAssessment = async (
     ? submittedRestriction : event);
   const changedIntent = draft.mode === "new-placement"
     || draft.answers.some((answer) => answer.value.kind === "goals" || answer.value.kind === "equipment");
-  if (changedIntent) await store.putAthleteIntent(buildAssessmentIntent(draft));
+  // The integrated runtime saves submitted context independently. The default
+  // retains the native standalone/partially committed assessment retry contract.
+  if (changedIntent && options.persistIntent !== false) await store.putAthleteIntent(buildAssessmentIntent(draft));
   for (const event of evidenceEvents) await store.appendEvidenceEvent(event);
   const committed: AssessmentDraft = draft.status === "committed" ? draft : {
     ...draft,

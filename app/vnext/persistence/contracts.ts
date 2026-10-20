@@ -181,6 +181,8 @@ export type SyncUploadItem = Readonly<{
 
 export type SyncDeltaRequest = Readonly<{
   schemaVersion: typeof VNEXT_PERSISTENCE_SCHEMA_VERSION;
+  /** Reader compatibility, independent of immutable observation/schema versions. */
+  readerVersion?: number;
   cursor: number;
   upload: readonly SyncUploadItem[];
   limit: number;
@@ -188,6 +190,7 @@ export type SyncDeltaRequest = Readonly<{
 
 export type SyncDeltaResponse = Readonly<{
   schemaVersion: typeof VNEXT_PERSISTENCE_SCHEMA_VERSION;
+  minimumReaderVersion?: number;
   cursor: number;
   hasMore: boolean;
   resetTombstone?: TrainingResetTombstone;
