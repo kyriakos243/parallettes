@@ -1235,7 +1235,7 @@ const validateEvidenceEventInto = (
   }
   if (value.type === "restriction_reported") {
     rejectUnknownKeys(value, [
-      ...baseKeys, "severity", "demandDomains", "bodyRegions", "notes",
+      ...baseKeys, "severity", "demandDomains", "bodyRegions", "notes", "symptomSource",
     ], path, issues);
     requireEnum(value.source, ["self-assessment", "guided-test", "athlete-report"] as const, `${path}.source`, issues);
     requireEnum(value.severity, ["modify", "block"] as const, `${path}.severity`, issues);
@@ -1245,6 +1245,13 @@ const validateEvidenceEventInto = (
         requireEnum(domain, DEMAND_DOMAINS, `${path}.demandDomains[${index}]`, issues));
     }
     validateNonEmptyStringArray(value.bodyRegions, `${path}.bodyRegions`, issues, false);
+    if (value.symptomSource !== undefined) {
+      validateObservationSourceRef(value.symptomSource, `${path}.symptomSource`, issues);
+      if (isRecord(value.symptomSource) && value.symptomSource.kind === "evidence-event"
+        && value.symptomSource.eventId === value.id) {
+        addIssue(issues, `${path}.symptomSource`, "reference.self", "A clarification cannot reference itself");
+      }
+    }
     if (value.notes !== undefined) requireNonEmptyString(value.notes, `${path}.notes`, issues);
     return;
   }
@@ -1714,13 +1721,57 @@ const validateDerivedAthleteStateInto = (
     "schemaVersion", "athleteId", "projectionVersion", "asOf", "observationCursors",
     "nodeStates", "capacityFindings", "activeRestrictions", "reconfirmationRequirements",
     "recentLoad", "workingNodes", "maintenanceNeeds", "eligibleTargets",
-    "trainabilityEvaluations", "recommendedEmphasis",
+    "trainabilityEvaluations", "recommendedEmphasis", "maintenanceExposures", "retainedDoseAdjustments",
   ], path, issues);
   validateSchemaVersion(value.schemaVersion, `${path}.schemaVersion`, issues);
   requireStableId(value.athleteId, `${path}.athleteId`, issues);
   requirePositiveInteger(value.projectionVersion, `${path}.projectionVersion`, issues);
   const asOf = value.asOf;
   const hasAsOf = requireIsoTimestamp(asOf, `${path}.asOf`, issues);
+  if (value.maintenanceExposures !== undefined && requireArray(value.maintenanceExposures, `${path}.maintenanceExposures`, issues)) {
+    const seen = new Set<string>();
+    value.maintenanceExposures.forEach((exposure, index) => {
+      const itemPath = `${path}.maintenanceExposures[${index}]`;
+      if (!requireRecord(exposure, itemPath, issues)) return;
+      rejectUnknownKeys(exposure, ["milestone", "occurredAt", "source"], itemPath, issues);
+      validateMilestoneRef(exposure.milestone, `${itemPath}.milestone`, issues);
+      validateObservationSourceRef(exposure.source, `${itemPath}.source`, issues);
+      if (isRecord(exposure.source) && exposure.source.kind !== "session-item") {
+        addIssue(issues, `${itemPath}.source`, "maintenance.session-source", "Maintenance exposure must identify actual session work");
+      }
+      if (requireIsoTimestamp(exposure.occurredAt, `${itemPath}.occurredAt`, issues) && hasAsOf
+        && Date.parse(exposure.occurredAt) > Date.parse(asOf)) {
+        addIssue(issues, `${itemPath}.occurredAt`, "time.future", "Exposure cannot be later than the projection cutoff");
+      }
+      if (isRecord(exposure.milestone)) {
+        const key = `${exposure.milestone.graphId}:${exposure.milestone.nodeId}`;
+        if (seen.has(key)) addIssue(issues, itemPath, "reference.duplicate", "Only the latest exposure per milestone is retained");
+        seen.add(key);
+      }
+    });
+  }
+  if (value.retainedDoseAdjustments !== undefined && requireArray(value.retainedDoseAdjustments, `${path}.retainedDoseAdjustments`, issues)) {
+    const seen = new Set<string>();
+    value.retainedDoseAdjustments.forEach((adjustment, index) => {
+      const itemPath = `${path}.retainedDoseAdjustments[${index}]`;
+      if (!requireRecord(adjustment, itemPath, issues)) return;
+      rejectUnknownKeys(adjustment, ["exerciseId", "exerciseDefinitionVersion", "prescriptionVariantId", "since",
+        "difficultObservationRefs", "manageableObservationRefs", "reasonCodes"], itemPath, issues);
+      requireStableId(adjustment.exerciseId, `${itemPath}.exerciseId`, issues);
+      requirePositiveInteger(adjustment.exerciseDefinitionVersion, `${itemPath}.exerciseDefinitionVersion`, issues);
+      requireStableId(adjustment.prescriptionVariantId, `${itemPath}.prescriptionVariantId`, issues);
+      if (requireIsoTimestamp(adjustment.since, `${itemPath}.since`, issues) && hasAsOf
+        && Date.parse(adjustment.since) > Date.parse(asOf)) {
+        addIssue(issues, `${itemPath}.since`, "time.future", "Adjustment cannot begin after the projection cutoff");
+      }
+      validateObservationSourceRefArray(adjustment.difficultObservationRefs, `${itemPath}.difficultObservationRefs`, issues, false);
+      validateObservationSourceRefArray(adjustment.manageableObservationRefs, `${itemPath}.manageableObservationRefs`, issues);
+      validateStableIdArray(adjustment.reasonCodes, `${itemPath}.reasonCodes`, issues, false);
+      const key = `${adjustment.exerciseId}@${adjustment.exerciseDefinitionVersion}:${adjustment.prescriptionVariantId}`;
+      if (seen.has(key)) addIssue(issues, itemPath, "reference.duplicate", "Only one adjustment per exact prescription is allowed");
+      seen.add(key);
+    });
+  }
   if (requireRecord(value.observationCursors, `${path}.observationCursors`, issues)) {
     rejectUnknownKeys(value.observationCursors, ["evidenceEvents", "sessionRecords"], `${path}.observationCursors`, issues);
     if (value.observationCursors.evidenceEvents !== undefined) requireNonEmptyString(value.observationCursors.evidenceEvents, `${path}.observationCursors.evidenceEvents`, issues);

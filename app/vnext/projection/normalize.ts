@@ -1,3 +1,4 @@
+import { symptomSourceError } from "../symptomSource";
 import type {
   AthleteEvidenceEvent,
   DefinitionBundle,
@@ -270,6 +271,14 @@ export const normalizeObservations = (input: NormalizationInput): NormalizationR
       || Date.parse(left.recordedAt) - Date.parse(right.recordedAt)
       || left.id.localeCompare(right.id));
   const activeRecords = resolveRecordSupersession(knownRecords, input.athleteId, planById, issues);
+  for (const event of activeEvents) {
+    if (event.type !== "restriction_reported" || !event.symptomSource) continue;
+    const ref = event.symptomSource;
+    const source = ref.kind === "evidence-event" ? knownEvents.find((item) => item.id === ref.eventId)
+      : knownRecords.find((item) => item.id === ref.sessionRecordId);
+    const error = symptomSourceError(event, source);
+    if (error) issue(issues, "error", projectionReasonCodes.supersessionInvalid, `Restriction ${event.id}: ${error}`);
+  }
 
   const observations: NormalizedObservation[] = [];
   for (const event of activeEvents) {

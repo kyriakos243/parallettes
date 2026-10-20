@@ -25,6 +25,32 @@ const PURPOSES = new Set([
 class ValidationFailure extends Error {}
 
 const fail = (message) => { throw new ValidationFailure(message); };
+
+/** Cross-entity check; strict payload validation runs before this helper. */
+export const validateShadowSymptomSource = (event, source, resetAt) => {
+  if (event.type !== "restriction_reported" || !event.symptomSource) return undefined;
+  const ref = event.symptomSource;
+  if (!source || source.athleteId !== event.athleteId) return "Symptom source must exist for the same athlete";
+  let occurredAt;
+  if (ref.kind === "evidence-event") {
+    if (source.id !== ref.eventId || source.type !== "performance_observed" || source.outcome !== "symptom") {
+      return "Symptom source must identify a symptom performance event";
+    }
+    occurredAt = source.occurredAt;
+  } else {
+    if (!Array.isArray(source.itemOutcomes) || source.id !== ref.sessionRecordId) return "Symptom source must identify its Session Record";
+    const item = source.itemOutcomes.find((entry) => entry.planItemId === ref.planItemId);
+    if (!item || (!item.review?.symptomOrInstability && item.benchmarkObservation?.outcome !== "symptom")) {
+      return "Symptom source must identify the exact symptomatic Session Record item";
+    }
+    occurredAt = source.completedAt;
+  }
+  if (Date.parse(occurredAt) > Date.parse(event.occurredAt) || Date.parse(source.recordedAt) > Date.parse(event.recordedAt)) {
+    return "Restriction clarification cannot predate its symptom source";
+  }
+  if (resetAt && Date.parse(occurredAt) <= Date.parse(resetAt)) return "Symptom source was removed by reset";
+  return undefined;
+};
 const object = (value, label) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${label} must be an object.`);
   return value;
@@ -189,7 +215,7 @@ const validateEvidenceInternal = (payload, itemId, profileId) => {
   }
 
   if (event.type === "restriction_reported") {
-    exactKeys(event, [...baseKeys, "severity", "demandDomains", "bodyRegions", "notes"], "Evidence Event");
+    exactKeys(event, [...baseKeys, "severity", "demandDomains", "bodyRegions", "notes", "symptomSource"], "Evidence Event");
     oneOf(event.source, new Set(["self-assessment", "guided-test", "athlete-report"]), "Restriction Event source");
     oneOf(event.severity, new Set(["modify", "block"]), "Restriction Event severity");
     if (!Array.isArray(event.demandDomains) || !event.demandDomains.length
@@ -201,6 +227,18 @@ const validateEvidenceInternal = (payload, itemId, profileId) => {
     }
     event.bodyRegions.forEach((region, index) => nonEmptyString(region, `Restriction Event bodyRegions[${index}]`));
     if (event.notes !== undefined) nonEmptyString(event.notes, "Restriction Event notes");
+    if (event.symptomSource !== undefined) {
+      const ref = object(event.symptomSource, "Restriction symptom source");
+      if (ref.kind === "evidence-event") {
+        exactKeys(ref, ["kind", "eventId"], "Restriction symptom source");
+        stableId(ref.eventId, "Restriction symptom event ID");
+        if (ref.eventId === event.id) fail("Restriction symptom source cannot reference itself.");
+      } else if (ref.kind === "session-item") {
+        exactKeys(ref, ["kind", "sessionRecordId", "planItemId"], "Restriction symptom source");
+        stableId(ref.sessionRecordId, "Restriction symptom Session Record ID");
+        stableId(ref.planItemId, "Restriction symptom plan item ID");
+      } else fail("Restriction symptom source kind is invalid.");
+    }
     return;
   }
 

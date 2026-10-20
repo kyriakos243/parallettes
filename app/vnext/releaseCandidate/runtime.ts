@@ -10,6 +10,7 @@ import {
   type EquipmentId,
   type IsoTimestamp,
   type RestrictionReportedEvent,
+  type RestrictionClearedEvent,
   type SessionDemand,
   type SessionItemOutcome,
   type SessionPlan,
@@ -274,6 +275,7 @@ export type VNextRuntime = Readonly<{
   }>>;
   commitRestrictionReport(input: VNextRuntimeRefreshInput & Readonly<{
     event: RestrictionReportedEvent;
+    clearance?: RestrictionClearedEvent;
   }>): Promise<Readonly<{
     append: AppendResult;
     snapshot: VNextRuntimeSnapshot;
@@ -596,7 +598,8 @@ export const createVNextReleaseCandidateRuntime = (
           || sources.sessionRecords.length > 0,
         ...(assessmentReview ? { guidedTestOffers: assessmentReview.guidedTests } : {}),
       }),
-      restrictions: buildRestrictionPresentation({ bundle: vNextDefinitionBundle, state }),
+      restrictions: buildRestrictionPresentation({ bundle: vNextDefinitionBundle, state,
+        evidenceEvents: sources.evidenceEvents, includeRecoveryActions: vNextProjectionPolicy.scopedSymptomRecovery }),
       completion: buildWorkoutCompletionPresentation({
         bundle: vNextDefinitionBundle,
         generated,
@@ -939,11 +942,20 @@ export const createVNextReleaseCandidateRuntime = (
       throw new TypeError("Restriction report belongs to another athlete or is not a restriction");
     }
     bundleFor(input.event.catalogueVersion);
+    if (input.clearance && (input.clearance.type !== "restriction_cleared"
+      || input.clearance.athleteId !== input.athleteId
+      || input.clearance.restrictionEventId !== input.event.id
+      || Date.parse(input.clearance.occurredAt) < Date.parse(input.event.occurredAt))) {
+      throw new TypeError("Comfort update must belong to this exact restriction and follow it");
+    }
     const append = await store.appendEvidenceEvent(input.event);
+    // If the second write fails the report remains restrictive. Exact prepared
+    // IDs let Retry finish safely without rewriting or duplicating either fact.
+    if (input.clearance) await store.appendEvidenceEvent(input.clearance);
     return {
       append,
       snapshot: await refresh({ ...input,
-        asOf: atLeastTimestamp(input.asOf ?? clock(), input.event.recordedAt, "Restriction refresh cutoff"),
+        asOf: atLeastTimestamp(input.asOf ?? clock(), input.clearance?.recordedAt ?? input.event.recordedAt, "Restriction refresh cutoff"),
       }),
     };
   };

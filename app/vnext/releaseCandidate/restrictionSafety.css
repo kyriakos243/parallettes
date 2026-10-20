@@ -2,5 +2,6 @@
 .vnext-restriction-report legend { font-weight: 700; margin-bottom: .5rem; }
 .vnext-restriction-choice { display: flex; align-items: center; gap: .65rem; min-height: 44px; font-size: 1rem; }
 .vnext-restriction-area { display: grid; gap: .5rem; margin-top: 1rem; font-size: 1rem; }
-.vnext-restriction-area input { box-sizing: border-box; width: 100%; min-height: 44px; font: inherit; padding: .7rem; }
+.vnext-restriction-area input,
+.vnext-restriction-area select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px; font: inherit; padding: .7rem; }
 .vnext-run-safety-message { padding: .75rem; margin: .5rem 0; border: 1px solid #af7850; border-radius: .6rem; background: #fff8ef; color: #3f2b1d; }

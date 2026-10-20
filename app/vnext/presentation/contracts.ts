@@ -290,7 +290,9 @@ export type RestrictionPresentation = Readonly<{
   summary: string;
   items: readonly Readonly<{
     sourceKey: string;
-    state: "modified" | "restricted";
+    source?: ObservationSourceRef;
+    action?: "clarify" | "comfort" | "recheck";
+    state: "modified" | "restricted" | "reconfirmation";
     title: string;
     bodyRegions: readonly string[];
     affectedFamilyIds: readonly GraphId[];

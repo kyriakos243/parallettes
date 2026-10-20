@@ -81,6 +81,8 @@ export const progressionCheckOffer = (input: CheckContext, protocol: BenchmarkPr
 
 const whenLabel = (offer: GuidedTestOffer): string => offer.blockers.includes("active-restriction")
   ? "Update your restriction feedback when resolved; use unaffected practice meanwhile."
+  : offer.blockers.includes("safety-prerequisite-not-current")
+    ? "Reconfirm the earlier exit and inversion safety checks before attempting this movement. Your achievements are kept."
   : offer.blockers.includes("missing-equipment") ? "Select the required equipment before this check."
     : offer.blockers.includes("recover-before-check") ? "Rest after recent difficult or demanding work. Check on a later training day when recovered."
       : offer.blockers.includes("check-another-day") ? "You have already trained this movement today. Check on another day when recovered."

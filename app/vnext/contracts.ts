@@ -377,6 +377,8 @@ export type RestrictionReportedEvent = EvidenceEventBase & Readonly<{
   demandDomains: readonly DemandDomain[];
   bodyRegions: readonly string[];
   notes?: string;
+  /** Explicit clarification of an existing symptom, retaining its immutable source. */
+  symptomSource?: ObservationSourceRef;
 }>;
 
 export type RestrictionClearedEvent = EvidenceEventBase & Readonly<{
@@ -574,6 +576,16 @@ export type LoadExposure = Readonly<{
   reviewDifficulty?: "easy" | "right" | "hard";
 }>;
 
+export type RetainedDoseAdjustment = Readonly<{
+  exerciseId: ExerciseId;
+  exerciseDefinitionVersion: DefinitionVersion;
+  prescriptionVariantId: PrescriptionVariantId;
+  since: IsoTimestamp;
+  difficultObservationRefs: readonly ObservationSourceRef[];
+  manageableObservationRefs: readonly ObservationSourceRef[];
+  reasonCodes: readonly ReasonCode[];
+}>;
+
 export type DerivedAthleteState = Readonly<{
   schemaVersion: DomainSchemaVersion;
   athleteId: AthleteId;
@@ -628,6 +640,13 @@ export type DerivedAthleteState = Readonly<{
   }>;
   workingNodes: readonly ReasonedMilestone[];
   maintenanceNeeds: readonly ReasonedMilestone[];
+  /** Actual completed practice recency; never benchmark confirmation or freshness. */
+  maintenanceExposures?: readonly Readonly<{
+    milestone: MilestoneRef;
+    occurredAt: IsoTimestamp;
+    source: ObservationSourceRef;
+  }>[];
+  retainedDoseAdjustments?: readonly RetainedDoseAdjustment[];
   eligibleTargets: readonly ReasonedMilestone[];
   trainabilityEvaluations: readonly Readonly<{
     exerciseId: ExerciseId;

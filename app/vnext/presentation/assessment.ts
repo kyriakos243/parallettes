@@ -24,6 +24,7 @@ const blockerMessage = (blocker: string): string => blocker === "missing-equipme
           : blocker === "check-another-day" ? "You have already practised this today. Continue on a later day."
           : blocker === "recover-before-check" ? "Rest after recent difficult or demanding work. Check on a later training day when recovered."
           : blocker === "exit-confirmation-needed" ? "Confirm the safe wall-height exit first."
+          : blocker === "safety-prerequisite-not-current" ? "Reconfirm the earlier exit and inversion safety checks first. Your achievements are kept."
           : blocker === "specialist-opt-in-required" ? "This optional skill requires specialist training to be enabled."
           : "This check is not currently available.";
 

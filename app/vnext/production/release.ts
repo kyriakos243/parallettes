@@ -206,7 +206,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   },
   phase11ReleaseArtifact: {
     status: "frozen",
-    sourceFingerprint: "eab40b2f4a5a3f7a94fdee70414c763287d4e409bf98cfa7e885863fdaa269e7",
+    sourceFingerprint: "f7acf28b608f9839e48fa682002ef21431b80ca942692be265f39adde1745ecb",
   },
   preflight: [
     {
@@ -217,17 +217,17 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
     {
       id: "phase11-release-artifact-frozen",
       status: "passed",
-      evidence: "dist-set:eab40b2f4a5a3f7a94fdee70414c763287d4e409bf98cfa7e885863fdaa269e7",
+      evidence: "dist-set:f7acf28b608f9839e48fa682002ef21431b80ca942692be265f39adde1745ecb",
     },
     {
       id: "recoverable-production-snapshots-verified",
       status: "passed",
-      evidence: "current-backup:2026-10-20T07:06:40.496651+00:00;isolated-full-and-accounts-restore:ok;14-invariants-zero;owner-retained;filevault-on",
+      evidence: "current-backup:2026-10-20T17:32:22.311794+00:00;isolated-full-and-accounts-restore:ok;14-invariants-zero;owner-retained;filevault-on",
     },
     {
       id: "compatible-schema-api-app-worker-order-ready",
       status: "passed",
-      evidence: "worker:10b6df5e-0c54-4311-9fb4-dd531694c5e8;schema:2e5ff8e06af41b2e0aad00671d13c995c938ba5fc0db2db1023f9f5549dddc9d",
+      evidence: "worker:98a00c05-2aed-40d9-96b6-62bc2238b381;schema:2e5ff8e06af41b2e0aad00671d13c995c938ba5fc0db2db1023f9f5549dddc9d",
     },
     {
       id: "live-migration-idempotency-and-reconciliation-ready",
@@ -252,7 +252,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   ],
   productionGrant: {
     status: "granted",
-    releaseArtifactFingerprint: "eab40b2f4a5a3f7a94fdee70414c763287d4e409bf98cfa7e885863fdaa269e7",
+    releaseArtifactFingerprint: "f7acf28b608f9839e48fa682002ef21431b80ca942692be265f39adde1745ecb",
     authorizations: {
       deployCompatibleRelease: true,
       runIdempotentLiveMigration: true,

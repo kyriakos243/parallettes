@@ -2656,6 +2656,205 @@ assert((await postShadowUpload(lateDependencyAccount, [
       lateDependencySession.plan.id, lateDependencySession.record.id).count) === 0,
 "Late native dependents did not clear target and plan quarantine revocations");
 
+// Explicit symptom clarification keeps immutable provenance through local/cloud
+// retry, backup, one-item paging, reset and converter quarantine.
+const symptomAccount = await registerCloudAthlete("Phase Four Symptom Sources", "phase four symptom source password");
+const symptomAthleteId = contracts.parseStableId("athlete", symptomAccount.profile.profileId);
+const symptomEvent = guidedObservation(symptomAthleteId, "2026-09-01T10:00:00.000Z", {
+  id: "z-phase4-symptom-source", outcome: "symptom",
+});
+const symptomSession = nativeSession(symptomAthleteId, "symptom-source", "2026-09-01T12:00:00.000Z");
+symptomSession.record.itemOutcomes[0].review = { outcome: "partial", difficulty: "hard", symptomOrInstability: true };
+const symptomReport = (id, symptomSource) => ({
+  schemaVersion: 1, id, athleteId: symptomAthleteId,
+  source: "athlete-report", type: "restriction_reported", catalogueVersion: bundle.catalogueVersion,
+  occurredAt: "2026-09-03T10:00:00.000Z", recordedAt: "2026-09-03T10:00:00.000Z",
+  severity: "block", demandDomains: ["hand-wrist-bearing"], bodyRegions: ["left wrist"],
+  ...(symptomSource ? { symptomSource } : {}),
+});
+const eventSymptomReport = symptomReport("a-phase4-linked-event", { kind: "evidence-event", eventId: symptomEvent.id });
+const recordSymptomReport = symptomReport("a-phase4-linked-record", {
+  kind: "session-item", sessionRecordId: symptomSession.record.id, planItemId: symptomSession.record.itemOutcomes[0].planItemId,
+});
+const oldSymptomReport = symptomReport("phase4-unlinked-native-report");
+const symptomClearance = {
+  schemaVersion: 1, id: "phase4-linked-clearance", athleteId: symptomAthleteId,
+  source: "athlete-report", type: "restriction_cleared", catalogueVersion: bundle.catalogueVersion,
+  occurredAt: "2026-09-04T10:00:00.000Z", recordedAt: "2026-09-04T10:00:00.000Z",
+  restrictionEventId: recordSymptomReport.id,
+};
+const symptomStore = makeStore("symptom-source");
+await symptomStore.appendEvidenceEvent(symptomEvent);
+await symptomStore.appendSession(symptomSession.plan, symptomSession.record);
+for (const event of [eventSymptomReport, recordSymptomReport, symptomClearance, oldSymptomReport]) await symptomStore.appendEvidenceEvent(event);
+assert((await symptomStore.appendEvidenceEvent(recordSymptomReport)).status === "duplicate", "Linked report exact retry was not idempotent");
+const symptomUpload = await symptomStore.readSyncUpload(symptomAthleteId, 40);
+assert(symptomUpload.findIndex((item) => item.id === symptomEvent.id) < symptomUpload.findIndex((item) => item.id === eventSymptomReport.id)
+  && symptomUpload.findIndex((item) => item.id === symptomSession.record.id) < symptomUpload.findIndex((item) => item.id === recordSymptomReport.id),
+"Outbox did not order exact symptom sources before their reports");
+const symptomExport = await symptomStore.exportBundle(symptomAthleteId, metadata("2026-09-05T00:00:00.000Z"));
+const symptomImport = makeStore("symptom-import");
+await symptomImport.importBundle(JSON.parse(JSON.stringify(symptomExport)));
+const importedSymptoms = await symptomImport.readProjectionSources(symptomAthleteId);
+assert(canonical(importedSymptoms.evidenceEvents) === canonical((await symptomStore.readProjectionSources(symptomAthleteId)).evidenceEvents),
+"Linked/unlinked restriction facts changed on backup/import");
+const symptomProjection = projection.projectAthleteState({
+  athleteId: symptomAthleteId, asOf: "2026-09-05T00:00:00.000Z", policy,
+  definitionBundles: [bundle], ...importedSymptoms,
+  intent: { schemaVersion: 1, athleteId: symptomAthleteId, updatedAt: "2026-09-01T00:00:00.000Z",
+    goals: [], equipment: ["floor", "parallettes", "wall"], defaultSessionDemand: "standard", preferences: { specialistOptIn: false } },
+  trainabilityRequests: [],
+});
+assert(symptomProjection.ok, `Valid symptom provenance failed projection: ${JSON.stringify(symptomProjection.issues)}`);
+const symptomVoidingCorrection = {
+  ...nativeCorrection, id: "phase4-void-symptom-performance", athleteId: symptomAthleteId,
+  occurredAt: "2026-09-04T12:00:00.000Z", recordedAt: "2026-09-04T12:00:00.000Z",
+  supersedesEventId: symptomEvent.id,
+};
+await symptomImport.appendEvidenceEvent(symptomVoidingCorrection);
+const voidedSymptomSources = await symptomImport.readProjectionSources(symptomAthleteId);
+const voidedSymptomProjection = projection.projectAthleteState({
+  athleteId: symptomAthleteId, asOf: "2026-09-05T00:00:00.000Z", policy,
+  definitionBundles: [bundle], ...voidedSymptomSources,
+  intent: { schemaVersion: 1, athleteId: symptomAthleteId, updatedAt: "2026-09-01T00:00:00.000Z",
+    goals: [], equipment: ["floor", "parallettes", "wall"], defaultSessionDemand: "standard", preferences: { specialistOptIn: false } },
+  trainabilityRequests: [],
+});
+assert(voidedSymptomProjection.ok && voidedSymptomProjection.state.activeRestrictions.some((restriction) =>
+  restriction.source.kind === "evidence-event" && restriction.source.eventId === eventSymptomReport.id),
+"Voiding the original performance silently erased an independently accepted explicit restriction");
+const voidedSymptomExport = await symptomImport.exportBundle(symptomAthleteId, metadata("2026-09-05T00:00:00.000Z"));
+assert(voidedSymptomExport.evidenceEvents.some((event) => event.id === symptomEvent.id)
+  && voidedSymptomExport.evidenceEvents.some((event) => event.id === eventSymptomReport.id),
+"Corrected symptom source or explicit restriction was omitted from backup provenance");
+const cleanSymptomSource = guidedObservation(symptomAthleteId, "2026-09-01T09:00:00.000Z", { id: "phase4-clean-source" });
+await symptomStore.appendEvidenceEvent(cleanSymptomSource);
+const invalidSymptomReports = [
+  { ...eventSymptomReport, id: "phase4-missing-symptom", symptomSource: { kind: "evidence-event", eventId: "phase4-missing-source" } },
+  { ...eventSymptomReport, id: "phase4-clean-symptom", symptomSource: { kind: "evidence-event", eventId: cleanSymptomSource.id } },
+  { ...recordSymptomReport, id: "phase4-wrong-symptom-item", symptomSource: { ...recordSymptomReport.symptomSource, planItemId: "phase4-absent-item" } },
+  { ...recordSymptomReport, id: "phase4-backdated-symptom", occurredAt: "2026-08-31T10:00:00.000Z" },
+  { ...recordSymptomReport, id: "phase4-backdated-recording", recordedAt: "2026-09-01T12:04:00.000Z", occurredAt: "2026-09-01T12:04:00.000Z" },
+];
+for (const bad of invalidSymptomReports) {
+  await assertRejects(() => symptomStore.appendEvidenceEvent(bad), /invalid-reference/u,
+    `Local append accepted invalid symptom source ${bad.id}`);
+  const importAttempt = makeStore(`invalid-${bad.id}`);
+  const edited = structuredClone(symptomExport);
+  edited.evidenceEvents = edited.evidenceEvents.filter((event) => event.id !== symptomClearance.id && event.id !== recordSymptomReport.id);
+  edited.evidenceEvents.push(bad);
+  edited.immutableEntityProvenance = edited.immutableEntityProvenance.filter((entry) => entry.id !== symptomClearance.id && entry.id !== recordSymptomReport.id);
+  edited.immutableEntityProvenance.push({ kind: "evidence-event", id: bad.id, origin: "native" });
+  await assertRejects(() => importAttempt.importBundle(edited), /invalid-reference/u, `Import accepted invalid symptom source ${bad.id}`);
+  importAttempt.close();
+}
+const symptomDelta = (changes) => ({ schemaVersion: 1, cursor: 1, hasMore: false, changes, acknowledged: [], conflicts: [] });
+const symptomMerge = makeStore("symptom-merge");
+await symptomMerge.applySyncDelta(symptomAthleteId, symptomDelta(symptomUpload));
+assert((await symptomMerge.readProjectionSources(symptomAthleteId)).evidenceEvents.length === 5, "Remote merge lost linked source/reports");
+const invalidSymptomDeltaItem = await shadowUploadItem("evidence-event", invalidSymptomReports[2]);
+await assertRejects(() => symptomMerge.applySyncDelta(symptomAthleteId, symptomDelta([invalidSymptomDeltaItem])), /invalid-reference/u, "Remote merge accepted the wrong symptom item");
+const acceptedSymptoms = await postShadowUpload(symptomAccount, [...symptomUpload].reverse().concat(await shadowUploadItem("evidence-event", cleanSymptomSource)));
+const acceptedSymptomsBody = await acceptedSymptoms.json();
+assert(acceptedSymptoms.status === 200 && acceptedSymptomsBody.conflicts?.length === 0,
+  `Worker rejected native linked/unlinked sources: ${JSON.stringify(acceptedSymptomsBody)}`);
+for (const bad of invalidSymptomReports) {
+  const response = await postShadowUpload(symptomAccount, [await shadowUploadItem("evidence-event", bad)]);
+  const body = await response.json();
+  assert(body.conflicts?.some((item) => item.id === bad.id && item.reason === "invalid-reference"), `Worker accepted invalid symptom source ${bad.id}`);
+}
+const malformedRef = { ...recordSymptomReport, id: "phase4-wrong-ref-discriminant", symptomSource: { ...recordSymptomReport.symptomSource, kind: "session-record" } };
+assert((await postShadowUpload(symptomAccount, [await shadowUploadItem("evidence-event", malformedRef)])).status === 400,
+  "Worker accepted storage entity kind in place of native session-item source kind");
+const symptomPageStore = makeStore("symptom-paged");
+let symptomCursor = 0;
+for (let page = 0; page < 15; page += 1) {
+  const response = await worker.fetch(cloudPost("/vnext/shadow/sync", { schemaVersion: 1, cursor: symptomCursor, upload: [], limit: 1 }, symptomAccount.token), cloudEnv);
+  const delta = await response.json();
+  assert(response.status === 200, "One-item symptom delta failed");
+  await symptomPageStore.applySyncDelta(symptomAthleteId, delta);
+  symptomCursor = delta.cursor;
+  if (!delta.hasMore) break;
+}
+assert((await symptomPageStore.readProjectionSources(symptomAthleteId)).evidenceEvents.length === 6,
+  "One-item delta paging lost symptom clarification provenance");
+const symptomReset = { schemaVersion: 1, id: "phase4-symptom-reset", athleteId: symptomAthleteId,
+  resetAt: "2026-09-02T00:00:00.000Z", recordedAt: "2026-09-05T00:00:00.000Z", source: "athlete-reset" };
+await symptomStore.applyProgressReset(symptomReset);
+const resetSymptomSources = await symptomStore.readProjectionSources(symptomAthleteId);
+assert(resetSymptomSources.sessionRecords.length === 0 && resetSymptomSources.evidenceEvents.length === 1
+  && resetSymptomSources.evidenceEvents[0].id === oldSymptomReport.id,
+"Local reset did not cascade from symptom sources through later reports/clearance, or removed independent report");
+await assertRejects(() => symptomStore.importBundle(symptomExport), /invalid-reference/u,
+  "Stale import resurrected a post-reset report whose symptom source was reset");
+const resetSymptoms = await postShadowUpload(symptomAccount, [await shadowUploadItem("reset-tombstone", symptomReset, symptomAthleteId)]);
+assert(resetSymptoms.status === 200
+  && Number(cloudEnv.DB.database.prepare("SELECT COUNT(*) AS count FROM vnext_shadow_evidence_events WHERE profile_id = ?").get(symptomAthleteId).count) === 1
+  && Number(cloudEnv.DB.database.prepare("SELECT COUNT(*) AS count FROM vnext_shadow_session_records WHERE profile_id = ?").get(symptomAthleteId).count) === 0,
+"Worker reset failed to cascade symptom-source dependencies without deleting independent later reports");
+for (const store of [symptomStore, symptomImport, symptomMerge, symptomPageStore]) store.close();
+
+// Provenance dependencies survive converter rollback, whether a native report
+// exists before rollback or reaches another device only afterwards.
+for (const timing of ["before", "after", "clearance-after"]) {
+  const account = await registerCloudAthlete(`Phase Four Symptom Rollback ${timing}`, `phase four symptom rollback ${timing} password`);
+  const athleteId = contracts.parseStableId("athlete", account.profile.profileId);
+  const event = { ...symptomEvent, id: `phase4-rollback-symptom-${timing}`, athleteId };
+  const session = nativeSession(athleteId, `symptom-rollback-${timing}`, "2026-09-01T12:00:00.000Z");
+  session.record.itemOutcomes[0].review = { outcome: "partial", difficulty: "hard", symptomOrInstability: true };
+  const eventReport = { ...eventSymptomReport, id: `phase4-rollback-event-report-${timing}`, athleteId,
+    symptomSource: { kind: "evidence-event", eventId: event.id } };
+  const recordReport = { ...recordSymptomReport, id: `phase4-rollback-record-report-${timing}`, athleteId,
+    symptomSource: { kind: "session-item", sessionRecordId: session.record.id, planItemId: session.record.itemOutcomes[0].planItemId } };
+  const base = await legacyMigration.convertLegacyV12Profile(legacyProfile(athleteId, {
+    withReset: false, revision: 1, updatedAt: "2026-09-01T00:00:00.000Z", history: [],
+  }), "2026-09-01T00:00:00.000Z", bundle);
+  const convertedEvents = timing === "clearance-after" ? [event, recordReport] : [event];
+  const converted = { ...base, evidenceEvents: convertedEvents, sessionPlans: [session.plan], sessionRecords: [session.record],
+    run: { ...base.run, generatedEntities: [
+      ...convertedEvents.map((item) => ({ kind: "evidence-event", id: item.id })),
+      { kind: "session-plan", id: session.plan.id }, { kind: "session-record", id: session.record.id },
+    ] } };
+  const local = makeStore(`symptom-rollback-${timing}`);
+  await local.applyLegacyConversion(converted);
+  assert((await postShadowUpload(account, [
+    await shadowUploadItem("legacy-snapshot", converted.snapshot),
+    await shadowUploadItem("migration-run", converted.run),
+    ...await Promise.all(convertedEvents.map((item) => shadowUploadItem("evidence-event", item, item.id, converted.run.id))),
+    await shadowUploadItem("session-plan", session.plan, session.plan.id, converted.run.id),
+    await shadowUploadItem("session-record", session.record, session.record.id, converted.run.id),
+  ])).status === 200, `Worker rejected ${timing} symptom rollback fixture`);
+  const clearance = { ...symptomClearance, id: `phase4-rollback-clearance-${timing}`, athleteId, restrictionEventId: recordReport.id };
+  const nativeReports = timing === "clearance-after" ? [clearance] : [eventReport, recordReport];
+  const appendNativeReports = async () => {
+    for (const report of nativeReports) await local.appendEvidenceEvent(report);
+    const response = await postShadowUpload(account, await Promise.all(nativeReports.map((report) => shadowUploadItem("evidence-event", report))));
+    const body = await response.json();
+    assert(response.status === 200 && !body.conflicts.length, `Worker rejected ${timing} report dependency: ${JSON.stringify(body)}`);
+  };
+  if (timing === "before") await appendNativeReports();
+  await local.rollbackMigrationRun(athleteId, converted.run.id, "2026-09-04T00:00:00.000Z");
+  const rolledBack = await postShadowUpload(account, [await shadowUploadItem("migration-run", {
+    ...converted.run, status: "rolled-back", rolledBackAt: "2026-09-04T00:00:00.000Z",
+  })]);
+  assert(rolledBack.status === 200, `Worker rejected ${timing} symptom rollback`);
+  if (timing !== "before") await appendNativeReports();
+  const localSources = await local.readProjectionSources(athleteId);
+  assert(localSources.sessionRecords.some((record) => record.id === session.record.id)
+    && localSources.sessionPlans.some((plan) => plan.id === session.plan.id)
+    && localSources.evidenceEvents.some((report) => report.id === recordReport.id),
+  `${timing} rollback orphaned the native report's local immutable source`);
+  const backup = await local.exportBundle(athleteId, metadata("2026-09-05T00:00:00.000Z"));
+  const restored = makeStore(`symptom-rollback-restored-${timing}`);
+  await restored.importBundle(JSON.parse(JSON.stringify(backup)));
+  assert((await restored.readProjectionSources(athleteId)).sessionRecords.some((record) => record.id === session.record.id),
+    `${timing} rollback backup lost the report's source record`);
+  assert(Number(cloudEnv.DB.database.prepare(`SELECT COUNT(*) AS count FROM vnext_shadow_rolled_back_entities
+    WHERE profile_id = ? AND entity_id IN (?, ?, ?)`).get(athleteId, session.record.id, session.plan.id, recordReport.id).count) === 0,
+  `${timing} rollback left the report, source record or plan revoked`);
+  local.close(); restored.close();
+}
+
 // Account deletion uses the existing authenticated path; D1 cascades every shadow row.
 const deletedMigrationAccount = await worker.fetch(cloudRequest("/profiles/me", {
   method: "DELETE",

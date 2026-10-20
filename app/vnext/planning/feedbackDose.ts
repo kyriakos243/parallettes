@@ -5,16 +5,19 @@ import { generateMixedVNextSession, generateMixedVNextCustomSession } from "./mi
 import type { VNextCustomContentFilter, VNextCustomSessionMinutes } from "./custom";
 import { planningReasonCodes } from "./policy";
 import { stableHash } from "./utils";
+import { projectionReasonCodes } from "../projection/policy";
 
 /**
  * Mixed generator v2 changes newly generated plans only. A modified development
  * block removes whole sets and their following rest; per-set targets/rest keep
  * their native authored meaning. Removed load is never filled with other work.
+ * Version 3 uses the same dose calculation with current retained-difficulty
+ * guidance. Its separate immutable identity keeps native v2 replay unchanged.
  */
-export const applyFeedbackDose = (input: GenerateSessionInput, generated: GeneratedSession): GeneratedSession => {
+const applyDose = (input: GenerateSessionInput, generated: GeneratedSession, policyVersion: 2 | 3): GeneratedSession => {
   if (!generated.ok || !generated.plan) return generated;
   const original = generated.plan;
-  const version = parseDefinitionVersion(2);
+  const version = parseDefinitionVersion(policyVersion);
   const explanations = new Map(generated.itemExplanations.map((item) => [item.planItemId, item]));
   const entries = original.items.map((item) => {
     const explanation = explanations.get(item.id)!;
@@ -27,15 +30,20 @@ export const applyFeedbackDose = (input: GenerateSessionInput, generated: Genera
         : "This gentle preparation or recovery keeps its planned time. Current safety checks still apply." } };
     }
     const structured = structureWorkoutItem(item, input.bundle);
+    const retainedDifficulty = policyVersion === 3
+      && evaluation.reasonCodes.includes(projectionReasonCodes.repeatedDifficultPerformance);
+    const recoveryAdvice = retainedDifficulty
+      ? " Recent workouts have repeatedly felt too hard or unfinished. Keep this smaller dose until two complete workouts feel Easy or Right, or an exact reassessment confirms readiness. If it is still too hard, choose Easier or a safe easier variation."
+      : "";
     const sets = [...new Set(structured.intervals.filter((interval) => interval.kind === "work").map((interval) => interval.set))];
     if (sets.length < 2) return { item, explanation: { ...explanation,
-      whyIntensity: "This is already one short set. Keep the current cautious target; stop or skip it if it still feels too hard." } };
+      whyIntensity: `This is already one short set. Keep the current cautious target; stop or skip it if it still feels too hard.${recoveryAdvice}` } };
     const retainedCount = Math.max(1, Math.floor(sets.length * 0.75));
     const retained = new Set(sets.slice(0, retainedCount));
     const plannedSeconds = structured.intervals.filter((interval) => retained.has(interval.set))
       .reduce((total, interval) => total + interval.durationSeconds, 0);
     return { item: { ...item, plannedSeconds }, explanation: { ...explanation,
-      whyIntensity: `Current feedback calls for less work: ${retainedCount} instead of ${sets.length} planned sets, with the same target and rest per set.` } };
+      whyIntensity: `Current feedback calls for less work: ${retainedCount} instead of ${sets.length} planned sets, with the same target and rest per set.${recoveryAdvice}` } };
   });
   const actualSeconds = entries.reduce((total, entry) => total + entry.item.plannedSeconds, 0);
   const reduced = actualSeconds < original.intendedDurationSeconds;
@@ -71,9 +79,19 @@ export const applyFeedbackDose = (input: GenerateSessionInput, generated: Genera
       { severity: "warning", code: planningReasonCodes.doseModified, message: durationException!.message }] : generated.issues };
 };
 
+export const applyFeedbackDose = (input: GenerateSessionInput, generated: GeneratedSession): GeneratedSession =>
+  applyDose(input, generated, 2);
+
 export const generateFeedbackVNextSession = (input: GenerateSessionInput): GeneratedSession =>
   applyFeedbackDose(input, generateMixedVNextSession(input));
 
 export const generateFeedbackVNextCustomSession = (input: GenerateSessionInput, minutes: VNextCustomSessionMinutes,
   contentFilter?: VNextCustomContentFilter): GeneratedSession =>
   applyFeedbackDose(input, generateMixedVNextCustomSession(input, minutes, contentFilter));
+
+export const generateTrainingQualitySessionPlan = (input: GenerateSessionInput): GeneratedSession =>
+  applyDose(input, generateMixedVNextSession(input), 3);
+
+export const generateTrainingQualityCustomPlan = (input: GenerateSessionInput, minutes: VNextCustomSessionMinutes,
+  contentFilter?: VNextCustomContentFilter): GeneratedSession =>
+  applyDose(input, generateMixedVNextCustomSession(input, minutes, contentFilter), 3);

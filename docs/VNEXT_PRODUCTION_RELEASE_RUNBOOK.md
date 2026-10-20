@@ -586,3 +586,45 @@ Post-release full/account exports verified at `2026-10-20T07:19:53.112766+00:00`
 No further owner QA is required for this accepted scope. Use the existing Home Screen app online; finish any active workout before closing/reopening to pick up the update. Do not clear storage or reinstall for this release. Device-only preview acceptance, automated account scenarios and live health/data equality do not claim a newly performed real two-device sync test, optional sound acceptance, or controlled WebKit storage eviction. These are evidence limits rather than an instruction to repeat the accepted device checks.
 
 The first controlled run [39384620594](https://github.com/kyriakos243/parallettes/actions/runs/39384620594) passed the complete source suite/typecheck, production build, PWA validation and exact artifact grant. Its publish job was rejected before execution because the development branch is outside the Pages environment’s allowed branches. Publication is retried through the existing main-branch workflow with the same exact source `b89c844c2509a1dd4a4db7ea8a4a7a8c9cdf4e5f`; environment protections remain unchanged.
+
+## 30. Five-correction isolated device preview — 2026-10-20
+
+The owner explicitly requested a separate test link and minimum iPhone/iPad checks, with no simulator, production deployment or real-data changes. The new owner-private static Site is:
+
+- App: <https://parallette25-corrections-test-oct20.daring-ash-7897.chatgpt.site/parallettes/>
+- Instructions: <https://parallette25-corrections-test-oct20.daring-ash-7897.chatgpt.site/>
+- Site `appgprj_6ad7a174bfac81919580dde8d41d9804`, one owner viewer, no groups/external viewers.
+- Saved version `appgprj_6ad7a174bfac81919580dde8d41d9804~appgver_b9726165a7188191a700389cd77d9e87`.
+- Successful deployment `appgdep_6ad7a277c9808191ab90bbfbf8fd7fdf`.
+- Separate Site source commit `580b6f5d4ef29282ce417b7562479c926b9d63e7`; this is not an application-repository commit/push.
+- Preview build `f87918ea4be0d3b1a79f`, cache channel `vnext-comfort-qa1`, 27 eager/lazy assets, Home Screen name **P25 Check**.
+- Retained wrapper: `/Users/kyria/Documents/Codex/2026-08-05/create-a-polished-practical-pdf-manual/sites/parallette25-corrections-qa-20261020`.
+
+The new hostname structurally separates all browser storage and service-worker scope from production and the earlier test Site. The current application graph/readers are retained; API configuration is explicitly empty, account operations fail before networking, and verified HTML CSP restricts connections to self and form submissions to none. No Worker, D1/KV binding, API proxy, production credentials, observations or backups were copied. Do not import real data.
+
+An explicit **Start sample check** wrapper runs only on this test hostname or its dedicated localhost name. It reserves its preparation marker before asynchronous work, refuses existing identity/training storage, and uses the real store/runtime APIs to create one clearly synthetic symptomatic Knee Push-Up Session Record with primary Pushing/supporting L-sit intent. It never resets or reseeds on reopening. Each device has its own disposable sample. The wrapper then starts the unmodified application entry. There are no setup questions or physical exercise requirements.
+
+Local browser acceptance: sample initialization → affected-movement form → wrist-only scope → Comfortable again → save → reload retained the reconfirmation notice, suitable workout and exactly one History entry. Reopening with the local server stopped also retained the app/recovery state. The only subsequent wrapper adjustment moved the preparation reservation before its first await. Independent source/packaging review passes; all asset imports resolve and the worker caches the wrapper plus original entry/lazy assets.
+
+Hosted read-only verification at `2026-10-20T17:20:33.903801+00:00` fetched all 36 files: all 34 non-HTML files match exactly; both HTML pages retain expected content/CSP with hosting-platform injection. All 42 application/test/API files recorded by the completed correction QA still match their saved hashes. Main remains `a36afa6816eeef1f3aaf2c80bd4b79883d203961`; live build remains `136589c73eecad6dce76`. Evidence: `/Users/kyria/Documents/Codex/parallette25-review-evidence/2026-10-20-long-term-training/corrections-qa/isolated-device-preview-verification.json`.
+
+Minimum owner checks:
+
+1. **iPhone:** open in Safari, authenticate through the private ChatGPT host if asked, Add to Home Screen as **P25 Check**, then open that icon and start the sample. Today → **Update affected movements** → leave only **Weight on hands / wrists** selected → **Comfortable again** → **Save comfort update**. Close/reopen: **Build back up with a check** and **Review suitable checks** remain; History still contains one sample session.
+2. **iPad:** start its separate sample, open **Update affected movements**, rotate portrait/landscape and check the movement choices, Area selector and Save button are readable, tappable and reachable.
+
+No repeat workout, broad prior QA, real account sign-in or training is required. This device-only preview does not test real account sync/storage eviction. Production remains unreleased for these five corrections; the Worker/client compatibility sequence in Data & Migration §5.16 still applies to any later separately approved release.
+
+## 31. Five-correction release — authorised, 2026-10-20
+
+The owner confirmed both iPhone and iPad checks in §30 passed and explicitly authorised release with existing progress/data intact and no simulator. This accepts the five corrections and closes their physical interaction checkpoint; it does not claim real account-sync or storage-eviction testing.
+
+The frozen production candidate is build `062799423b50af791eb1`, cache lane `vnext-production1`, distribution SHA-256 `f7acf28b608f9839e48fa682002ef21431b80ca942692be265f39adde1745ecb`. Its index hash is `029cdf0ed5b5004760f15d31a4115f4cdec171c83f98541bf3b18540e2d735f4` and service-worker hash is `4a9b0acd3e656fa84f55d72e5cdd635df95cce32010f1162009460588d9bd7a9`. All accepted application files match the completed correction QA; production contains no test wrapper/sample initialization. Native definitions v1–v8, generator readers 1/2/3, IDs and all production account/storage/recovery namespaces remain.
+
+Before publication, all 27 previously served files match the accepted four-batch release and exact API/D1/schema/paired-authority health passes. Wrangler is pinned to 4.151.0. Fresh full/accounts exports verified at `2026-10-20T17:32:22.311794+00:00` restore into isolated in-memory databases, pass foreign keys and all 14 invariants, and agree on all account rows. Counts: 6 accounts, 25 plans, 46 evidence events, 23 session records, 4 legacy snapshots. Full export SHA-256 `1387a8202f3a9bb1ac6dc97e4a7928b2973db9920f7012aecb88435bdd41562a`; accounts SHA-256 `223482274114536d53aee07ff1aec38f815f495889b199009d061839b23fdd5a`. Recovery bookmark and private exports are retained outside Git in the FileVault-protected directory `/Users/kyria/Documents/Codex/parallette25-release-evidence/2026-10-20-training-corrections`.
+
+The compatible Worker reader was published **before the client**, version `98a00c05-2aed-40d9-96b6-62bc2238b381` at `2026-10-20T17:32:53.421118Z`; 100% deployment and exact API/D1/schema/paired-authority health pass. This adds strict optional linked-symptom validation and dependency-ordered sync without a schema migration or observation write. Existing variables, bindings and secrets are retained.
+
+The full local source suite and typecheck pass; independent persistence/Worker checks also pass. The release-grant records now bind the exact accepted artifact and fresh recovery evidence; focused contract/operations checks retain fail-closed tamper and cleanup protections. Controlled Pages publication and post-release verification remain pending at this checkpoint.
+
+**Update/repair boundary:** after publication, finish/save active work, close all production app windows/tabs on both devices, then reopen online to receive the new build before creating new reports/workflows. Keep the existing installation and storage. Old strict clients cannot read linked symptom reports; their local data stays intact, but they can show stale state after a sync rejection. Any repair after new facts must retain new readers, preserve outboxes/native work and use compatible behavior changes. Do not restore an old frontend/Worker bundle, clear browser storage or overwrite production D1 to erase newer observations.

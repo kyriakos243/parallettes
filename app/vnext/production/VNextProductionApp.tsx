@@ -1,8 +1,8 @@
-import { restrictionSafetyCatalogue } from "./restrictionSafety";
+import { trainingQualityCatalogue } from "./trainingQuality";
 import { useEffect, useMemo, useState } from "react";
 import "./combinedProgressionMedia";
 import { evaluateCombinedProgressionPlanMedia } from "./combinedProgressionRelease";
-import { generateFeedbackVNextSession, generateFeedbackVNextCustomSession } from "../planning/feedbackDose";
+import { generateTrainingQualitySessionPlan, generateTrainingQualityCustomPlan } from "../planning/feedbackDose";
 import { isStableId, parseStableId, type VNextShadowStore } from "../index";
 import {
   VNextAccountGate,
@@ -168,8 +168,8 @@ const prepareProductionAthlete = async ({
 
 const PRODUCTION_DEPLOYMENT: VNextApplicationDeployment = {
   kind: "production",
-  catalogue: restrictionSafetyCatalogue,
-  workoutGenerators: { generateSession: generateFeedbackVNextSession, generateCustomSession: generateFeedbackVNextCustomSession },
+  catalogue: trainingQualityCatalogue,
+  workoutGenerators: { generateSession: generateTrainingQualitySessionPlan, generateCustomSession: generateTrainingQualityCustomPlan },
   evaluatePlanMedia: evaluateCombinedProgressionPlanMedia,
   productKicker: "Parallette25",
   openingMessage: "Opening your evidence-led training…",
