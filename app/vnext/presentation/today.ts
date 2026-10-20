@@ -9,6 +9,7 @@ import { presentationFamilyLabel } from "./progress";
 import { structureWorkoutItem, type WorkoutExerciseSelection } from "../workoutUx";
 import type { PlanItemId } from "../contracts";
 import { isMixedWorkoutPlan, workoutExecutionGroups } from "../mixedWorkout";
+import { planningReasonCodes } from "../planning/policy";
 
 const demandPresentation = (
   demand: SessionDemand,
@@ -134,7 +135,8 @@ export const buildTodayWorkoutPresentation = (
   if (!generated.ok || !generated.plan || !generated.emphasis) return {
     title: "Today's Workout",
     status: "unavailable",
-    reason: "A safe, goal-relevant session is not available from the current information. Review current restrictions, equipment or placement.",
+    reason: generated.issues.find((issue) => issue.code === planningReasonCodes.recoveryRequired)?.message
+      ?? "A safe, goal-relevant session is not available from the current information. Review current restrictions, equipment or placement.",
     maintenance: [],
     demand,
     blocks: [],

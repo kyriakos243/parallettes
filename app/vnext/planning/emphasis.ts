@@ -30,6 +30,7 @@ import {
   seededOrder,
   uniqueReasons,
 } from "./utils";
+import { usableDevelopmentVariant } from "./usableVariant";
 
 type FocusResolution = Readonly<{
   focus: EmphasisFocus;
@@ -160,6 +161,34 @@ const resolveGraphFocus = (
   const pathEligible = (milestone: MilestoneRef): boolean =>
     !explicitTarget || isAncestorOf(milestone, explicitTarget, nodeMap);
   const nodeIndex = new Map(graph.nodes.map((node, index) => [node.id, index] as const));
+  const developmentRank = (milestone: MilestoneRef): number => {
+    if (!input.preferUnfinishedTargets) return 0;
+    const protocol = exactProtocolFor(input.bundle, milestone);
+    const exercise = input.bundle.exercises.find((item) => item.id === protocol?.exerciseId);
+    const finding = input.state.nodeStates.find((item) =>
+      projectionMilestoneKey(item.milestone) === projectionMilestoneKey(milestone));
+    const reconfirming = finding?.confidence === "stale" || finding?.confidence === "contradicted";
+    const demand = input.sessionDemand ?? input.intent.defaultSessionDemand;
+    const variants = exercise?.prescriptionVariants.filter((variant) =>
+      variant.id === protocol?.prescriptionVariantId
+      || (!reconfirming && demand !== "challenge" && variant.id.endsWith("-regressed"))) ?? [];
+    const usable = exercise && variants.some((variant) => usableDevelopmentVariant(variant,
+      evaluateTrainability({
+        request: { exerciseId: exercise.id, exerciseDefinitionVersion: exercise.definitionVersion,
+          prescriptionVariantId: variant.id },
+        state: input.state, bundle: input.bundle, asOf: input.state.asOf,
+        policy: input.projectionPolicy, intent: input.intent,
+      }), demand));
+    // Prefer the next usable milestone. Keep a useful established fallback when
+    // the next step is unavailable; never reinterpret practice as achievement.
+    return (usable ? 0 : 2) + Number(milestoneIsSatisfied(milestone, input));
+  };
+  const developmentRanks = new Map<string, number>();
+  const rank = (milestone: MilestoneRef): number => {
+    const key = projectionMilestoneKey(milestone);
+    if (!developmentRanks.has(key)) developmentRanks.set(key, developmentRank(milestone));
+    return developmentRanks.get(key)!;
+  };
   const candidates = [
     ...input.state.workingNodes.map((item) => ({ item, sourceRank: 0 })),
     ...input.state.eligibleTargets.map((item) => ({ item, sourceRank: 1 })),
@@ -191,6 +220,7 @@ const resolveGraphFocus = (
       const leftIndex = nodeIndex.get(left.item.milestone.nodeId) ?? Number.MAX_SAFE_INTEGER;
       const rightIndex = nodeIndex.get(right.item.milestone.nodeId) ?? Number.MAX_SAFE_INTEGER;
       return leftReconfirm - rightReconfirm
+        || rank(left.item.milestone) - rank(right.item.milestone)
         || left.sourceRank - right.sourceRank
         || (left.sourceRank === 2 && right.sourceRank === 2
           ? rightIndex - leftIndex

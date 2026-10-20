@@ -44,6 +44,8 @@ import { RestrictionRecoveryForm, type RestrictionRecoveryContext } from "./Rest
 import { validateWorkoutStart } from "./workoutStartSafety";
 import type { WorkoutRunRequest } from "./useWorkoutRunAuthorization";
 import { shortWorkoutPreferenceKey } from "./shortWorkoutPreferences";
+import { createAppUpdateController, hasUnfinishedUpdateWork, type AppUpdateState } from "./appUpdate";
+import "./appUpdate.css";
 import { isMixedWorkoutPlan } from "../mixedWorkout";
 import { ReliableWorkoutRunner } from "./ReliableWorkoutRunner";
 import { MixedWorkoutRunner, recoverActiveWorkoutFacts as recoverMixedWorkoutFacts } from "./MixedWorkoutRunner";
@@ -366,12 +368,22 @@ const VNextAthleteApplication = ({
   const [savedWorkoutId, setSavedWorkoutId] = useState<string>();
   const [online, setOnline] = useState(navigator.onLine);
   const [syncStatus, setSyncStatus] = useState<TrainingSyncStatus>({ phase: "idle" });
+  const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ phase: "idle" });
+  const [goalEditing, setGoalEditing] = useState(false);
+  const updateController = useRef<ReturnType<typeof createAppUpdateController> | undefined>(undefined);
+  const updateLocked = useRef(false);
+  const updateSafe = useRef(false);
+  const savedUpdatePlanIds = useRef<readonly string[]>([]);
+  savedUpdatePlanIds.current = snapshot?.sources.sessionRecords.map((record) => record.planId) ?? [];
   const commandQueue = useRef<Promise<void>>(Promise.resolve());
   const pendingCommands = useRef(0);
   const bootstrapStarted = useRef(false);
   const completionSubmissionLocked = useRef(false);
   const guidedSubmissionLocked = useRef(false);
   const lastAutomaticSyncFingerprint = useRef<string | undefined>(undefined);
+  updateSafe.current = Boolean(snapshot) && !busy && !workoutRecovery && !guidedRecovery
+    && !assessment && !guidedOffer && !workoutOpen && !customOpen && !accountOpen
+    && !restrictionOpen && !restrictionRecovery && !restartSetupOpen && !reviewCheckpointError && !goalEditing;
 
   const executionFacts = workoutRecovery?.stage === "review" || workoutRecovery?.stage === "prepared"
     ? workoutRecovery.facts
@@ -435,6 +447,7 @@ const VNextAthleteApplication = ({
   }), [athleteId, storageNamespace]);
 
   const runCommand = useCallback((command: () => Promise<void>): void => {
+    if (updateLocked.current) return;
     pendingCommands.current += 1;
     setBusy(true);
     setError(undefined);
@@ -480,12 +493,48 @@ const VNextAthleteApplication = ({
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
-    void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, {
-      scope: import.meta.env.BASE_URL,
-    }).catch(() => setMessage(deployment.kind === "production"
-      ? "Parallette25 is usable online; offline caching will retry later."
-      : "The RC is usable online; offline caching will retry later."));
-  }, [deployment.kind]);
+    const controller = createAppUpdateController({
+      workers: navigator.serviceWorker,
+      base: import.meta.env.BASE_URL,
+      runningBuild: document.querySelector<HTMLMetaElement>('meta[name="p25-build-id"]')?.content,
+      canApply: () => {
+        if (!updateSafe.current || pendingCommands.current) return false;
+        try {
+          // Recheck disk as well as this render: another window may have saved work.
+          return !hasUnfinishedUpdateWork({
+            athleteId,
+            workout: localStorage.getItem(workoutRecoveryKey(athleteId, storageNamespace)),
+            guided: localStorage.getItem(guidedRecoveryKey(athleteId, storageNamespace)),
+            timer: localStorage.getItem(`parallette25-vnext-rc-active-workout-v1:${athleteId}`),
+            savedPlanIds: savedUpdatePlanIds.current,
+          });
+        } catch { return false; }
+      },
+      onState: (state) => {
+        updateLocked.current = state.phase === "applying";
+        setAppUpdate(state);
+      },
+      reload: () => window.location.reload(),
+    });
+    updateController.current = controller;
+    let lastCheck = Date.now();
+    void controller.check();
+    const checkVisible = () => {
+      if (document.visibilityState !== "visible" || !navigator.onLine || Date.now() - lastCheck < 300_000) return;
+      lastCheck = Date.now();
+      void controller.check();
+    };
+    window.addEventListener("online", checkVisible);
+    window.addEventListener("focus", checkVisible);
+    document.addEventListener("visibilitychange", checkVisible);
+    return () => {
+      controller.dispose();
+      updateLocked.current = false;
+      window.removeEventListener("online", checkVisible);
+      window.removeEventListener("focus", checkVisible);
+      document.removeEventListener("visibilitychange", checkVisible);
+    };
+  }, [athleteId, storageNamespace]);
 
   const syncTraining = useCallback(async () => {
     setSyncStatus({ phase: "syncing" });
@@ -501,6 +550,11 @@ const VNextAthleteApplication = ({
       setSnapshot(refreshed);
       setSyncStatus(fingerprint ? { phase: "synced", fingerprint, confirmedAt: new Date().toISOString() } : { phase: "waiting" });
     } catch (reason) {
+      if (reason instanceof Error && reason.message === "shadow-sync-update-required") {
+        setSyncStatus({ phase: "update-required" });
+        void updateController.current?.check();
+        return;
+      }
       const { isTransientVNextSyncError } = await import("../../profileStore");
       if (isTransientVNextSyncError(reason)) {
         setSyncStatus({ phase: "waiting" });
@@ -1420,13 +1474,17 @@ const VNextAthleteApplication = ({
       {restrictionRecovery && <RestrictionRecoveryForm athleteId={athleteId} catalogueVersion={vNextDefinitionBundle.catalogueVersion}
         context={restrictionRecovery} onSave={saveComfortUpdate} onClose={() => setRestrictionRecovery(undefined)} />}
       <div hidden={showingRestrictionReport || showingComfortUpdate}>
+      <div inert={appUpdate.phase === "applying"}>
       <aside className="vnext-rc-banner" aria-label={deployment.kind === "production" ? "Application and account status" : "Release candidate status"}>
         <span><strong>{deployment.bannerTitle}</strong> · {deployment.bannerDetail}</span>
         <div className="vnext-rc-banner-tools">
           <button type="button" className="vnext-rc-account-button" disabled={Boolean(reviewCheckpointError)} onClick={() => setAccountOpen(true)}>{identity.mode === "account" ? `Account: ${identity.username}` : "On this device"}</button>
           <details>
             <summary>Offline &amp; data tools</summary>
+            <p>App version: {appUpdate.runningBuild?.slice(0, 8) ?? "local preview"}</p>
+            <p role="status">{appUpdate.message}</p>
             <div className="vnext-actions">
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || appUpdate.phase === "checking"} onClick={() => { void updateController.current?.check(); }}>Check for updates</button>
               <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || workflowLocked} onClick={exportObservations}>Export backup</button>
               <label className="vnext-action" data-kind="secondary" aria-disabled={busy || workflowLocked}>Import backup<input className="vnext-rc-file" type="file" accept="application/json,.json" disabled={busy || workflowLocked} onChange={(event) => { const file = event.target.files?.[0]; if (file) importObservations(file); event.target.value = ""; }} /></label>
               {identity.mode === "account"
@@ -1437,6 +1495,14 @@ const VNextAthleteApplication = ({
         </div>
       </aside>
       <p className="vnext-sync-status" data-state={syncStatus.phase} role="status">{syncMessage}</p>
+      {appUpdate.availableBuild && <aside className="vnext-update-notice" aria-label="App update">
+        <p><strong>Update ready</strong> · Your saved progress stays on this device.
+          {workflowLocked ? " Finish saving your workout or check before updating." : ""}
+          {goalEditing ? " Save or cancel your goal changes before updating." : ""}</p>
+        {appUpdate.message && <p role="status">{appUpdate.message}</p>}
+        <button type="button" className="vnext-action" disabled={busy || workflowLocked || goalEditing || Boolean(reviewCheckpointError)}
+          onClick={() => { void updateController.current?.apply(); }}>Update now</button>
+      </aside>}
       {(message || error) && <p className={`vnext-rc-message${error ? " is-error" : ""}`} role={error ? "alert" : "status"}>{error ?? message}{pendingPrepared && error ? " Your workout is kept on this device so you can retry." : ""}</p>}
       {pendingPrepared && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={retryPreparedCompletion}>Retry saving workout</button>}
       {guidedRecovery && !guidedOffer && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={() => {
@@ -1445,6 +1511,7 @@ const VNextAthleteApplication = ({
       }}>Review pending test result</button>}
       {reviewCheckpointError && <div className="vnext-run-safety-message" role="alert"><p>{reviewCheckpointError}</p><button type="button" className="vnext-action" onClick={retryWorkoutReviewCheckpoint}>Retry saving review</button></div>}
       <VNextExperience
+        onGoalEditingChange={setGoalEditing}
         setupNotice={!workflowLocked ? <>
           {snapshot.assessmentDraft?.status === "in-progress" && (
             <section className="vnext-panel vnext-rc-saved-setup" aria-label="Saved setup">
@@ -1541,6 +1608,10 @@ const VNextAthleteApplication = ({
         } : undefined}
       />
       </div>
+      </div>
+      {appUpdate.phase === "applying" && <div className="vnext-update-overlay" role="status" aria-live="polite">
+        <p>Opening the update… Your saved progress is kept.</p>
+      </div>}
     </div>
   );
 };

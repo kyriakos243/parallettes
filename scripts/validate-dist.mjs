@@ -203,6 +203,11 @@ const fingerprintPaths = [
 ].sort((a, b) => portablePath(a).localeCompare(portablePath(b)));
 const fingerprint = createHash("sha256");
 fingerprint.update(`channel:${cacheChannel}\0`);
+// Revalidation is deterministic; the badge is derived from, not part of, its hash.
+html = html.replace(/<meta name="p25-build-id" content="[a-f0-9]{20}"\s*\/?>/gu, "")
+  .replace(/\s*<\/head>/u, "\n</head>");
+writeFileSync(indexPath, html);
+fingerprint.update(readFileSync(sourceWorkerPath));
 for (const path of fingerprintPaths) {
   fingerprint.update(portablePath(path));
   fingerprint.update("\0");
@@ -210,6 +215,7 @@ for (const path of fingerprintPaths) {
   fingerprint.update("\0");
 }
 const buildId = fingerprint.digest("hex").slice(0, 20);
+writeFileSync(indexPath, html.replace("</head>", `<meta name="p25-build-id" content="${buildId}" />\n</head>`));
 
 const assetManifest = { buildId, channel: cacheChannel, assets: assetNames };
 writeFileSync(assetManifestPath, `${JSON.stringify(assetManifest, null, 2)}\n`);
@@ -298,7 +304,8 @@ if (!builtWorker.includes(`const BUILD_ID = "${buildId}";`)
   || builtWorker.includes("__PWA_BUILD_ID__") || builtWorker.includes("__PWA_CACHE_CHANNEL__") ||
   !builtWorker.includes("asset-manifest.json") || !builtWorker.includes("key.startsWith(CACHE_PREFIX)") ||
   !builtWorker.includes('CACHE_CHANNEL === "v1" && requestUrl.pathname.startsWith(VNEXT_RC_PATH)') ||
-  builtWorker.includes("self.skipWaiting(")) {
+  !builtWorker.includes('event.data.type === "P25_APPLY_UPDATE"') ||
+  !builtWorker.includes("clients.length !== 1")) {
   throw new Error("Service worker lacks deterministic assets, namespaced cleanup or safe update behavior");
 }
 const demoSource = readFileSync("app/ExerciseDemo.tsx", "utf8");

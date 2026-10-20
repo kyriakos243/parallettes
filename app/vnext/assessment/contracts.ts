@@ -73,8 +73,9 @@ export type AssessmentAnswerRecord = Readonly<{
 /**
  * Resumable UI workflow state only. It is not evidence, does not sync, and is
  * excluded from projection/export. Explicitly submitted positive safety reports
- * are persisted independently as immutable Evidence Events; placement and intent
- * still require completion. A draft itself never clears a restriction.
+ * are persisted independently as immutable Evidence Events. The integrated
+ * runtime also saves explicitly submitted goals/equipment as Athlete Intent;
+ * placement still requires completion. A draft itself never clears a restriction.
  */
 export type AssessmentDraft = Readonly<{
   schemaVersion: typeof VNEXT_ASSESSMENT_SCHEMA_VERSION;

@@ -52,8 +52,12 @@ import {
   uniqueReasons,
 } from "./utils";
 import { validateGeneratedSession } from "./validation";
+import { usableDevelopmentVariant } from "./usableVariant";
 
 type TrainabilityEvaluation = ReturnType<typeof evaluateTrainability>;
+type CompositionInput = GenerateSessionInput & Readonly<{
+  rejectedDevelopment?: Set<ReasonCode>;
+}>;
 
 type Candidate = Readonly<{
   exercise: ExerciseDefinition;
@@ -183,7 +187,7 @@ const variantCandidates = (
 };
 
 const candidateForExercise = (
-  input: GenerateSessionInput,
+  input: CompositionInput,
   options: Readonly<{
     exercise: ExerciseDefinition;
     preferredVariantId?: string;
@@ -208,6 +212,10 @@ const candidateForExercise = (
     options.exactVariantRequired ?? false,
   )) {
     const evaluation = evaluate(input, options.exercise, variant);
+    const development = options.block !== "preparation" && options.block !== "recovery";
+    if (development && !usableDevelopmentVariant(variant, evaluation, input.sessionDemand ?? input.intent.defaultSessionDemand)) {
+      evaluation.reasonCodes.forEach((reason) => input.rejectedDevelopment?.add(reason));
+    }
     if (evaluation.decision === "block") {
       if (evaluation.safeAlternative) blockedWithAlternative.push(evaluation);
       continue;
@@ -782,7 +790,9 @@ export const composeSession = (
   policy: GeneratorPolicy = vNextGeneratorPolicy,
 ): GeneratedSession => {
   const demand = input.sessionDemand ?? input.intent.defaultSessionDemand;
-  const normalizedInput = { ...input, sessionDemand: demand };
+  const rejectedDevelopment = new Set<ReasonCode>();
+  const normalizedInput: CompositionInput = { ...input, sessionDemand: demand,
+    ...(input.preferUnfinishedTargets ? { rejectedDevelopment } : {}) };
   const seed = input.seed ?? `${input.intent.athleteId}:${input.createdAt.slice(0, 10)}`;
   const issues: PlanningIssue[] = [];
   const coverageGaps: CoverageGap[] = [];
@@ -1034,6 +1044,15 @@ export const composeSession = (
   }
 
   if (issues.some((issue) => issue.severity === "error")) {
+    if (rejectedDevelopment.has(projectionReasonCodes.recentHighLoad)
+      && !rejectedDevelopment.has(projectionReasonCodes.activeRestriction)
+      && !rejectedDevelopment.has(projectionReasonCodes.postClearance)) {
+      issues.push({
+        severity: "warning",
+        code: planningReasonCodes.recoveryRequired,
+        message: "Recent demanding work is limiting today's training, and no suitable lighter session is available. Take a recovery day, then return when comfortable and recovered.",
+      });
+    }
     return {
       ok: false,
       generatorPolicyId: policy.id,

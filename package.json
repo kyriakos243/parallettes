@@ -58,10 +58,10 @@
     "validate:vnext-roadmap": "node scripts/validate-vnext-roadmap.mjs",
     "validate:vnext-history": "node scripts/validate-vnext-history.mjs",
     "validate:vnext-navigation": "node scripts/validate-vnext-navigation.mjs && node scripts/validate-vnext-short-workout-preferences.mjs",
-    "validate:vnext-placement": "node scripts/validate-vnext-placement.mjs && node scripts/validate-vnext-placement-compatibility.mjs && node scripts/validate-vnext-quick-setup.mjs && node scripts/validate-vnext-quick-guided-ui.mjs",
+    "validate:vnext-placement": "node scripts/validate-vnext-placement.mjs && node scripts/validate-vnext-placement-compatibility.mjs && node scripts/validate-vnext-quick-setup.mjs && node scripts/validate-vnext-quick-guided-ui.mjs && node scripts/validate-vnext-paused-setup-context.mjs",
     "validate:vnext-restriction-safety": "node scripts/validate-vnext-submitted-safety.mjs && node scripts/validate-vnext-restriction-exposure.mjs && node scripts/validate-vnext-workout-start-safety.mjs && node scripts/validate-vnext-restriction-report.mjs && node scripts/validate-vnext-mixed-runner.mjs",
     "validate:vnext-product-review": "pnpm validate:vnext-restriction-safety && node scripts/validate-vnext-signout-safety.mjs && node scripts/validate-vnext-workout-review-recovery.mjs && node scripts/validate-vnext-guided-recovery.mjs && node scripts/validate-vnext-progress-feedback.mjs && node scripts/validate-vnext-check-safety.mjs && node scripts/validate-vnext-quick-guided-ui.mjs",
-    "validate:vnext-training-corrections": "node scripts/validate-vnext-current-safety-prerequisites.mjs && node scripts/validate-vnext-symptom-recovery.mjs && node scripts/validate-vnext-symptom-recovery-ui.mjs && node scripts/validate-vnext-long-term-allocation.mjs && node scripts/validate-vnext-persistent-difficulty.mjs"
+    "validate:vnext-training-corrections": "node scripts/validate-vnext-current-safety-prerequisites.mjs && node scripts/validate-vnext-symptom-recovery.mjs && node scripts/validate-vnext-symptom-recovery-ui.mjs && node scripts/validate-vnext-long-term-allocation.mjs && node scripts/validate-vnext-persistent-difficulty.mjs && node scripts/validate-vnext-progression-recovery.mjs && node scripts/validate-vnext-app-update.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.28.0",

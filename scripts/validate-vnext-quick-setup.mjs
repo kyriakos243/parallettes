@@ -28,14 +28,15 @@ const context = [
 ];
 try {
   const start = await runtime.startAssessment({athleteId,mode:'new-placement'});
-  const initialIntent = canonicalJson(start.snapshot.intent);
   const savedBefore = saves;
   let current = await runtime.updateAssessmentContext({draft:start.assessment.draft,answers:context});
   assert.equal(saves,savedBefore+1,'Grouped context must be one atomic draft write');
   assert.equal(current.step.kind,'skill-selection');
   assert.equal(current.step.graphId,'parallette-pushing');
   assert.equal(current.draft.answers.length,5);
-  assert.equal(canonicalJson((await runtime.refresh({athleteId})).intent),initialIntent,'Uncommitted context must not change profile intent');
+  const savedContext = (await runtime.refresh({athleteId})).intent;
+  assert.deepEqual(savedContext.goals.map(goal => goal.graphId), context[3].graphIds,'Submitted goals apply before placement checks');
+  assert.deepEqual(savedContext.equipment, context[4].equipment,'Submitted equipment applies before placement checks');
   assert.equal((await runtime.refresh({athleteId})).sources.evidenceEvents.length,0,'Context is not evidence');
   await assert.rejects(()=>runtime.deferSupportingAssessment({draft:current.draft}),/main starting point/);
   current = await runtime.answerAssessment({draft:current.draft,answer:{kind:'skill-selection',graphId:'parallette-pushing',protocolId:'parallette-pushing-floor-push-up',response:'clean'}});
@@ -70,5 +71,5 @@ try {
   assert.equal(nextAssessmentStep(validInversion,bundle).graphId,'handstand-balance');
   const back=goBackAssessment(validInversion,now(),bundle);
   assert.equal(nextAssessmentStep(back,bundle).kind,'inversion');
-  console.log('Quick setup passed: atomic native context, no premature evidence/intent, Back retention, changed-choice invalidation, supporting deferral, safe required context and save-failure recovery.');
+  console.log('Quick setup passed: atomic native context, submitted goals/equipment without premature evidence, Back retention, changed-choice invalidation, supporting deferral, safe required context and save-failure recovery.');
 } finally { baseStore.close(); }

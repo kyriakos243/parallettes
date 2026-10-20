@@ -2,7 +2,7 @@ import { trainingQualityCatalogue } from "./trainingQuality";
 import { useEffect, useMemo, useState } from "react";
 import "./combinedProgressionMedia";
 import { evaluateCombinedProgressionPlanMedia } from "./combinedProgressionRelease";
-import { generateTrainingQualitySessionPlan, generateTrainingQualityCustomPlan } from "../planning/feedbackDose";
+import { generateProgressionSessionPlan, generateProgressionCustomPlan } from "../planning/feedbackDose";
 import { isStableId, parseStableId, type VNextShadowStore } from "../index";
 import {
   VNextAccountGate,
@@ -169,7 +169,7 @@ const prepareProductionAthlete = async ({
 const PRODUCTION_DEPLOYMENT: VNextApplicationDeployment = {
   kind: "production",
   catalogue: trainingQualityCatalogue,
-  workoutGenerators: { generateSession: generateTrainingQualitySessionPlan, generateCustomSession: generateTrainingQualityCustomPlan },
+  workoutGenerators: { generateSession: generateProgressionSessionPlan, generateCustomSession: generateProgressionCustomPlan },
   evaluatePlanMedia: evaluateCombinedProgressionPlanMedia,
   productKicker: "Parallette25",
   openingMessage: "Opening your evidence-led training…",

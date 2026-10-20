@@ -8,6 +8,7 @@ import {
 } from "./vnext-session-validation.js";
 
 const SCHEMA_VERSION = 1;
+const MINIMUM_READER_VERSION = 2;
 // Keep the upload side comfortably inside the Workers Free 50-subrequest
 // budget even for validation-heavy migration pages. Delta reads have their
 // own independent item and byte bounds.
@@ -1616,6 +1617,7 @@ const responseFor = async (env, profileId, cursor, limit, acknowledged, conflict
   const serverCursor = Number(head?.change_cursor ?? 0);
   const responseBase = {
     schemaVersion: SCHEMA_VERSION,
+    minimumReaderVersion: MINIMUM_READER_VERSION,
     ...(head?.reset_payload_json ? { resetTombstone: parseJson(head.reset_payload_json, "reset tombstone") } : {}),
     acknowledged,
     conflicts,
@@ -1677,6 +1679,11 @@ export async function handleVNextShadowSync(request, env, origin, account, helpe
   try {
     const body = object(await helpers.readJson(request), "request body");
     if (body.schemaVersion !== SCHEMA_VERSION) problem(400, "vnext-schema-version", "Unsupported shadow-sync schema version.");
+    if (!Number.isSafeInteger(body.readerVersion) || body.readerVersion < MINIMUM_READER_VERSION) {
+      // Check before ensureHead, uploaded facts, reset processing or cursor writes.
+      return helpers.json({ code: "vnext-client-update-required", minimumReaderVersion: MINIMUM_READER_VERSION,
+        error: "Update Parallette25 to resume sync. Your saved training is kept." }, 426, origin);
+    }
     const cursor = nonNegativeInteger(body.cursor, "cursor");
     const limit = nonNegativeInteger(body.limit, "limit");
     if (limit < 1 || limit > MAX_DELTA_ITEMS) problem(400, "vnext-delta-limit", `limit must be 1-${MAX_DELTA_ITEMS}.`);

@@ -56,7 +56,7 @@ const compile = (path, extra = "") => {
   return module.exports;
 };
 const { RestrictionRecoveryForm } = compile("app/vnext/releaseCandidate/RestrictionRecoveryForm.tsx");
-const { RestrictionNotice } = compile("app/vnext/ui/VNextExperience.tsx", "\nexport { RestrictionNotice };\n");
+const { RestrictionNotice, GoalControls } = compile("app/vnext/ui/VNextExperience.tsx", "\nexport { RestrictionNotice, GoalControls };\n");
 const elements = (node) => Array.isArray(node) ? node.flatMap(elements)
   : node && typeof node === "object" ? [node, ...elements(node.props?.children)] : [];
 const text = (node) => Array.isArray(node) ? node.map(text).join("") : node && typeof node === "object"
@@ -282,4 +282,32 @@ await check("root save keeps the form on failure and closes only after the exact
   assert(messages[0].includes("paused"));
 });
 
-console.log(`Symptom recovery UI: ${checks} real handler scenarios passed.`);
+await check("goal editing blocks updates until Save or Cancel, including failure and unmount", async () => {
+  const editing = [];
+  let rejectSave = true;
+  const app = createHost(GoalControls, {
+    presentation: {
+      title: "Your goals", primaryGraphId: "planche", secondaryGraphIds: [],
+      options: [{ graphId: "planche", label: "Planche", selectedPriority: "primary" },
+        { graphId: "l-sit-v-sit", label: "L-Sit / V-Sit", selectedPriority: undefined }],
+    },
+    onGoalEditingChange: value => editing.push(value),
+    onGoalSelectionChange: async () => { if (rejectSave) throw new Error("Save failed"); },
+  });
+  app.click("Edit goals", false);
+  assert.equal(editing.at(-1), true, "Opening blocks updates synchronously, before the next render");
+  app.flush();
+  app.click("Save goals"); await app.drain();
+  assert.equal(editing.at(-1), true, "Failed save leaves the editor protected");
+  assert.match(text(app.tree), /could not be saved/);
+  rejectSave = false;
+  app.click("Save goals"); await app.drain();
+  assert.equal(editing.at(-1), false, "Only a completed save releases the protection");
+  app.click("Edit goals"); app.click("Cancel");
+  assert.equal(editing.at(-1), false);
+  app.click("Edit goals");
+  for (const slot of app.slots) slot?.cleanup?.();
+  assert.equal(editing.at(-1), false, "Unmount does not strand the update lock");
+});
+
+console.log(`Symptom recovery and saved-form UI: ${checks} real handler scenarios passed.`);

@@ -19,6 +19,8 @@ export type ShadowSyncSummary = Readonly<{
 
 const encodedSize = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength;
 const MAX_UPLOAD_ITEMS_PER_REQUEST = 8;
+// Includes linked symptoms and native generator 1–4 recovery readers.
+export const VNEXT_SYNC_READER_VERSION = 2;
 
 const boundedUpload = (
   cursor: number,
@@ -31,6 +33,7 @@ const boundedUpload = (
     const candidate = [...selected, item];
     const request: SyncDeltaRequest = {
       schemaVersion: 1,
+      readerVersion: VNEXT_SYNC_READER_VERSION,
       cursor,
       upload: candidate,
       limit,
@@ -77,11 +80,17 @@ export const syncObservationDeltas = async (
     const upload = boundedUpload(cursor, pending, pageSize, maximumRequestBytes);
     const request: SyncDeltaRequest = {
       schemaVersion: 1,
+      readerVersion: VNEXT_SYNC_READER_VERSION,
       cursor,
       upload,
       limit: pageSize,
     };
     const response = await transport(request);
+    if (response.minimumReaderVersion !== undefined
+      && (!Number.isSafeInteger(response.minimumReaderVersion) || response.minimumReaderVersion > VNEXT_SYNC_READER_VERSION)) {
+      // No local page writes, cursor advance or outbox acknowledgement.
+      throw new Error("shadow-sync-update-required");
+    }
     if (response.schemaVersion !== 1 || !Number.isSafeInteger(response.cursor) || response.cursor < cursor) {
       throw new Error("shadow-sync-invalid-cursor");
     }
@@ -154,6 +163,7 @@ export const createAuthenticatedShadowTransport = (
     headers: { "content-type": "application/json" },
     body: JSON.stringify(request),
   });
+  if (response.status === 426) throw new Error("shadow-sync-update-required");
   if (response.status === 409) {
     const detail = await response.json() as { code?: unknown };
     throw new Error(detail.code === "vnext-cursor-ahead"
