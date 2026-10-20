@@ -1,6 +1,6 @@
-# Four approved improvements — local completion, 2026-10-20
+# Four approved improvements — accepted and released, 2026-10-20
 
-The owner approved these four changes together, focused checks and final QA. No simulator, deployment, production account access or real training-data write was used. The live build remains `062799423b50af791eb1`, verified against main `c92efbad98802de716c31e45523ba7bec72326f5` before implementation. All changes remain local and uncommitted in the canonical corrections checkout.
+The owner approved these four changes together, focused checks and final QA. Implementation used no simulator, deployment, production account access or real training-data writes. Its baseline was live build `062799423b50af791eb1` and main `c92efbad98802de716c31e45523ba7bec72326f5`. The owner subsequently passed both physical device checks and authorised release: build `9d6666cf69bfe5b52ea6` is now live through PR #37 and controlled workflow 39479257029. All saved training/account data is verified preserved; release runbook §32 records the single routine sync-timestamp difference and exact evidence.
 
 ## Delivered behavior
 
@@ -27,13 +27,13 @@ Evidence and logs: `/Users/kyria/Documents/Codex/parallette25-review-evidence/20
 
 No database schema, observation schema, namespace, account identity or existing event/session ID changes. Definitions 1–8, native plans/generator readers 1–4 and existing recovery paths remain. Projection stays at 11. New generator 4 has its own immutable plan identity; old generator 3 entry points are retained.
 
-Reader capability 2 is separate from observation schema/version. A future compatible Worker must be released before the new client. Its sync route rejects missing/older reader capabilities before training-store access; the new client identifies an update requirement and retains its queued data. The currently released Worker tolerates the new request field, so the candidate is compatible with it. No Worker was deployed here.
+Reader capability 2 is separate from observation schema/version. A future compatible Worker must be released before the new client. Its sync route rejects missing/older reader capabilities before training-store access; the new client identifies an update requirement and retains its queued data. The currently released Worker tolerates the new request field, so the candidate is compatible with it. The compatible Worker was subsequently deployed before the accepted client; see release runbook §32.
 
 Already-distributed clients cannot retroactively display these new controls. On the first eventual release, finish/save active work, close the existing production app and tabs, reopen online and confirm the new app version. Keep the installation and its storage. An old client may show a generic sync error until upgraded; it is not globally disabled while offline. Do not strip unknown data, advance an incompatible cursor, or roll back to a reader that cannot understand retained newer facts.
 
-## Minimum remaining physical acceptance
+## Physical acceptance — passed on iPhone and iPad
 
-Desktop browser and synthetic tests cannot certify iOS Home Screen lifecycle or storage eviction. No further training-content tour is needed. On an isolated preview, one short update/reopen journey on each iPhone and iPad should confirm:
+Desktop browser and synthetic tests cannot certify iOS Home Screen lifecycle or storage eviction. No further training-content tour is needed. On an isolated preview, one short update/reopen journey on each iPhone and iPad confirmed:
 
 1. With a synthetic saved workout and selected goals, use the offered update; History still contains the same workout once and the goals remain.
 2. Close/reopen the Home Screen app offline; Today and History load.

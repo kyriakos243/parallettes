@@ -403,7 +403,7 @@ The owner approved five corrections and both checkpoints together. Current proje
 
 Checkpoint evidence and limits are in [the correction report](VNEXT_LONG_TERM_TRAINING_CORRECTIONS.md). Data extension and safe publication order are canonical in Data & Migration §5.16.
 
-### 6.17 Progression, recovery and paused setup — local completion, 2026-10-20
+### 6.17 Progression, recovery and paused setup — released 2026-10-20
 
 The owner approved four further improvements together; the update/data boundary is in Data & Migration §5.17. New mixed generator **4** ranks currently usable unfinished milestones ahead of satisfied parents, retaining stale/contradicted reconfirmation priority, explicit target ancestry and specialist opt-in. If the next step is unavailable, useful established practice can remain the focus. Ranking and composition use the same existing trainability/variant rules; no prerequisite, confirmation or 48-hour high-load threshold is relaxed. Native generator 3 exports remain unchanged and projection stays at 11.
 
