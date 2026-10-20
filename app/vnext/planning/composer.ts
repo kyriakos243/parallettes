@@ -62,6 +62,7 @@ type Candidate = Readonly<{
   graphId: GraphId;
   purpose: SessionPurpose;
   block: SessionBlockKind;
+  allocation?: "secondary";
   reasonCodes: readonly ReasonCode[];
   whySkill: string;
   whyExercise: string;
@@ -651,6 +652,19 @@ const blockSeconds = (
   input: GenerateSessionInput,
   policy: GeneratorPolicy,
 ): readonly SelectedBlock[] => {
+  // A supporting prerequisite keeps its technical/capacity scope for ordering
+  // and validation, but receives the smaller supporting-goal time allocation.
+  if (input.projectionPolicy.longTermAllocation
+    && blocks.some((candidate) => candidate.allocation === "secondary"
+      && candidate.block !== "secondary")) {
+    const allocated = blocks.map((candidate) => candidate.allocation === "secondary"
+      ? { ...candidate, block: "secondary" as const }
+      : candidate);
+    return blockSeconds(allocated, input, policy).map((item, index) => ({
+      ...item,
+      candidate: blocks[index],
+    }));
+  }
   const configured = policy.blockSeconds[input.sessionDemand ?? input.intent.defaultSessionDemand];
   const hasTechnical = blocks.some((candidate) => candidate.block === "technical");
   const hasSecondary = blocks.some((candidate) => candidate.block === "secondary");
@@ -859,9 +873,33 @@ export const composeSession = (
     ]) }
     : milestonePrerequisiteTechnical ?? primaryTechnicalPool[0];
   const primaryCapacity = capacityCandidates(normalizedInput, emphasis.primary, `${seed}:primary-capacity`);
-  const secondaryExact = emphasis.secondary
+  const secondaryExactCandidate = emphasis.secondary
     ? exactFocusCandidate(normalizedInput, emphasis.secondary, "secondary-development", "secondary")
     : undefined;
+  const secondaryExact: Candidate | undefined = normalizedInput.projectionPolicy.longTermAllocation
+    && secondaryExactCandidate
+    && (secondaryExactCandidate.exercise.roles.includes("technique-safety")
+      || secondaryExactCandidate.variant.demand["inversion-technical"] === "moderate"
+      || secondaryExactCandidate.variant.demand["inversion-technical"] === "high")
+    ? { ...secondaryExactCandidate, block: "technical", allocation: "secondary" }
+    : secondaryExactCandidate;
+  const secondaryPrerequisites = normalizedInput.projectionPolicy.longTermAllocation
+    && emphasis.secondary?.kind === "prerequisite-development"
+    ? [
+      ...prerequisiteMilestoneCandidates(normalizedInput, emphasis.secondary, `${seed}:secondary-prerequisite`),
+      ...capacityCandidates(normalizedInput, emphasis.secondary, `${seed}:secondary-capacity`),
+    ].map((candidate): Candidate => ({
+      ...candidate,
+      purpose: "secondary-development",
+      block: candidate.block === "primary" ? "secondary" : candidate.block,
+      allocation: "secondary",
+      reasonCodes: uniqueReasons([
+        planningReasonCodes.selectedSecondary,
+        ...candidate.reasonCodes.filter((reason) => reason !== planningReasonCodes.selectedPrimary),
+      ]),
+    }))
+    : [];
+  const secondaryPool = [...(secondaryExact ? [secondaryExact] : []), ...secondaryPrerequisites];
   const maintenanceExact = emphasis.maintenance[0]
     ? exactFocusCandidate(normalizedInput, emphasis.maintenance[0], "maintenance", "maintenance")
     : undefined;
@@ -893,8 +931,39 @@ export const composeSession = (
   if (main) selected.push({ ...main, block: "primary" });
   const support = takeCandidate([...prerequisiteDevelopmentPool, ...primaryCapacity], selected, policy);
   if (support) selected.push(support);
-  const secondary = secondaryExact && takeCandidate([secondaryExact], selected, policy);
+  const secondary = takeCandidate(secondaryPool, selected, policy);
   if (secondary) selected.push(secondary);
+  if (normalizedInput.projectionPolicy.longTermAllocation && emphasis.secondary && !secondary) {
+    // A primary item can already cover the same exact supporting requirement.
+    // Do not duplicate it, or advertise a supporting focus that has no work.
+    const shared = selected.find((candidate) => secondaryPool.some((supporting) =>
+      supporting.exercise.id === candidate.exercise.id
+        && supporting.variant.id === candidate.variant.id));
+    if (shared) {
+      const index = selected.indexOf(shared);
+      const supportingLabel = normalizedInput.bundle.graphs.find((graph) => graph.id === emphasis.secondary?.graphId)?.label
+        ?? emphasis.secondary.graphId.replaceAll("-", " ");
+      selected[index] = {
+        ...shared,
+        whySkill: `${shared.whySkill} This also supports ${supportingLabel}.`,
+        reasonCodes: uniqueReasons([...shared.reasonCodes, planningReasonCodes.selectedSecondary]),
+      };
+    } else {
+      const { secondary: deferredSecondary, ...remainingEmphasis } = emphasis;
+      emphasis = {
+        ...remainingEmphasis,
+        deferredGraphIds: [...new Set([...emphasis.deferredGraphIds, deferredSecondary.graphId])].sort(),
+        reasonCodes: emphasis.reasonCodes.filter((reason) => reason !== planningReasonCodes.compatibleSecondary),
+      };
+      coverageGaps.push({
+        graphId: deferredSecondary.graphId,
+        ...(deferredSecondary.targetMilestone ? { targetMilestone: deferredSecondary.targetMilestone } : {}),
+        kind: "missing-safe-prescription",
+        reasonCodes: [planningReasonCodes.noSafeRelevantCandidate],
+        message: "The supporting goal is deferred because no compatible safe prerequisite or skill dose fits this session.",
+      });
+    }
+  }
   const maintenance = maintenanceExact && takeCandidate([maintenanceExact], selected, policy);
   if (maintenance) selected.push(maintenance);
   if (!secondary && !maintenance) {
@@ -915,7 +984,18 @@ export const composeSession = (
       maintenance: 6,
       recovery: 7,
     };
-    return order[left.block] - order[right.block]
+    // An inversion capacity retains its capacity scope but follows safety
+    // rehearsal and precedes strength, even when it belongs to another goal.
+    const position = (candidate: Candidate): number =>
+      normalizedInput.projectionPolicy.longTermAllocation
+        && candidate.allocation === "secondary"
+        && candidate.block !== "technical"
+        && (candidate.exercise.roles.includes("technique-safety")
+          || candidate.variant.demand["inversion-technical"] === "moderate"
+          || candidate.variant.demand["inversion-technical"] === "high")
+        ? 1.5
+        : order[candidate.block];
+    return position(left) - position(right)
       || left.exercise.id.localeCompare(right.exercise.id);
   });
   const selectedBlocks = blockSeconds(ordered, normalizedInput, policy);

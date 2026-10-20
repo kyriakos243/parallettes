@@ -400,6 +400,14 @@ export const planEmphasis = (
     .map((candidate) => candidate.focus.graphId)
     .sort();
 
+  const lastMaintenanceExposure = (focus: EmphasisFocus): number => {
+    if (!input.projectionPolicy.longTermAllocation || !focus.targetMilestone) return 0;
+    const key = projectionMilestoneKey(focus.targetMilestone);
+    const exposure = input.state.maintenanceExposures?.find((item) => projectionMilestoneKey(item.milestone) === key);
+    // Unmaintained skills come first. These dated completed exposures allocate
+    // practice only; they never refresh benchmark confidence or unlock work.
+    return exposure ? Date.parse(exposure.occurredAt) : Number.NEGATIVE_INFINITY;
+  };
   const maintenance = input.state.maintenanceNeeds
     .filter((item) => item.milestone.graphId !== primary.focus.graphId
       && item.milestone.graphId !== secondary?.focus.graphId)
@@ -427,6 +435,8 @@ export const planEmphasis = (
     .filter((item) => focusCompatible(primary, item, policy)
       && (!secondary || focusCompatible(secondary, item, policy)))
     .sort((left, right) => Number(left.recentlyExposed) - Number(right.recentlyExposed)
+      || (lastMaintenanceExposure(left.focus) < lastMaintenanceExposure(right.focus) ? -1
+        : lastMaintenanceExposure(left.focus) > lastMaintenanceExposure(right.focus) ? 1 : 0)
       || left.focus.graphId.localeCompare(right.focus.graphId))
     .slice(0, 1)
     .map((item) => item.focus);

@@ -19,6 +19,7 @@ import {
 } from "../validation";
 import { assertAssessmentDraft, type AssessmentDraft } from "../assessment/contracts";
 import { canonicalJson, sha256 } from "./canonical";
+import { symptomSourceError } from "../symptomSource";
 import { verifyLegacyMigrationSnapshot } from "./legacyMigration";
 import {
   LEGACY_V12_CONVERTER_VERSION,
@@ -433,7 +434,8 @@ const eventDependencyId = (event: AthleteEvidenceEvent): AthleteEvidenceEvent["i
   ? event.supersedesEventId
   : event.type === "restriction_cleared"
     ? event.restrictionEventId
-    : undefined;
+    : event.type === "restriction_reported" && event.symptomSource?.kind === "evidence-event"
+      ? event.symptomSource.eventId : undefined;
 
 const isSuppressedEvent = (event: AthleteEvidenceEvent, resetAt?: IsoTimestamp): boolean => resetAt !== undefined
   && compareTime(event.occurredAt, resetAt) <= 0;
@@ -441,19 +443,36 @@ const isSuppressedEvent = (event: AthleteEvidenceEvent, resetAt?: IsoTimestamp):
 const isSuppressedRecord = (record: SessionRecord, resetAt?: IsoTimestamp): boolean => resetAt !== undefined
   && compareTime(record.completedAt, resetAt) <= 0;
 
-const filterLinkedEvents = (events: readonly AthleteEvidenceEvent[]): AthleteEvidenceEvent[] => {
+const assertSymptomReference = async (
+  transaction: IDBTransaction,
+  event: AthleteEvidenceEvent,
+  resetAt?: IsoTimestamp,
+  incomingEvents: readonly AthleteEvidenceEvent[] = [],
+  incomingRecords: readonly SessionRecord[] = [],
+): Promise<void> => {
+  if (event.type !== "restriction_reported" || !event.symptomSource) return;
+  const ref = event.symptomSource;
+  const source = ref.kind === "evidence-event" ? incomingEvents.find((item) => item.id === ref.eventId)
+    : incomingRecords.find((item) => item.id === ref.sessionRecordId);
+  const stored = source ? undefined : await requestResult(transaction.objectStore(
+    ref.kind === "evidence-event" ? STORES.events : STORES.records,
+  ).get(entityKey(event.athleteId, ref.kind === "evidence-event" ? ref.eventId : ref.sessionRecordId))) as
+    StoredEntity<AthleteEvidenceEvent | SessionRecord> | undefined;
+  if (symptomSourceError(event, source ?? stored?.payload, resetAt)) throw conflict("evidence-event", event.id, "invalid-reference");
+};
+
+const filterLinkedEvents = (events: readonly AthleteEvidenceEvent[], records?: readonly SessionRecord[]): AthleteEvidenceEvent[] => {
   let retained = [...events];
   let changed = true;
   while (changed) {
     changed = false;
     const ids = new Set(retained.map((event) => event.id));
     const next = retained.filter((event) => {
-      const target = event.type === "evidence_corrected"
-        ? event.supersedesEventId
-        : event.type === "restriction_cleared"
-          ? event.restrictionEventId
-          : undefined;
-      return target === undefined || ids.has(target);
+      const target = eventDependencyId(event);
+      if (target !== undefined && !ids.has(target)) return false;
+      const ref = event.type === "restriction_reported" ? event.symptomSource : undefined;
+      return records === undefined || ref?.kind !== "session-item"
+        || records.some((record) => record.id === ref.sessionRecordId);
     });
     if (next.length !== retained.length) changed = true;
     retained = next;
@@ -502,12 +521,13 @@ const activeRecordsWithDependencies = (
   rows: readonly StoredEntity<SessionRecord>[],
   activeClaims: ReadonlySet<string>,
   resetAt?: IsoTimestamp,
+  requiredRecordIds: ReadonlySet<string> = new Set(),
 ): SessionRecord[] => {
   const available = new Map(rows
     .filter((row) => !isSuppressedRecord(row.payload, resetAt))
     .map((row) => [row.id, row] as const));
   const retained = new Map([...available.values()]
-    .filter((row) => isActiveImmutableRow("session-record", row, activeClaims))
+    .filter((row) => isActiveImmutableRow("session-record", row, activeClaims) || requiredRecordIds.has(row.id))
     .map((row) => [row.id, row] as const));
   const pending = [...retained.values()];
   while (pending.length) {
@@ -661,6 +681,9 @@ const pendingDependencyKeys = (
     const event = item.payload as AthleteEvidenceEvent;
     const targetId = eventDependencyId(event);
     if (targetId) candidates.push(`evidence-event:${targetId}`);
+    if (event.type === "restriction_reported" && event.symptomSource?.kind === "session-item") {
+      candidates.push(`session-record:${event.symptomSource.sessionRecordId}`);
+    }
   }
   if (item.kind === "session-record") {
     const record = item.payload as SessionRecord;
@@ -840,19 +863,19 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
 
   async #purgeAtReset(transaction: IDBTransaction, athleteId: AthleteId, resetAt: IsoTimestamp): Promise<void> {
     const events = await allForAthlete<StoredEntity<AthleteEvidenceEvent>>(transaction, STORES.events, athleteId);
+    const records = await allForAthlete<StoredEntity<SessionRecord>>(transaction, STORES.records, athleteId);
+    const retainedRecords = filterLinkedRecords(records
+      .map((row) => row.payload)
+      .filter((record) => !isSuppressedRecord(record, resetAt)));
     const retainedEventIds = new Set<string>(filterLinkedEvents(events
       .map((row) => row.payload)
-      .filter((event) => !isSuppressedEvent(event, resetAt)))
+      .filter((event) => !isSuppressedEvent(event, resetAt)), retainedRecords)
       .map((event) => event.id));
     for (const row of events) {
       if (retainedEventIds.has(row.id)) continue;
       await requestResult(transaction.objectStore(STORES.events).delete(entityKey(athleteId, row.id)));
       await requestResult(transaction.objectStore(STORES.outbox).delete(outboxKey(athleteId, "evidence-event", row.id)));
     }
-    const records = await allForAthlete<StoredEntity<SessionRecord>>(transaction, STORES.records, athleteId);
-    const retainedRecords = filterLinkedRecords(records
-      .map((row) => row.payload)
-      .filter((record) => !isSuppressedRecord(record, resetAt)));
     const retainedRecordIds = new Set<string>(retainedRecords.map((record) => record.id));
     for (const row of records) {
       if (retainedRecordIds.has(row.id)) continue;
@@ -972,6 +995,7 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
           throw conflict("evidence-event", event.id, "invalid-reference");
         }
       }
+      await assertSymptomReference(transaction, event, reset?.payload.resetAt);
       const result = await this.#insertImmutable(transaction, STORES.events, event, hash, migrationRunId, true);
       if (result.status === "inserted") await invalidateCache(transaction, event.athleteId);
       await transactionDone(transaction);
@@ -1066,7 +1090,9 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
     const resetAt = resetRow?.payload.resetAt;
     const activeClaims = activeMigrationClaims(runRows);
     const evidenceEvents = sortById(activeEventsWithDependencies(eventRows, activeClaims, resetAt));
-    const sessionRecords = sortById(activeRecordsWithDependencies(recordRows, activeClaims, resetAt));
+    const requiredRecordIds = new Set(evidenceEvents.flatMap((event) =>
+      event.type === "restriction_reported" && event.symptomSource?.kind === "session-item" ? [event.symptomSource.sessionRecordId] : []));
+    const sessionRecords = sortById(activeRecordsWithDependencies(recordRows, activeClaims, resetAt, requiredRecordIds));
     const planIds = new Set(sessionRecords.map((record) => record.planId));
     const sessionPlans = sortById(storedPayloads(planRows).filter((plan) => planIds.has(plan.id)));
     const sourceFingerprint = await sha256({
@@ -1185,6 +1211,13 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
   async #removeRunGenerated(transaction: IDBTransaction, run: MigrationRun): Promise<void> {
     const runRows = await allForAthlete<StoredEntity<MigrationRun>>(transaction, STORES.runs, run.athleteId);
     const activeClaims = activeMigrationClaims(runRows, run.id);
+    const eventRows = await allForAthlete<StoredEntity<AthleteEvidenceEvent>>(transaction, STORES.events, run.athleteId);
+    const protectedEvents = activeEventsWithDependencies(eventRows, activeClaims);
+    const requiredRecords = new Set(protectedEvents.flatMap((event) =>
+      event.type === "restriction_reported" && event.symptomSource?.kind === "session-item"
+        ? [event.symptomSource.sessionRecordId] : []));
+    const recordRows = await allForAthlete<StoredEntity<SessionRecord>>(transaction, STORES.records, run.athleteId);
+    const protectedRecords = activeRecordsWithDependencies(recordRows, activeClaims, undefined, requiredRecords);
     const mayQuarantine = (ref: MigrationRun["generatedEntities"][number], entity: StoredEntity<unknown> | undefined): boolean =>
       entity?.migrationRunId !== undefined && !activeClaims.has(migrationClaimKey(ref.kind, ref.id));
     const nonPlans = run.generatedEntities.filter((ref) => ref.kind !== "session-plan");
@@ -1199,13 +1232,13 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
       // Converter payloads are retained as a local quarantine: a later sync
       // cursor may deliver a new active owner without replaying the older fact.
       if (!mayQuarantine(ref, entity)) continue;
+      if (ref.kind === "evidence-event" && protectedEvents.some((event) => event.id === ref.id)) continue;
+      if (ref.kind === "session-record" && protectedRecords.some((record) => record.id === ref.id)) continue;
       await requestResult(transaction.objectStore(STORES.outbox).delete(outboxKey(run.athleteId, ref.kind, ref.id)));
     }
-    const remainingRecords = (await allForAthlete<StoredEntity<SessionRecord>>(transaction, STORES.records, run.athleteId))
-      .filter((row) => isActiveImmutableRow("session-record", row, activeClaims));
     for (const ref of plans) {
       // Keep the immutable reference if a later non-migration correction still uses it.
-      if (remainingRecords.some((record) => record.payload.planId === ref.id)) continue;
+      if (protectedRecords.some((record) => record.planId === ref.id)) continue;
       const entity = await requestResult(transaction.objectStore(STORES.plans).get(
         entityKey(run.athleteId, ref.id),
       )) as StoredEntity<SessionPlan> | undefined;
@@ -1262,6 +1295,14 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
     for (const event of conversion.evidenceEvents) {
       assertValid("Evidence Event", validateAthleteEvidenceEvent(event));
       sameAthlete(athleteId, event.athleteId, event.id);
+      if (event.type === "restriction_reported" && event.symptomSource) {
+        const ref = event.symptomSource;
+        const source = ref.kind === "evidence-event" ? conversion.evidenceEvents.find((item) => item.id === ref.eventId)
+          : conversion.sessionRecords.find((item) => item.id === ref.sessionRecordId);
+        if (symptomSourceError(event, source, conversion.resetTombstone?.resetAt)) {
+          throw conflict("evidence-event", event.id, "invalid-reference");
+        }
+      }
     }
     const expectedRefs = new Set([
       ...conversion.evidenceEvents.map((event) => `evidence-event:${event.id}`),
@@ -1413,9 +1454,11 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
     await transactionDone(transaction);
     const resetAt = reset?.payload.resetAt;
     const activeClaims = activeMigrationClaims(runs);
-    const exportedRecords = sortById(activeRecordsWithDependencies(records, activeClaims, resetAt));
-    const planIds = new Set<string>(exportedRecords.map((record) => record.planId));
     const exportedEvents = sortById(activeEventsWithDependencies(events, activeClaims, resetAt));
+    const requiredRecordIds = new Set(exportedEvents.flatMap((event) =>
+      event.type === "restriction_reported" && event.symptomSource?.kind === "session-item" ? [event.symptomSource.sessionRecordId] : []));
+    const exportedRecords = sortById(activeRecordsWithDependencies(records, activeClaims, resetAt, requiredRecordIds));
+    const planIds = new Set<string>(exportedRecords.map((record) => record.planId));
     const exportedPlans = sortById(storedPayloads(plans).filter((plan) => planIds.has(plan.id)));
     const exportedEventIds = new Set<string>(exportedEvents.map((event) => event.id));
     const exportedRecordIds = new Set<string>(exportedRecords.map((record) => record.id));
@@ -1647,6 +1690,7 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
       };
       for (const event of bundle.evidenceEvents) {
         if (isSuppressedEvent(event, reset?.payload.resetAt)) continue;
+        await assertSymptomReference(transaction, event, reset?.payload.resetAt, bundle.evidenceEvents, bundle.sessionRecords);
         const targetId = eventDependencyId(event);
         if (targetId && !await targetExists("evidence-event", targetId)) {
           throw conflict("evidence-event", event.id, "invalid-reference");
@@ -1855,6 +1899,7 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
         .map((change) => [(change.payload as SessionRecord).id, change.payload as SessionRecord] as const));
       for (const event of incomingEvents.values()) {
         if (isSuppressedEvent(event, reset?.payload.resetAt)) continue;
+        await assertSymptomReference(transaction, event, reset?.payload.resetAt, [...incomingEvents.values()], [...incomingRecords.values()]);
         const targetId = eventDependencyId(event);
         if (!targetId) continue;
         const incomingTarget = incomingEvents.get(targetId);

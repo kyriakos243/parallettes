@@ -1,5 +1,6 @@
 import type { BenchmarkProtocol, DefinitionBundle, DemandDomain, DerivedAthleteState, EquipmentId } from "../contracts";
 import { restrictionExposureDomains, type ProjectionPolicy } from "../projection";
+import { missingCurrentSafetyPrerequisites } from "../projection/safetyPrerequisites";
 
 /** Current physical safety for an exact check, independent of placement entry rules. */
 export const currentCheckSafetyBlockers = (input: Readonly<{
@@ -16,6 +17,10 @@ export const currentCheckSafetyBlockers = (input: Readonly<{
   if (!exercise || !variant) return ["missing-prescription"];
   const request = { exerciseId: exercise.id, exerciseDefinitionVersion: exercise.definitionVersion, prescriptionVariantId: variant.id };
   const blockers: string[] = [];
+  if (policy.requireCurrentSafetyPrerequisites && protocol.subject.kind === "milestone"
+    && missingCurrentSafetyPrerequisites({ milestone: protocol.subject.milestone, bundle, state }).length) {
+    blockers.push("safety-prerequisite-not-current");
+  }
   const additionalEquipment = (policy.additionalEquipmentRules ?? []).filter((rule) =>
     rule.exerciseId === request.exerciseId && rule.exerciseDefinitionVersion === request.exerciseDefinitionVersion
       && rule.prescriptionVariantIds.includes(request.prescriptionVariantId)).flatMap((rule) => rule.equipment);

@@ -14,6 +14,7 @@ import {
   type IsoTimestamp,
   type ObservationMeasurement,
   type ObservationSessionId,
+  type ObservationSourceRef,
   type PrerequisiteRef,
   type RestrictionClearedEvent,
   type RestrictionReportedEvent,
@@ -620,6 +621,7 @@ export const createRestrictionReport = (input: Readonly<{
   demandDomains: readonly DemandDomain[];
   bodyRegions: readonly string[];
   notes?: string;
+  symptomSource?: ObservationSourceRef;
 }>): RestrictionReportedEvent => {
   const event: RestrictionReportedEvent = {
     schemaVersion: DOMAIN_SCHEMA_VERSION,
@@ -634,6 +636,7 @@ export const createRestrictionReport = (input: Readonly<{
     demandDomains: [...new Set(input.demandDomains)].sort(),
     bodyRegions: [...new Set(input.bodyRegions)].sort(),
     ...(input.notes ? { notes: input.notes } : {}),
+    ...(input.symptomSource ? { symptomSource: input.symptomSource } : {}),
   };
   const result = validateAthleteEvidenceEvent(event);
   if (!result.valid) throw new TypeError(`Invalid restriction report: ${result.issues.map((issue) => issue.message).join("; ")}`);

@@ -53,16 +53,29 @@ const policyModule = loadTypeScriptModule("app/vnext/projection/policy.ts", {
   "../definitions/benchmarks": benchmarks,
   "../definitions/ids": ids,
 });
+const symptomSource = loadTypeScriptModule("app/vnext/symptomSource.ts");
 const normalize = loadTypeScriptModule("app/vnext/projection/normalize.ts", {
   "./policy": policyModule,
+  "../symptomSource": symptomSource,
 });
 const restrictionExposure = loadTypeScriptModule("app/vnext/projection/restrictionExposure.ts");
+const safetyPrerequisites = loadTypeScriptModule("app/vnext/projection/safetyPrerequisites.ts");
+const workoutTiming = loadTypeScriptModule("app/vnext/workoutTiming.ts");
+const maintenanceExposure = loadTypeScriptModule("app/vnext/projection/maintenanceExposure.ts", {
+  "./contracts": projectionContracts, "../workoutTiming": workoutTiming,
+});
+const persistentDifficulty = loadTypeScriptModule("app/vnext/projection/persistentDifficulty.ts", {
+  "../workoutTiming": workoutTiming, "./policy": policyModule,
+});
 const projection = loadTypeScriptModule("app/vnext/projection/project.ts", {
   "../contracts": contracts,
   "./contracts": projectionContracts,
   "./normalize": normalize,
   "./policy": policyModule,
   "./restrictionExposure": restrictionExposure,
+  "./safetyPrerequisites": safetyPrerequisites,
+  "./maintenanceExposure": maintenanceExposure,
+  "./persistentDifficulty": persistentDifficulty,
 });
 
 const bundle = {

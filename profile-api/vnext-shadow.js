@@ -4,6 +4,7 @@ import {
   validateShadowSessionPair,
   validateShadowSessionPlan,
   validateShadowSessionRecord,
+  validateShadowSymptomSource,
 } from "./vnext-session-validation.js";
 
 const SCHEMA_VERSION = 1;
@@ -289,7 +290,8 @@ const validatePayload = (kind, itemId, payload, profileId) => {
       ? stableId(payload.supersedesEventId, "superseded Evidence Event ID")
       : payload.type === "restriction_cleared"
         ? stableId(payload.restrictionEventId, "cleared restriction Evidence Event ID")
-        : null;
+        : payload.type === "restriction_reported" && payload.symptomSource?.kind === "evidence-event"
+          ? stableId(payload.symptomSource.eventId, "symptom Evidence Event ID") : null;
     if (targetEventId === itemId) problem(400, "vnext-invalid-reference", "Evidence Event cannot target itself.");
     return { fact: occurred, recorded, event: {
       type: payload.type, source: payload.source, catalogueVersion: payload.catalogueVersion, targetEventId,
@@ -557,6 +559,20 @@ const storedPlansById = async (env, profileId, ids) => {
     WHERE plans.profile_id = ? AND plans.plan_id IN (${placeholders})`)
     .bind(profileId, ...ids));
   return new Map(found.map((row) => [String(row.plan_id), parseJson(row.payload_json, "stored Session Plan")]));
+};
+
+const storedSymptomSources = async (env, profileId, refs) => {
+  const found = new Map();
+  for (const kind of ["evidence-event", "session-record"]) {
+    const ids = [...new Set(refs.filter((ref) => (ref.kind === "evidence-event" ? "evidence-event" : "session-record") === kind)
+      .map((ref) => kind === "evidence-event" ? ref.eventId : ref.sessionRecordId))];
+    if (!ids.length) continue;
+    const selected = await rows(env.DB.prepare(`SELECT entity_id, payload_json FROM vnext_shadow_changes
+      WHERE profile_id = ? AND entity_kind = ? AND entity_id IN (${ids.map(() => "?").join(", ")})`)
+      .bind(profileId, kind, ...ids));
+    for (const row of selected) found.set(`${kind}:${row.entity_id}`, parseJson(row.payload_json, "symptom source"));
+  }
+  return found;
 };
 
 const storedRecordRowsForPlans = async (env, profileId, planIds, resetMilliseconds) => {
@@ -857,6 +873,19 @@ const planRequest = async (env, profileId, incoming, head) => {
   for (const row of immutableRows.filter((candidate) => candidate.kind === "evidence-event" && usable(candidate.kind, candidate.id))) {
     const target = row.metadata.event.targetEventId;
     if (target && !incomingEventIds.has(target) && !storedEventIds.has(target)) conflicts.push(conflict(row, "invalid-reference"));
+  }
+  const clarifications = immutableRows.filter((row) => row.kind === "evidence-event" && usable(row.kind, row.id)
+    && row.payload.type === "restriction_reported" && row.payload.symptomSource);
+  const symptomSources = new Map(immutableRows.filter((row) => usable(row.kind, row.id))
+    .map((row) => [`${row.kind}:${row.id}`, row.payload]));
+  const symptomKey = (ref) => `${ref.kind === "evidence-event" ? "evidence-event" : "session-record"}:${ref.kind === "evidence-event" ? ref.eventId : ref.sessionRecordId}`;
+  const storedSymptoms = await storedSymptomSources(env, profileId, clarifications.map((row) => row.payload.symptomSource)
+    .filter((ref) => !symptomSources.has(symptomKey(ref))));
+  for (const row of clarifications) {
+    const key = symptomKey(row.payload.symptomSource);
+    const error = validateShadowSymptomSource(row.payload, symptomSources.get(key) ?? storedSymptoms.get(key),
+      resetMilliseconds === null ? undefined : new Date(resetMilliseconds).toISOString());
+    if (error) conflicts.push(conflict(row, "invalid-reference"));
   }
 
   const incomingRecordIds = new Set(immutableRows.filter((row) => row.kind === "session-record" && usable(row.kind, row.id)).map((row) => row.id));
@@ -1186,6 +1215,15 @@ const persistReset = async (env, profileId, row) => {
       SELECT event_id FROM vnext_shadow_evidence_events
       WHERE profile_id = ? AND occurred_at_ms <= ?
       UNION
+      SELECT event.event_id FROM vnext_shadow_evidence_events AS event
+      INNER JOIN vnext_shadow_changes AS change ON change.sequence = event.change_sequence
+      LEFT JOIN vnext_shadow_session_records AS source
+        ON source.profile_id = event.profile_id
+        AND source.record_id = json_extract(change.payload_json, '$.symptomSource.sessionRecordId')
+      WHERE event.profile_id = ?
+        AND json_extract(change.payload_json, '$.symptomSource.kind') = 'session-item'
+        AND source.record_id IS NULL
+      UNION
       SELECT child.event_id FROM vnext_shadow_evidence_events AS child
       INNER JOIN invalid_events AS parent ON child.target_event_id = parent.event_id
       WHERE child.profile_id = ?
@@ -1195,7 +1233,7 @@ const persistReset = async (env, profileId, row) => {
         AND entity_id IN (SELECT event_id FROM invalid_events) AND EXISTS (
           SELECT 1 FROM vnext_shadow_sync_heads
           WHERE profile_id = ? AND reset_tombstone_hash = ?
-        )`).bind(profileId, resetMilliseconds, profileId, profileId, profileId, row.hash),
+        )`).bind(profileId, resetMilliseconds, profileId, profileId, profileId, profileId, row.hash),
     // Plans contain intended facts only. Retaining an orphan permits a later
     // sync page to attach its post-reset Session Record deterministically.
     env.DB.prepare(`DELETE FROM vnext_shadow_projection_caches
@@ -1226,20 +1264,6 @@ const applyRollback = async (env, profileId, row) => {
         json_each(owner.generated_entities_json) AS ref
       WHERE owner.profile_id = ? AND owner.run_id <> ? AND owner.status = 'active'
     ),
-    protected_records(record_id, supersedes_record_id) AS (
-      SELECT record.record_id, record.supersedes_record_id
-      FROM vnext_shadow_session_records AS record
-      WHERE record.profile_id = ? AND (
-        record.migration_run_id IS NULL OR EXISTS (
-          SELECT 1 FROM live_run_refs WHERE kind = 'session-record' AND id = record.record_id
-        )
-      )
-      UNION
-      SELECT target.record_id, target.supersedes_record_id
-      FROM vnext_shadow_session_records AS target
-      INNER JOIN protected_records AS child ON child.supersedes_record_id = target.record_id
-      WHERE target.profile_id = ?
-    ),
     protected_events(event_id, target_event_id) AS (
       SELECT event.event_id, event.target_event_id
       FROM vnext_shadow_evidence_events AS event
@@ -1252,6 +1276,27 @@ const applyRollback = async (env, profileId, row) => {
       SELECT target.event_id, target.target_event_id
       FROM vnext_shadow_evidence_events AS target
       INNER JOIN protected_events AS child ON child.target_event_id = target.event_id
+      WHERE target.profile_id = ?
+    ),
+    protected_records(record_id, supersedes_record_id) AS (
+      SELECT record.record_id, record.supersedes_record_id
+      FROM vnext_shadow_session_records AS record
+      WHERE record.profile_id = ? AND (
+        record.migration_run_id IS NULL OR EXISTS (
+          SELECT 1 FROM protected_events AS event
+          INNER JOIN vnext_shadow_evidence_events AS stored ON stored.event_id = event.event_id
+            AND stored.profile_id = record.profile_id
+          INNER JOIN vnext_shadow_changes AS change ON change.sequence = stored.change_sequence
+          WHERE json_extract(change.payload_json, '$.symptomSource.kind') = 'session-item'
+            AND json_extract(change.payload_json, '$.symptomSource.sessionRecordId') = record.record_id
+        ) OR EXISTS (
+          SELECT 1 FROM live_run_refs WHERE kind = 'session-record' AND id = record.record_id
+        )
+      )
+      UNION
+      SELECT target.record_id, target.supersedes_record_id
+      FROM vnext_shadow_session_records AS target
+      INNER JOIN protected_records AS child ON child.supersedes_record_id = target.record_id
       WHERE target.profile_id = ?
     ),
     protected_plans(plan_id) AS (
@@ -1333,12 +1378,35 @@ const clearNativeDependencyRevocations = async (env, profileId, rowsToCheck) => 
 
   const nativeRecordIds = rowsToCheck.filter((row) => row.kind === "session-record"
     && !row.migrationRunId).map((row) => row.id);
-  if (nativeRecordIds.length) {
+  const symptomRecordIds = rowsToCheck.filter((row) => row.kind === "evidence-event"
+    && !row.migrationRunId && row.payload.type === "restriction_reported"
+    && row.payload.symptomSource?.kind === "session-item")
+    .map((row) => row.payload.symptomSource.sessionRecordId);
+  if (nativeEventIds.length) {
+    const linkedRecords = await rows(env.DB.prepare(`WITH RECURSIVE required_events(event_id, target_event_id) AS (
+      SELECT event_id, target_event_id FROM vnext_shadow_evidence_events
+      WHERE profile_id = ? AND migration_run_id IS NULL AND event_id IN (SELECT value FROM json_each(?))
+      UNION
+      SELECT target.event_id, target.target_event_id FROM vnext_shadow_evidence_events AS target
+      INNER JOIN required_events AS child ON child.target_event_id = target.event_id
+      WHERE target.profile_id = ?
+    )
+      SELECT DISTINCT json_extract(change.payload_json, '$.symptomSource.sessionRecordId') AS record_id
+      FROM required_events AS required
+      INNER JOIN vnext_shadow_evidence_events AS event ON event.profile_id = ? AND event.event_id = required.event_id
+      INNER JOIN vnext_shadow_changes AS change ON change.sequence = event.change_sequence
+      WHERE json_extract(change.payload_json, '$.symptomSource.kind') = 'session-item'`)
+      .bind(profileId, canonicalJson(nativeEventIds), profileId, profileId));
+    symptomRecordIds.push(...linkedRecords.map((row) => String(row.record_id)));
+  }
+  if (nativeRecordIds.length || symptomRecordIds.length) {
     await env.DB.prepare(`WITH RECURSIVE
       seed_records(record_id, supersedes_record_id, plan_id) AS (
         SELECT record_id, supersedes_record_id, plan_id FROM vnext_shadow_session_records
-        WHERE profile_id = ? AND migration_run_id IS NULL
-          AND record_id IN (SELECT value FROM json_each(?))
+        WHERE profile_id = ? AND (
+          (migration_run_id IS NULL AND record_id IN (SELECT value FROM json_each(?)))
+          OR record_id IN (SELECT value FROM json_each(?))
+        )
       ),
       dependencies(record_id, supersedes_record_id, plan_id) AS (
         SELECT target.record_id, target.supersedes_record_id, target.plan_id
@@ -1356,11 +1424,13 @@ const clearNativeDependencyRevocations = async (env, profileId, rowsToCheck) => 
       )
       DELETE FROM vnext_shadow_rolled_back_entities
       WHERE profile_id = ? AND (
-        (entity_kind = 'session-record' AND entity_id IN (SELECT record_id FROM dependencies))
+        (entity_kind = 'session-record' AND entity_id IN (
+          SELECT record_id FROM seed_records UNION SELECT record_id FROM dependencies
+        ))
         OR (entity_kind = 'session-plan' AND entity_id IN (SELECT plan_id FROM required_plans))
-      )`).bind(profileId, canonicalJson(nativeRecordIds), profileId, profileId, profileId).run();
+      )`).bind(profileId, canonicalJson(nativeRecordIds), canonicalJson(symptomRecordIds), profileId, profileId, profileId).run();
   }
-  if (nativeEventIds.length || nativeRecordIds.length) {
+  if (nativeEventIds.length || nativeRecordIds.length || symptomRecordIds.length) {
     await env.DB.prepare("DELETE FROM vnext_shadow_projection_caches WHERE profile_id = ?")
       .bind(profileId).run();
   }
@@ -1573,8 +1643,19 @@ const persistPlan = async (env, profileId, plan) => {
   for (const activeRun of activeRunRequests) await activateMigrationOwnership(env, profileId, activeRun);
   await insertRows(env, profileId, inserted.filter((row) => row.kind === "athlete-intent"), intentStatement);
   await insertRows(env, profileId, inserted.filter((row) => row.kind === "session-plan"), planStatement);
-  await insertRows(env, profileId, inserted.filter((row) => row.kind === "evidence-event"), eventStatement);
+  // Linked restriction reports may depend on an exact Session Record item.
+  // Publish the source first so even a one-item delta page has its dependency.
   await insertRows(env, profileId, inserted.filter((row) => row.kind === "session-record"), recordStatement);
+  const pendingEvents = inserted.filter((row) => row.kind === "evidence-event");
+  const orderedEvents = [];
+  while (pendingEvents.length) {
+    const pendingIds = new Set(pendingEvents.map((row) => row.id));
+    const next = pendingEvents.findIndex((row) => !pendingIds.has(row.metadata.event.targetEventId));
+    // Existing malformed correction cycles remain subject to the reader's
+    // validation. A valid symptom -> report -> clearance chain is acyclic.
+    orderedEvents.push(pendingEvents.splice(next < 0 ? 0 : next, 1)[0]);
+  }
+  await insertRows(env, profileId, orderedEvents, eventStatement);
   const rollbacks = inserted.filter((row) => row.kind === "migration-run" &&
     row.metadata.migration.status === "rolled-back");
   await insertRows(env, profileId, rollbacks, migrationStatement);

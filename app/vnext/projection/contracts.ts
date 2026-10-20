@@ -107,6 +107,14 @@ export type ProjectionPolicy = Readonly<{
   restrictionExposureRules?: readonly RestrictionExposureRule[];
   /** Exact current-guide apparatus corrections; native definitions remain unchanged. */
   additionalEquipmentRules?: readonly AdditionalEquipmentRule[];
+  /** Current safety exits remain mandatory even for historically achieved work. */
+  requireCurrentSafetyPrerequisites?: boolean;
+  /** Resolve supporting foundations and allocate maintenance from actual exposure. */
+  longTermAllocation?: boolean;
+  /** Retain repeated difficulty independently of the acute recovery window. */
+  persistentDifficulty?: boolean;
+  /** Current scoped symptom interpretation; historical policy replay is unchanged. */
+  scopedSymptomRecovery?: boolean;
 }>;
 
 export type AdditionalEquipmentRule = Readonly<{

@@ -83,7 +83,7 @@ export type VNextExperienceProps = Readonly<{
   onEndRecoveredWorkout?: () => void;
   onWorkoutReviewSubmitted?: (feedback: readonly VNextWorkoutReviewFeedback[]) => void;
   onWorkoutRestrictionRequested?: () => void;
-  onRestrictionRequested?: () => void;
+  onRestrictionRequested?: (sourceKey?: string) => void;
 }>;
 
 const demandOptions = [
@@ -142,7 +142,7 @@ const RestrictionNotice = ({
   onRestrictionRequested,
 }: Readonly<{
   presentation: RestrictionPresentation;
-  onRestrictionRequested?: () => void;
+  onRestrictionRequested?: (sourceKey?: string) => void;
 }>) => {
   const titleId = useId();
   return presentation.hasActiveRestrictions ? (
@@ -154,10 +154,14 @@ const RestrictionNotice = ({
         <p><strong>{item.title}</strong></p>
         <p className="vnext-trust-note">{item.achievementMessage}</p>
         <p>{item.trainingMessage}</p>
+        {item.action && onRestrictionRequested && <button type="button" className="vnext-action" data-kind="secondary"
+          onClick={() => onRestrictionRequested(item.sourceKey)}>
+          {item.action === "clarify" ? "Update affected movements" : item.action === "comfort" ? "Update comfort" : "Review suitable checks"}
+        </button>}
       </div>
     ))}
-    {onRestrictionRequested && (
-      <button type="button" className="vnext-action" data-kind="secondary" onClick={onRestrictionRequested}>
+    {onRestrictionRequested && !presentation.items.some((item) => item.action) && (
+      <button type="button" className="vnext-action" data-kind="secondary" onClick={() => onRestrictionRequested()}>
         Update restriction feedback
       </button>
     )}

@@ -6,7 +6,7 @@ import { structureWorkoutPlan, type StructuredWorkoutItem, type WorkoutSetInterv
 export const MIXED_WORKOUT_POLICY_ID = "vnext-mixed-workout-generator";
 export const MIXED_CAPACITY_POLICY_ID = "vnext-mixed-capacity-workout-generator";
 export const isMixedWorkoutPlan = (plan: Pick<SessionPlan, "generatorPolicyId" | "generatorPolicyVersion">): boolean =>
-  (plan.generatorPolicyVersion === 1 || plan.generatorPolicyVersion === 2)
+  (plan.generatorPolicyVersion === 1 || plan.generatorPolicyVersion === 2 || plan.generatorPolicyVersion === 3)
   && [MIXED_WORKOUT_POLICY_ID, MIXED_CAPACITY_POLICY_ID].includes(plan.generatorPolicyId);
 
 export type WorkoutExecutionGroup = Readonly<{

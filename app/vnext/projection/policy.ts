@@ -35,6 +35,8 @@ export const projectionReasonCodes = {
   postClearance: reason("post-clearance-reconfirmation"),
   recentHighLoad: reason("recent-high-load"),
   recentDifficultPerformance: reason("recent-difficult-performance"),
+  repeatedDifficultPerformance: reason("repeated-difficult-performance"),
+  safetyPrerequisiteNotCurrent: reason("safety-prerequisite-not-current"),
   missingEquipment: reason("missing-equipment"),
   staleEvidence: reason("stale-evidence"),
   contradictedEvidence: reason("contradicted-evidence"),
@@ -93,8 +95,9 @@ const protocolReuseRules = [
 
 /**
  * Explicit mechanical implications. These are eligibility conveniences, not
- * synthetic demonstrations. Safety exits, capacities and anyOf alternatives
- * never appear here.
+ * synthetic demonstrations. Exact higher-exit evidence may cover the listed
+ * lower exit rehearsals; strength never supplies exit evidence. Capacities and
+ * anyOf alternatives never appear here.
  */
 const mechanicalPredecessorRules = [
   {

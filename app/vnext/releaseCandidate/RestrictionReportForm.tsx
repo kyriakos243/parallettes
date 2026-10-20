@@ -3,7 +3,7 @@ import { createRestrictionReport } from "../assessment/evidence";
 import { DEMAND_DOMAINS, type AthleteId, type DefinitionVersion, type DemandDomain, type RestrictionReportedEvent } from "../contracts";
 import "./restrictionSafety.css";
 
-const labels: Record<DemandDomain, string> = {
+export const restrictionMovementLabels: Record<DemandDomain, string> = {
   "hand-wrist-bearing": "Weight on hands / wrists",
   "forward-straight-arm-upper-limb": "Straight-arm leaning",
   "overhead-straight-arm-upper-limb": "Straight arms overhead",
@@ -57,7 +57,7 @@ export const RestrictionReportForm = ({ athleteId, catalogueVersion, initialRepo
         <legend>Which movements should be avoided?</legend>
         {DEMAND_DOMAINS.map((domain) => <label key={domain} className="vnext-restriction-choice">
           <input type="checkbox" checked={domains.includes(domain)} onChange={() => setDomains((current) => current.includes(domain) ? current.filter((value) => value !== domain) : [...current, domain])} />
-          <span>{labels[domain]}</span>
+          <span>{restrictionMovementLabels[domain]}</span>
         </label>)}
         <label className="vnext-restriction-area">Affected area
           <input value={region} onChange={(event) => setRegion(event.target.value)} placeholder="For example: left wrist" required />

@@ -27,6 +27,9 @@ import {
 import { normalizeObservations } from "./normalize";
 import { projectionReasonCodes } from "./policy";
 import { restrictionExposureDomains } from "./restrictionExposure";
+import { missingCurrentSafetyPrerequisites } from "./safetyPrerequisites";
+import { deriveMaintenanceExposures } from "./maintenanceExposure";
+import { deriveRetainedDoseAdjustments } from "./persistentDifficulty";
 import {
   milestoneKey,
   subjectKey,
@@ -661,7 +664,22 @@ const deriveRestrictions = (
 
   for (const observation of observations) {
     if (!observation.symptomOrInstability) continue;
-    const domains = (Object.keys(observation.demand).length
+    if (policy.scopedSymptomRecovery && reports.some((report) => report.symptomSource
+      && canonicalSourceKey(report.symptomSource) === canonicalSourceKey(observation.source)
+      && Date.parse(report.occurredAt) >= Date.parse(observation.occurredAt))) {
+      // A linked, explicit clarification owns the affected movements from now
+      // on. The original symptom observation remains immutable and visible.
+      continue;
+    }
+    const scopedDomains = observation.exerciseId && observation.exerciseDefinitionVersion && observation.prescriptionVariantId
+      ? [...restrictionExposureDomains({
+        exerciseId: observation.exerciseId,
+        exerciseDefinitionVersion: observation.exerciseDefinitionVersion,
+        prescriptionVariantId: observation.prescriptionVariantId,
+      }, observation.demand, policy)]
+      : [];
+    const domains = policy.scopedSymptomRecovery && scopedDomains.length ? scopedDomains
+      : (Object.keys(observation.demand).length
       ? Object.keys(observation.demand)
       : DEMAND_DOMAINS) as readonly DemandDomain[];
     const remainingDomains = remainingUnconfirmedDomains(domains, observation.occurredAt);
@@ -981,6 +999,10 @@ const evaluateTrainabilityInternal = (
     }
     const historicallyAchieved = nodeState !== undefined
       && lifecycleRank[nodeState.lifecycle] >= lifecycleRank.demonstrated;
+    if (input.policy.requireCurrentSafetyPrerequisites
+      && missingCurrentSafetyPrerequisites({ milestone, bundle: input.bundle, state: input.state }).length) {
+      linkedBlocks.push(projectionReasonCodes.safetyPrerequisiteNotCurrent);
+    }
     if (!historicallyAchieved && !eligibleKeys.has(milestoneKey(milestone))) {
       linkedBlocks.push(projectionReasonCodes.prerequisiteMissing);
     }
@@ -1022,6 +1044,12 @@ const evaluateTrainabilityInternal = (
       && exposure.prescriptionVariantId === input.request.prescriptionVariantId
       && (exposure.reviewDifficulty === "hard" || exposure.reviewOutcome === "not-today"))) {
     modifyReasons.push(projectionReasonCodes.recentDifficultPerformance);
+  }
+  if (input.policy.persistentDifficulty && input.state.retainedDoseAdjustments?.some((adjustment) =>
+    adjustment.exerciseId === input.request.exerciseId
+      && adjustment.exerciseDefinitionVersion === input.request.exerciseDefinitionVersion
+      && adjustment.prescriptionVariantId === input.request.prescriptionVariantId)) {
+    modifyReasons.push(projectionReasonCodes.repeatedDifficultPerformance);
   }
 
   const decision: TrainabilityDecision = blockReasons.length ? "block" : modifyReasons.length ? "modify" : "allow";
@@ -1272,6 +1300,22 @@ export const projectAthleteState = (input: ProjectionInput): ProjectionResult =>
     ...restrictions,
     recentLoad,
     ...family,
+    ...(input.policy.longTermAllocation ? {
+      maintenanceExposures: deriveMaintenanceExposures(normalization.observations, normalization.activeRecords, input.sessionPlans, input.definitionBundles),
+    } : {}),
+    ...(input.policy.persistentDifficulty ? {
+      retainedDoseAdjustments: deriveRetainedDoseAdjustments({
+        observations: normalization.observations,
+        sessionRecords: normalization.activeRecords,
+        sessionPlans: input.sessionPlans,
+        definitionBundles: input.definitionBundles,
+        protocolEvaluations: compatibleEvaluations,
+        isReassessmentConfirmed: (evaluations, protocol, at) => {
+          const status = evaluateProtocolStatus(evaluations, protocol, input.policy, Date.parse(at));
+          return status.established && status.confidence === "current";
+        },
+      }),
+    } : {}),
     trainabilityEvaluations: [],
   };
   const trainabilityEvaluations = (input.trainabilityRequests ?? [])

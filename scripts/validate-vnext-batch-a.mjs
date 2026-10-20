@@ -277,7 +277,7 @@ for (const spec of a.batchASpecs) {
 const releaseApp = readFileSync(new URL("../app/vnext/releaseCandidate/VNextReleaseCandidateApp.tsx",import.meta.url),"utf8");
 assert(releaseApp.includes("const workoutBundle = plan ? bundleFor(plan.catalogueVersion)") && releaseApp.includes("<WorkoutRunner plan={plan} bundle={workoutBundle}"), "Recovered UI does not select its native workout catalogue");
 const productionApp = readFileSync(new URL("../app/vnext/production/VNextProductionApp.tsx",import.meta.url),"utf8");
-assert(productionApp.includes("catalogue: restrictionSafetyCatalogue") && productionApp.includes("evaluatePlanMedia: evaluateCombinedProgressionPlanMedia") && productionApp.includes('import "./combinedProgressionMedia"'), "Production omitted coherent catalogue/media activation");
+assert(productionApp.includes("catalogue: trainingQualityCatalogue") && productionApp.includes("evaluatePlanMedia: evaluateCombinedProgressionPlanMedia") && productionApp.includes('import "./combinedProgressionMedia"'), "Production omitted coherent catalogue/media activation");
 const safetyCatalogue = load("app/vnext/production/restrictionSafety.ts").restrictionSafetyCatalogue;
 const priorCatalogue = load("app/vnext/production/experiencedPlacement.ts").experiencedPlacementCatalogue;
 assert(json(safetyCatalogue.bundle) === json(priorCatalogue.bundle) && json(safetyCatalogue.history) === json(priorCatalogue.history), "Current safety overlay changed the accepted native catalogue/history");

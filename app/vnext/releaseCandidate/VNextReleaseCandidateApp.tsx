@@ -26,6 +26,7 @@ import {
   type VNextShadowStore,
   type WorkoutCompletionAnswer,
   type RestrictionReportedEvent,
+  type RestrictionClearedEvent,
   generateVNextCustomSession,
   safeWorkoutSwaps,
 } from "../index";
@@ -39,6 +40,7 @@ import { AssessmentRunner } from "./AssessmentRunner";
 import { GuidedTestRunner, type GuidedTestFormResult } from "./GuidedTestRunner";
 import { CustomSessionBuilder, type VNextCustomSessionRequest } from "./CustomSessionBuilder";
 import { RestrictionReportForm } from "./RestrictionReportForm";
+import { RestrictionRecoveryForm, type RestrictionRecoveryContext } from "./RestrictionRecoveryForm";
 import { validateWorkoutStart } from "./workoutStartSafety";
 import type { WorkoutRunRequest } from "./useWorkoutRunAuthorization";
 import { shortWorkoutPreferenceKey } from "./shortWorkoutPreferences";
@@ -358,6 +360,7 @@ const VNextAthleteApplication = ({
   const [busy, setBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [restrictionOpen, setRestrictionOpen] = useState(Boolean(initialWorkoutRecovery?.pendingRestriction));
+  const [restrictionRecovery, setRestrictionRecovery] = useState<RestrictionRecoveryContext>();
   const [message, setMessage] = useState(deployment.openingMessage);
   const [error, setError] = useState<string>();
   const [savedWorkoutId, setSavedWorkoutId] = useState<string>();
@@ -586,11 +589,21 @@ const VNextAthleteApplication = ({
     })
     : undefined, [workoutBundle, completionGenerated, executionFacts]);
   const previousRestrictionOpen = useRef(restrictionOpen);
+  const restrictionReturnFocus = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
-    if (restrictionOpen) document.getElementById("vnext-restriction-report-title")?.focus();
-    else if (previousRestrictionOpen.current) document.getElementById("vnext-workout-restriction-action")?.focus();
-    previousRestrictionOpen.current = restrictionOpen;
-  }, [restrictionOpen]);
+    const open = restrictionOpen || Boolean(restrictionRecovery);
+    if (open) document.getElementById("vnext-restriction-report-title")?.focus();
+    else if (previousRestrictionOpen.current) {
+      const target = restrictionReturnFocus.current;
+      if (target?.isConnected && !target.closest("[hidden]") && !target.matches(":disabled")) target.focus();
+      else [...["vnext-workout-restriction-action", "vnext-completion-heading", "vnext-today-heading"]
+        .map((id) => document.getElementById(id)),
+        document.querySelector<HTMLElement>('.vnext-section-navigation button[aria-pressed="true"]')]
+        .find((element) => element && !element.closest("[hidden]") && !element.matches(":disabled"))?.focus();
+      restrictionReturnFocus.current = null;
+    }
+    previousRestrictionOpen.current = open;
+  }, [restrictionOpen, restrictionRecovery]);
   const workoutSwapOptions = useMemo(() => !plan || !snapshot ? {} : Object.fromEntries(
     plan.items.map((item) => [item.id, safeWorkoutSwaps({
       plan,
@@ -1193,6 +1206,24 @@ const VNextAthleteApplication = ({
     });
   });
 
+  const saveComfortUpdate = (event: RestrictionReportedEvent, clearance?: RestrictionClearedEvent): Promise<void> => new Promise((resolve, reject) => {
+    runCommand(async () => {
+      try {
+        const result = await runtime.commitRestrictionReport({ ...refreshInput(), event, clearance });
+        setSnapshot(result.snapshot);
+        setWorkoutSelections({});
+        setRestrictionRecovery(undefined);
+        setMessage(clearance
+          ? "Comfort updated. Your history is kept; suitable practice and checks will guide your return."
+          : "Affected movements are paused. Your original feedback and progress are kept.");
+        resolve();
+      } catch (reason) {
+        reject(reason);
+        throw reason;
+      }
+    });
+  });
+
   const captureWorkoutDiscard = (): (() => void) => {
     const timerStorage = createRecoveryStorageGuard(`parallette25-vnext-rc-active-workout-v1:${athleteId}`);
     if (timerStorage.initialValue !== null) {
@@ -1380,12 +1411,15 @@ const VNextAthleteApplication = ({
   } : baseTodayPresentation;
 
   const showingRestrictionReport = restrictionOpen && workoutRecovery?.stage === "review";
+  const showingComfortUpdate = Boolean(restrictionRecovery);
 
   return (
     <div className="vnext-rc-root vnext-simple-app">
       {showingRestrictionReport && <RestrictionReportForm athleteId={athleteId} catalogueVersion={vNextDefinitionBundle.catalogueVersion}
         initialReport={workoutRecovery.pendingRestriction} onSave={saveWorkoutRestriction} onClose={() => setRestrictionOpen(false)} />}
-      <div hidden={showingRestrictionReport}>
+      {restrictionRecovery && <RestrictionRecoveryForm athleteId={athleteId} catalogueVersion={vNextDefinitionBundle.catalogueVersion}
+        context={restrictionRecovery} onSave={saveComfortUpdate} onClose={() => setRestrictionRecovery(undefined)} />}
+      <div hidden={showingRestrictionReport || showingComfortUpdate}>
       <aside className="vnext-rc-banner" aria-label={deployment.kind === "production" ? "Application and account status" : "Release candidate status"}>
         <span><strong>{deployment.bannerTitle}</strong> · {deployment.bannerDetail}</span>
         <div className="vnext-rc-banner-tools">
@@ -1492,8 +1526,19 @@ const VNextAthleteApplication = ({
         onDiscardWorkout={!busy && (workoutRecovery?.stage === "preview" || workoutRecovery?.stage === "active") ? discardWorkout : undefined}
         onEndRecoveredWorkout={!busy && workoutRecovery?.stage === "active" ? endRecoveredWorkout : undefined}
         onWorkoutReviewSubmitted={!busy && !reviewCheckpointError && workoutRecovery?.stage === "review" ? submitWorkoutReview : undefined}
-        onWorkoutRestrictionRequested={!busy && !reviewCheckpointError && workoutRecovery?.stage === "review" ? () => setRestrictionOpen(true) : undefined}
-        onRestrictionRequested={!workflowLocked && !busy ? () => startAssessment() : undefined}
+        onWorkoutRestrictionRequested={!busy && !reviewCheckpointError && workoutRecovery?.stage === "review" ? () => {
+          restrictionReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          setRestrictionOpen(true);
+        } : undefined}
+        onRestrictionRequested={!workflowLocked && !busy ? (sourceKey) => {
+          const item = snapshot.presentations.restrictions.items.find((candidate) => candidate.sourceKey === sourceKey);
+          if (!item?.source || item.action === "recheck") { startAssessment(); return; }
+          const source = item.source;
+          const report = source.kind === "evidence-event" ? snapshot.sources.evidenceEvents.find((event): event is RestrictionReportedEvent =>
+            event.id === source.eventId && event.type === "restriction_reported") : undefined;
+          restrictionReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          setRestrictionRecovery({ source, demandDomains: item.demandDomains, ...(report ? { report } : {}) });
+        } : undefined}
       />
       </div>
     </div>
