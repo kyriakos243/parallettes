@@ -3,3 +3,4 @@ export * from "./evidence";
 export * from "./flow";
 export * from "./policy";
 export * from "./presentation";
+export * from "./progressionCheck";

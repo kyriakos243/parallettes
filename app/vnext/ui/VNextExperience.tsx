@@ -25,12 +25,20 @@ type ViewId = "today" | "progress" | "history";
 type ReviewStatus = "completed" | "modified" | "skipped";
 type ReviewDifficulty = "easy" | "right" | "hard";
 
-type ReviewDraft = Readonly<{
+export type ReviewDraft = Readonly<{
   status?: ReviewStatus;
   difficulty?: ReviewDifficulty;
   symptomOrInstability: boolean;
   bodyRegion: string;
   modificationReason: string;
+}>;
+
+/** Device-local answers only; performance becomes authoritative on final save. */
+export type WorkoutReviewDraft = Readonly<{
+  version: 1;
+  planId: string;
+  reviewIndex: number;
+  answers: Readonly<Record<string, ReviewDraft>>;
 }>;
 
 export type VNextWorkoutReviewFeedback = Readonly<{
@@ -51,6 +59,9 @@ export type VNextExperienceProps = Readonly<{
   restrictions: RestrictionPresentation;
   recentSessions: readonly VNextRecentSession[];
   completion?: WorkoutCompletionPresentation;
+  reviewSessionId?: string;
+  reviewDraft?: WorkoutReviewDraft;
+  onReviewDraftChange?: (draft: WorkoutReviewDraft) => void;
   setupNotice?: ReactNode;
   savedWorkout?: VNextRecentSession;
   syncMessage?: string;
@@ -71,6 +82,7 @@ export type VNextExperienceProps = Readonly<{
   onDiscardWorkout?: () => void;
   onEndRecoveredWorkout?: () => void;
   onWorkoutReviewSubmitted?: (feedback: readonly VNextWorkoutReviewFeedback[]) => void;
+  onWorkoutRestrictionRequested?: () => void;
   onRestrictionRequested?: () => void;
 }>;
 
@@ -166,6 +178,9 @@ const TodayView = ({
   today,
   restrictions,
   completion,
+  reviewSessionId,
+  reviewDraft,
+  onReviewDraftChange,
   setupNotice,
   workoutStartBlocker,
   workoutOrigin,
@@ -180,20 +195,26 @@ const TodayView = ({
   onDiscardWorkout,
   onEndRecoveredWorkout,
   onWorkoutReviewSubmitted,
+  onWorkoutRestrictionRequested,
   onRestrictionRequested,
   announce,
 }: Readonly<Pick<VNextExperienceProps,
-  "today" | "restrictions" | "completion" | "setupNotice" | "onDemandChange" | "onStartWorkout" | "busy"
+  "today" | "restrictions" | "completion" | "reviewSessionId" | "reviewDraft" | "onReviewDraftChange" | "setupNotice" | "onDemandChange" | "onStartWorkout" | "busy"
   | "workoutSwapOptions" | "workoutSelections" | "onWorkoutSwap" | "onCustomSessionRequested"
-  | "onDiscardWorkout" | "onEndRecoveredWorkout" | "onWorkoutReviewSubmitted" | "onRestrictionRequested" | "workoutStartBlocker"
+  | "onDiscardWorkout" | "onEndRecoveredWorkout" | "onWorkoutReviewSubmitted" | "onWorkoutRestrictionRequested" | "onRestrictionRequested" | "workoutStartBlocker"
   | "workoutOrigin" | "workoutRecoveryStage"> & {
   active?: boolean;
   announce: (message: string) => void;
 }>) => {
-  const [reviewIndex, setReviewIndex] = useState(0);
+  const reviewIdentity = reviewSessionId ?? completion?.prompts.map((item) => item.planItemId).join("|");
+  const restoredReview = reviewDraft?.planId === reviewIdentity ? reviewDraft : undefined;
+  const [reviewIndex, setReviewIndex] = useState(restoredReview?.reviewIndex ?? 0);
   const [swapPlanItemId, setSwapPlanItemId] = useState<PlanItemId>();
   const [swapDirection, setSwapDirection] = useState<SafeWorkoutSwap["direction"]>("similar");
-  const [reviews, setReviews] = useState<Record<string, ReviewDraft>>({});
+  const [reviews, setReviews] = useState<Readonly<Record<string, ReviewDraft>>>(restoredReview?.answers ?? {});
+  const reviewsRef = useRef(reviews);
+  const reviewIndexRef = useRef(reviewIndex);
+  const previousReviewIdentity = useRef(reviewIdentity);
   const prompts = completion?.prompts ?? [];
   const completionHeading = useRef<HTMLHeadingElement>(null);
   const reviewing = Boolean(completion);
@@ -202,7 +223,23 @@ const TodayView = ({
     completionHeading.current?.focus({ preventScroll: true });
     completionHeading.current?.scrollIntoView({ block: "start", behavior: "instant" });
   }, [reviewing]);
-  useEffect(() => setReviewIndex(0), [completion]);
+  useEffect(() => {
+    if (previousReviewIdentity.current === reviewIdentity) return;
+    previousReviewIdentity.current = reviewIdentity;
+    reviewsRef.current = restoredReview?.answers ?? {};
+    reviewIndexRef.current = restoredReview?.reviewIndex ?? 0;
+    setReviews(reviewsRef.current);
+    setReviewIndex(reviewIndexRef.current);
+  }, [reviewIdentity]);
+  const retainReview = (): void => {
+    if (reviewIdentity) onReviewDraftChange?.({ version: 1, planId: reviewIdentity,
+      reviewIndex: reviewIndexRef.current, answers: reviewsRef.current });
+  };
+  const moveReview = (index: number): void => {
+    reviewIndexRef.current = Math.max(0, Math.min(prompts.length - 1, index));
+    setReviewIndex(reviewIndexRef.current);
+    retainReview();
+  };
   const allAnswered = prompts.length > 0 && prompts.every((prompt) =>
     reviews[prompt.planItemId]?.status !== undefined
       && (!reviews[prompt.planItemId]?.symptomOrInstability
@@ -232,20 +269,12 @@ const TodayView = ({
   }, []);
 
   const updateReview = (planItemId: PlanItemId, update: Partial<ReviewDraft>) => {
-    setReviews((current) => {
-      const existing = current[planItemId] ?? {
-        symptomOrInstability: false,
-        bodyRegion: "",
-        modificationReason: "",
-      };
-      return {
-        ...current,
-        [planItemId]: {
-          ...existing,
-        ...update,
-      },
-      };
-    });
+    const existing = reviewsRef.current[planItemId] ?? {
+      symptomOrInstability: false, bodyRegion: "", modificationReason: "",
+    };
+    reviewsRef.current = { ...reviewsRef.current, [planItemId]: { ...existing, ...update } };
+    setReviews(reviewsRef.current);
+    retainReview();
   };
 
   const submitReview = () => {
@@ -380,12 +409,12 @@ const TodayView = ({
           )}
           <div className="vnext-actions vnext-review-navigation">
             {currentReviewIndex > 0 && (
-              <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => setReviewIndex((index) => Math.max(0, index - 1))}>
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => moveReview(currentReviewIndex - 1)}>
                 Previous
               </button>
             )}
             {currentReviewPrompt && currentReviewIndex < prompts.length - 1 ? (
-              <button type="button" className="vnext-submit" disabled={busy || !currentReviewReady} onClick={() => setReviewIndex((index) => Math.min(prompts.length - 1, index + 1))}>
+              <button type="button" className="vnext-submit" disabled={busy || !currentReviewReady} onClick={() => moveReview(currentReviewIndex + 1)}>
                 Next movement
               </button>
             ) : (
@@ -398,8 +427,8 @@ const TodayView = ({
                 {completion.prompts.length > 0 ? "Save workout" : "Save workout"}
               </button>
             )}
-            {onRestrictionRequested && completion.prompts.length === 0 && (
-              <button type="button" className="vnext-action" data-kind="secondary" onClick={onRestrictionRequested}>
+            {onWorkoutRestrictionRequested && (
+              <button id="vnext-workout-restriction-action" type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onWorkoutRestrictionRequested}>
                 Report pain or a new restriction
               </button>
             )}
@@ -991,6 +1020,9 @@ export const VNextExperience = ({
   restrictions,
   recentSessions,
   completion,
+  reviewSessionId,
+  reviewDraft,
+  onReviewDraftChange,
   setupNotice,
   savedWorkout,
   syncMessage = "Saved on this device.",
@@ -1011,6 +1043,7 @@ export const VNextExperience = ({
   onDiscardWorkout,
   onEndRecoveredWorkout,
   onWorkoutReviewSubmitted,
+  onWorkoutRestrictionRequested,
   onRestrictionRequested,
 }: VNextExperienceProps) => {
   const workflowStatus = completion
@@ -1074,6 +1107,9 @@ export const VNextExperience = ({
             today={today}
             restrictions={restrictions}
             completion={completion}
+            reviewSessionId={reviewSessionId}
+            reviewDraft={reviewDraft}
+            onReviewDraftChange={onReviewDraftChange}
             setupNotice={setupNotice}
             workoutStartBlocker={workoutStartBlocker}
             workoutOrigin={workoutOrigin}
@@ -1088,6 +1124,7 @@ export const VNextExperience = ({
             onDiscardWorkout={onDiscardWorkout}
             onEndRecoveredWorkout={onEndRecoveredWorkout}
             onWorkoutReviewSubmitted={onWorkoutReviewSubmitted}
+            onWorkoutRestrictionRequested={onWorkoutRestrictionRequested}
             onRestrictionRequested={onRestrictionRequested}
             announce={announce}
           />}

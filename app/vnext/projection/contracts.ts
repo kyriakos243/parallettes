@@ -7,6 +7,8 @@ import type {
   DefinitionBundle,
   DefinitionVersion,
   DemandProfile,
+  DemandDomain,
+  EquipmentId,
   ExerciseId,
   IsoTimestamp,
   MilestoneRef,
@@ -101,6 +103,24 @@ export type ProjectionPolicy = Readonly<{
   subjectVersionCompatibilityRules: readonly SubjectVersionCompatibilityRule[];
   /** Own demonstrated ordinary practice only; never graph prerequisite eligibility. */
   measuredPlacementEntries?: readonly import("../placementEntry").PlacementEntryRule[];
+  /** Audited physical exposure for restriction checks; never rewrites historical demand. */
+  restrictionExposureRules?: readonly RestrictionExposureRule[];
+  /** Exact current-guide apparatus corrections; native definitions remain unchanged. */
+  additionalEquipmentRules?: readonly AdditionalEquipmentRule[];
+}>;
+
+export type AdditionalEquipmentRule = Readonly<{
+  exerciseId: ExerciseId;
+  exerciseDefinitionVersion: DefinitionVersion;
+  prescriptionVariantIds: readonly PrescriptionVariantId[];
+  equipment: readonly EquipmentId[];
+}>;
+
+export type RestrictionExposureRule = Readonly<{
+  exerciseId: ExerciseId;
+  exerciseDefinitionVersion: DefinitionVersion;
+  prescriptionVariantIds: readonly PrescriptionVariantId[];
+  demandDomains: readonly DemandDomain[];
 }>;
 
 export type TrainabilityRequest = Readonly<{

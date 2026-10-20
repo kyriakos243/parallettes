@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import type { VNextPendingSignOutWork } from "../../profileStore";
 import {
   ACCOUNT_SESSION_CHANGED_EVENT,
   ACCOUNT_SESSION_STORAGE_KEY,
@@ -86,6 +87,7 @@ export const clearVNextRcIdentity = (
   namespace = VNEXT_RC_STORAGE_NAMESPACE,
 ): void => {
   for (const prefix of workflowPrefixes(namespace)) localStorage.removeItem(`${prefix}${athleteId}`);
+  localStorage.removeItem(`parallette25-vnext-rc-active-workout-v1:${athleteId}`);
   localStorage.removeItem(identityKey(namespace));
   localStorage.removeItem(legacyAthleteKey(namespace));
 };
@@ -147,6 +149,8 @@ export const VNextAccountGate = ({
     recoveryCode: string;
   }>>();
   const [deletePassword, setDeletePassword] = useState("");
+  const [pendingSignOut, setPendingSignOut] = useState<VNextPendingSignOutWork>();
+  const signOutInFlight = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -195,18 +199,29 @@ export const VNextAccountGate = ({
     }
   };
 
-  const signOut = async (): Promise<void> => {
-    if (!current || busy) return;
+  const signOut = async (discardPendingWorkFingerprint?: string): Promise<void> => {
+    if (!current || busy || signOutInFlight.current) return;
+    signOutInFlight.current = true;
     setBusy(true);
     setError(undefined);
+    setPendingSignOut(undefined);
     try {
-      const { signOutVNextAccount } = await accountBoundary();
-      await signOutVNextAccount(current.athleteId, shadowDatabaseName);
+      const boundary = await accountBoundary();
+      try {
+        await boundary.signOutVNextAccount(current.athleteId, shadowDatabaseName, { discardPendingWorkFingerprint });
+      } catch (reason) {
+        if (reason instanceof boundary.VNextPendingWorkError) {
+          setPendingSignOut(reason.pendingWork);
+          return;
+        }
+        throw reason;
+      }
       clearVNextRcIdentity(current.athleteId, storageNamespace);
       onSignedOut?.();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Sign-out could not be completed.");
     } finally {
+      signOutInFlight.current = false;
       setBusy(false);
     }
   };
@@ -255,9 +270,13 @@ export const VNextAccountGate = ({
             <p>Your account supplies identity and secure sync only. vNext observations remain separate from the v1.2 training profile.</p>
           </div>
           <div className="vnext-account-actions">
-            {onClose && <button type="button" className="vnext-action" data-kind="secondary" onClick={onClose}>Done</button>}
-            <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => void signOut()}>Sign out on this device</button>
+            {onClose && <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onClose}>{pendingSignOut ? "Return to training" : "Done"}</button>}
+            {!pendingSignOut && <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => void signOut()}>Sign out on this device</button>}
           </div>
+          {pendingSignOut && <div className="vnext-account-separation" role="alert">
+            <p>You have {pendingSignOut.descriptions.join(", ")}. Return to finish and save it. Signing out now will discard this unfinished work from this device; it cannot be restored from sync.</p>
+            <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => void signOut(pendingSignOut.fingerprint)}>Discard unfinished work &amp; sign out</button>
+          </div>}
           {onResetProgress && <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => {
             if (!window.confirm("Reset training progress on every synced device? Account access and historical recovery safeguards remain.")) return;
             setBusy(true);

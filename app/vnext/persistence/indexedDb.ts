@@ -39,6 +39,7 @@ import {
   type SyncUploadItem,
   type TrainingResetTombstone,
   type VNextShadowStore,
+  type VNextSignOutClearGuard,
 } from "./contracts";
 
 /** Kept separate so an old v1.2 client can always open its version-2 profile DB. */
@@ -1996,10 +1997,17 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
     return state?.cursor ?? 0;
   }
 
-  async clearAthlete(athleteId: AthleteId): Promise<void> {
+  async clearAthlete(athleteId: AthleteId, signOutGuard?: VNextSignOutClearGuard): Promise<void> {
     const database = await this.#database();
     const transaction = database.transaction(Object.values(STORES), "readwrite");
     try {
+      if (signOutGuard) {
+        const pending = await allForAthlete<StoredOutbox>(transaction, STORES.outbox, athleteId);
+        const draft = await requestResult(transaction.objectStore(STORES.assessmentDrafts).get(athleteId)) as AssessmentDraft | undefined;
+        if (pending.length > 0 || canonicalJson(draft ?? null) !== canonicalJson(signOutGuard.assessmentDraft)) {
+          throw new Error("New training arrived while signing out. Account access is locked, and your local progress has been kept. Sign in again to review and sync it before signing out.");
+        }
+      }
       await Promise.all(Object.values(STORES).map((storeName) => deleteForAthlete(transaction, storeName, athleteId)));
       await transactionDone(transaction);
     } catch (error) {
@@ -2035,12 +2043,13 @@ export const deleteVNextShadowDatabase = async (options: VNextShadowStoreOptions
 export const clearVNextShadowAthleteData = async (
   profileId: string,
   options: VNextShadowStoreOptions = {},
+  signOutGuard?: VNextSignOutClearGuard,
 ): Promise<void> => {
   const factory = options.indexedDB ?? globalThis.indexedDB;
   if (!factory) return;
   const store = new IndexedDbVNextShadowStore(factory, options.databaseName ?? VNEXT_SHADOW_DATABASE_NAME);
   try {
-    await store.clearAthlete(profileId as AthleteId);
+    await store.clearAthlete(profileId as AthleteId, signOutGuard);
   } finally {
     store.close();
   }

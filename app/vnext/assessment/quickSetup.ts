@@ -7,7 +7,7 @@ const contextKinds = new Set(["safety", "experience", "inactivity", "goals", "eq
 export const isQuickSetupContext = (draft: AssessmentDraft, step: AssessmentStep): boolean =>
   draft.policyVersion === 2 && draft.mode === "new-placement" && contextKinds.has(step.kind);
 
-/** One local write after all native answers validate; no evidence is committed here. */
+/** Validate all native answers before the runtime saves context and positive safety reports. */
 export const reviseQuickSetupContext = (draft: AssessmentDraft, answers: readonly AssessmentAnswerValue[],
   updatedAt: string, bundle: DefinitionBundle): AssessmentDraft => {
   if (draft.policyVersion !== 2 || draft.mode !== "new-placement" || draft.status !== "in-progress") {

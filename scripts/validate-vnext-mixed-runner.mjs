@@ -69,9 +69,10 @@ const componentModule = (path) => {
     if (name === "lucide-react") return { Volume2: "Volume2", VolumeX: "VolumeX", X: "X" };
     if (name === "../index") return workout;
     if (name === "../mixedWorkout") return mixed;
-    if (name === "./useWorkoutClock" || name === "./workoutClock") {
+    if (name === "./useWorkoutClock" || name === "./workoutClock" || name === "./useWorkoutRunAuthorization" || name === "./recoveryStorage") {
       return componentModule(resolve(dirname(sourcePath), `${name}.ts`));
     }
+    if (name.endsWith(".css")) return {};
     throw new Error(`Unexpected runner import ${name}`);
   });
   return module.exports;
@@ -86,8 +87,14 @@ const elements = (value) => Array.isArray(value) ? value.flatMap(elements)
   : value && typeof value === "object" ? [value, ...elements(value.props?.children)] : [];
 const storage = () => {
   const entries = new Map([["parallette25-vnext-timer-sound-v1", "off"]]);
-  return { getItem: (key) => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, String(value)),
-    removeItem: (key) => entries.delete(key), entries };
+  const saved = { failWrites: false, writeAttempts: 0,
+    getItem: (key) => entries.get(key) ?? null,
+    setItem: (key, value) => {
+      saved.writeAttempts++;
+      if (saved.failWrites) throw new Error("Storage quota exhausted");
+      entries.set(key, String(value));
+    }, removeItem: (key) => entries.delete(key), entries };
+  return saved;
 };
 const domains = ["hand-wrist-bearing", "forward-straight-arm-upper-limb", "overhead-straight-arm-upper-limb",
   "horizontal-bent-arm-push", "vertical-bent-arm-push", "inversion-technical", "compression-trunk"];
@@ -104,6 +111,9 @@ const bundle = { exercises: [
   exercise("e", ["capacity-accessory"], { "compression-trunk": "moderate" }),
   exercise("f", ["capacity-accessory"], { "horizontal-bent-arm-push": "moderate" }),
 ] };
+// Distinct neighboring targets make a stale prescription visible in the rest
+// preview instead of letting identical test targets mask a mismatched card.
+bundle.exercises.find((entry) => entry.id === "b").prescriptionVariants[0].target = { kind: "repetitions", minimum: 7, maximum: 9 };
 const plan = { id: "runner-mixed-plan", athleteId: "runner-test", generatorPolicyId: mixed.MIXED_WORKOUT_POLICY_ID,
   generatorPolicyVersion: 1, intendedDurationSeconds: 840,
   items: [["a", "preparation", 120], ["b", "preparation", 120], ["c", "primary-development", 120],
@@ -149,6 +159,8 @@ const createHost = (saved = storage(), options = {}) => {
     wakeRequests: [], document: { ...eventTarget(), visibilityState: "visible" }, window: eventTarget() };
   owner.props = { plan: options.native ? nativePlan : plan, bundle, origin: "custom", initialSelections: {}, swapOptions,
     onStart: () => { owner.starts++; }, onFinish: (facts) => { owner.facts.push(facts); }, onClose: (started) => owner.closes.push(started) };
+  if (options.onBeforeRun) owner.props.onBeforeRun = options.onBeforeRun;
+  if (options.safetyVersion !== undefined) owner.props.safetyVersion = options.safetyVersion;
   Object.assign(owner.window, { scrollTo() {}, setInterval(callback, delay) {
     const id = ++owner.serial; owner.timers.set(id, { callback, delay }); return id;
   }, clearInterval: (id) => owner.timers.delete(id) });
@@ -227,6 +239,32 @@ const createHost = (saved = storage(), options = {}) => {
 
 let checks = 0;
 const check = async (label, callback) => { await callback(); checks++; console.log(`PASS ${label}`); };
+
+for (const native of [false, true]) await check(`${native ? "native reliable" : "mixed"} rest preview uses the next exact movement, target and set structure`, () => {
+  const app = createHost(storage(), { native });
+  const activePlan = native ? nativePlan : plan;
+  const structured = workout.structureWorkoutPlan(activePlan, bundle);
+  const timeline = native ? structured.flatMap(item => item.intervals) : mixed.workoutExecutionTimeline(activePlan, bundle);
+  const boundary = timeline.findIndex((interval, index) => interval.kind === "rest"
+    && timeline[index + 1]?.planItemId !== interval.planItemId && timeline[index + 1]);
+  assert(boundary >= 0);
+  for (let index = 0; index < boundary; index++) app.click("Skip interval");
+  const next = structured.find(item => item.planItemId === timeline[boundary + 1].planItemId);
+  const card = elements(app.tree).find(node => node.props.className === "vnext-rc-coaching");
+  assert.equal(app.title(), "Rest");
+  assert.equal(text(elements(card).find(node => node.type === "h2")), next.variant.label);
+  assert.equal(text(elements(card).find(node => node.props.className === "vnext-rc-target")), next.targetLabel);
+  assert.equal(text(elements(card).find(node => node.props.className === "vnext-rc-structure")), next.structureLabel);
+  assert.equal(elements(app.tree).find(node => node.type === "OwnedMotionGuide").props.preset, next.exercise.media[0].reference);
+  const timer = elements(app.tree).find(node => node.props.className === "vnext-rc-timer");
+  assert(text(timer).startsWith("Rest"), "The countdown must remain explicitly a rest timer");
+  for (let index = boundary; index < timeline.length - 1; index++) app.click("Skip interval");
+  assert.equal(app.title(), "Rest");
+  const finalCard = elements(app.tree).find(node => node.props.className === "vnext-rc-coaching");
+  assert(!elements(finalCard).some(node => node.props.className === "vnext-rc-target"), "Final rest must not advertise another work target");
+  assert(text(finalCard).includes("complete after this rest"));
+  app.unmount();
+});
 
 await check("actual timer effects visit A1 work/rest, B1 work/rest, then A2 without completing A early", () => {
   const app = createHost();
@@ -633,6 +671,260 @@ for (const native of [false, true]) {
     assert.equal(app.draft().participationSeconds["item-a"], 45);
     app.tick(1);
     assert.equal(app.draft().intervalElapsedSeconds, 1);
+    app.unmount();
+  });
+}
+
+const pendingAuthorization = () => {
+  const requests = [];
+  const authorize = (request) => new Promise((resolve, reject) => requests.push({ request, resolve, reject }));
+  return { requests, authorize };
+};
+for (const native of [false, true]) {
+  const name = native ? "native" : "mixed";
+  await check(`${name}: first Start and every Resume await one current safety decision`, async () => {
+    const gate = pendingAuthorization();
+    const app = createHost(storage(), { native, onBeforeRun: gate.authorize });
+    app.change("item-e");
+    app.click("Start workout", false); app.click("Start workout", false); app.flush();
+    assert.equal(gate.requests.length, 1, "Rapid duplicate taps must share the same request");
+    assert.deepEqual(gate.requests[0].request.selections, { "item-e": option });
+    assert.deepEqual(new Set(gate.requests[0].request.planItemIds), new Set(plan.items.map((item) => item.id)));
+    app.tick(3); assert.equal(app.starts, 0); assert.equal(app.draft(), null);
+    assert(text(app.tree).includes("Checking safety…"));
+    for (const label of ["Previous interval", "Skip interval", "Finish early", "Change"]) {
+      assert(app.buttons().filter((button) => text(button) === label).every((button) => button.props.disabled),
+        `${label} must not change a pending authorization request`);
+    }
+    gate.requests[0].resolve(true); await app.drain();
+    assert.equal(app.starts, 1); app.tick(3); assert.equal(app.draft().elapsedSeconds, 3);
+    app.click("Pause"); const checkpoint = JSON.stringify(app.draft());
+    app.click("Resume"); assert.equal(gate.requests.length, 2); app.tick(3);
+    assert.equal(JSON.stringify(app.draft()), checkpoint);
+    gate.requests[1].resolve(true); await app.drain(); app.tick(2);
+    assert.equal(app.draft().elapsedSeconds, 5);
+    assert.equal(app.starts, 1, "Resume must not create another workout start");
+    app.unmount();
+  });
+  await check(`${name}: rejected and failed safety checks keep measured facts paused`, async () => {
+    const gate = pendingAuthorization();
+    const app = createHost(storage(), { native, onBeforeRun: gate.authorize });
+    app.click("Start workout"); gate.requests[0].resolve(true); await app.drain(); app.tick(5); app.click("Pause");
+    const checkpoint = JSON.stringify(app.draft());
+    app.click("Resume"); gate.requests[1].resolve(false); await app.drain(); app.tick(3);
+    assert.equal(JSON.stringify(app.draft()), checkpoint);
+    assert(text(app.tree).includes("Your place is kept"));
+    app.click("Resume"); gate.requests[2].reject(new Error("Safety check unavailable")); await app.drain(); app.tick(3);
+    assert.equal(JSON.stringify(app.draft()), checkpoint);
+    assert(text(app.tree).includes("Safety check unavailable"));
+    assert.equal(app.facts.length, 0);
+    app.unmount();
+  });
+  await check(`${name}: hide and unmount invalidate late safety approvals`, async () => {
+    for (const leave of ["hidden", "pagehide", "unmount"]) {
+      const gate = pendingAuthorization();
+      const app = createHost(storage(), { native, onBeforeRun: gate.authorize });
+      app.click("Start workout");
+      if (leave === "hidden") { app.visible(false); app.visible(true); }
+      else if (leave === "pagehide") app.lifecycle("pagehide");
+      else app.unmount();
+      gate.requests[0].resolve(true);
+      await Promise.resolve(); await Promise.resolve();
+      if (leave !== "unmount") { app.flush(); app.tick(3); }
+      assert.equal(app.starts, 0); assert.equal(app.saved.getItem(activeKey), null);
+      app.unmount();
+    }
+  });
+  await check(`${name}: changed safety pauses running work and every continuation is checked`, async () => {
+    const gate = pendingAuthorization();
+    const app = createHost(storage(), { native, onBeforeRun: gate.authorize, safetyVersion: "original" });
+    app.click("Start workout"); gate.requests[0].resolve(true); await app.drain(); app.tick(3);
+    app.props = { ...app.props, safetyVersion: "new-restriction" }; app.flush();
+    const checkpoint = JSON.stringify(app.draft()); app.tick(3);
+    assert.equal(JSON.stringify(app.draft()), checkpoint);
+    assert(app.buttons().some((button) => text(button) === "Resume"));
+    app.click("Resume"); assert.equal(gate.requests.length, 2);
+    gate.requests[1].resolve(false); await app.drain(); app.tick(3);
+    assert.equal(JSON.stringify(app.draft()), checkpoint);
+    app.unmount();
+  });
+  await check(`${name}: a safety update invalidates a pending grant`, async () => {
+    const gate = pendingAuthorization();
+    const app = createHost(storage(), { native, onBeforeRun: gate.authorize, safetyVersion: "original" });
+    app.click("Start workout");
+    app.props = { ...app.props, safetyVersion: "new-restriction" }; app.flush();
+    gate.requests[0].resolve(true); await app.drain(); app.tick(3);
+    assert.equal(app.starts, 0); assert.equal(app.draft(), null);
+    app.click("Start workout"); assert.equal(gate.requests.length, 2);
+    gate.requests[1].resolve(true); await app.drain(); app.tick(2);
+    assert.equal(app.starts, 1); assert.equal(app.draft().elapsedSeconds, 2);
+    app.unmount();
+  });
+}
+
+for (const native of [false, true]) {
+  const name = native ? "native" : "mixed";
+  await check(`${name}: a failed mid-tick checkpoint stops immediately and explicit retry keeps the newest facts`, () => {
+    const app = createHost(storage(), { native });
+    app.click("Start workout"); app.tick(5);
+    const staleSkip = app.buttons().find(button => text(button) === "Skip interval").props.onClick;
+    const staleFinish = app.buttons().find(button => text(button) === "Finish early").props.onClick;
+    app.saved.failWrites = true;
+    app.sample(1000, { flush: false });
+    assert.equal(app.draft().elapsedSeconds, 5, "Failed write leaves only the earlier durable checkpoint");
+    app.sample(2000, { flush: false }); staleSkip(); staleFinish();
+    app.flush();
+    assert.equal(app.title(), "A");
+    assert(text(app.tree).includes("could not be saved on this device"));
+    assert.equal(app.timers.size, 0);
+    for (const label of ["Resume", "Previous interval", "Skip interval", "Finish early", "Change"]) {
+      assert(app.buttons().filter(button => text(button) === label).every(button => button.props.disabled));
+    }
+    app.click("Save & close"); assert.deepEqual(app.closes, [], "Close must retain the only copy of unsaved facts");
+    const failedAttempts = app.saved.writeAttempts;
+    app.tick(5); app.flush();
+    assert.equal(app.saved.writeAttempts, failedAttempts, "Failure stays latched until an explicit retry");
+    app.click("Retry saving progress");
+    assert(text(app.tree).includes("could not be saved on this device"), "A failed retry remains actionable");
+    app.saved.failWrites = false;
+    app.click("Retry saving progress");
+    assert.equal(app.draft().elapsedSeconds, 6, "Retry saves the measured second that initially failed");
+    assert.equal(app.draft().intervalElapsedSeconds, 6);
+    assert.equal(app.draft().participationSeconds["item-a"], 6);
+    assert(!text(app.tree).includes("Retry saving progress"));
+    assert.equal(app.timers.size, 0, "Saving cannot implicitly resume exercise");
+    app.tick(10); assert.equal(app.draft().elapsedSeconds, 6);
+    app.click("Resume"); app.tick(2); app.click("Finish early");
+    assert.equal(app.facts.length, 1);
+    assert.equal(app.facts[0].participationSeconds["item-a"], 8);
+    assert.equal(app.saved.getItem(activeKey), null);
+    app.tick(3); assert.equal(app.facts.length, 1);
+    app.unmount();
+  });
+  await check(`${name}: failed hidden checkpoint preserves the last pending tick and remains paused on return`, () => {
+    const app = createHost(storage(), { native });
+    app.click("Start workout"); app.tick(5);
+    app.sample(1000, { flush: false });
+    app.saved.failWrites = true; app.visible(false, false); app.flush();
+    assert.equal(app.timers.size, 0);
+    app.sample(60_000); app.visible(true);
+    assert(text(app.tree).includes("Retry saving progress"));
+    app.click("Save & close"); assert.deepEqual(app.closes, []);
+    app.saved.failWrites = false; app.click("Retry saving progress");
+    assert.equal(app.draft().elapsedSeconds, 6);
+    assert.equal(app.draft().participationSeconds["item-a"], 6);
+    assert.equal(app.draft().pauseReason, "hidden");
+    assert.equal(app.timers.size, 0);
+    app.click("Save & close"); assert.deepEqual(app.closes, [true]);
+    app.unmount();
+  });
+  await check(`${name}: a failed first checkpoint preserves the start and cannot credit unsaved running time`, () => {
+    const saved = storage(); saved.failWrites = true;
+    const app = createHost(saved, { native });
+    app.click("Start workout");
+    assert.equal(app.starts, 1);
+    assert.equal(app.draft(), null);
+    assert.equal(app.timers.size, 0);
+    assert(text(app.tree).includes("Retry saving progress"));
+    app.tick(10); app.click("Save & close"); assert.deepEqual(app.closes, []);
+    saved.failWrites = false; app.click("Retry saving progress");
+    assert.equal(app.draft().elapsedSeconds, 0);
+    assert.deepEqual(app.draft().participationSeconds, {});
+    if (!native) assert.deepEqual(app.draft().lockedPlanItemIds, ["item-a", "item-b"]);
+    const firstStart = app.draft().startedAt;
+    app.click("Resume"); app.tick(1);
+    assert.equal(app.starts, 1);
+    assert.equal(app.draft().startedAt, firstStart);
+    assert.equal(app.draft().participationSeconds["item-a"], 1);
+    app.unmount();
+  });
+  await check(`${name}: rejected completion stays visible and retries all completed facts once`, () => {
+    const app = createHost(storage(), { native });
+    const attempts = [];
+    let accept = false;
+    app.props = { ...app.props, onFinish: facts => { attempts.push(facts); if (!accept) return false; app.facts.push(facts); return true; } };
+    app.flush(); app.click("Start workout"); app.tick(plan.intendedDurationSeconds);
+    assert.equal(attempts.length, 1);
+    assert.equal(app.facts.length, 0);
+    assert(text(app.tree).includes("completed work could not be saved for review"));
+    assert.equal(app.timers.size, 0);
+    app.tick(5); assert.equal(attempts.length, 1, "Failure must not retry completion repeatedly");
+    app.click("Save & close"); assert.deepEqual(app.closes, []);
+    app.click("Retry saving progress");
+    assert.equal(app.timers.size, 0);
+    accept = true; app.click("Finish workout");
+    assert.equal(app.facts.length, 1);
+    assert.deepEqual(app.facts[0].participationSeconds, attempts[0].participationSeconds);
+    assert.deepEqual(app.facts[0].completedPlanItemIds, attempts[0].completedPlanItemIds, "Retry must retain the naturally finished final item");
+    assert.equal(app.saved.getItem(activeKey), null);
+    app.tick(5); assert.equal(app.facts.length, 1);
+    app.unmount();
+  });
+}
+
+for (const native of [false, true]) await check(`${native ? "native" : "mixed"}: an older open player cannot overwrite newer measured progress`, () => {
+  const saved = storage(), active = createHost(saved, { native });
+  active.click("Start workout"); active.tick(5);
+  const stale = createHost(saved, { native });
+  active.tick(3);
+  const newer = saved.getItem(activeKey);
+  stale.click("Resume");
+  assert.equal(saved.getItem(activeKey), newer, "Stale paused state must never overwrite newer measured seconds");
+  assert(text(stale.tree).includes("another open view"));
+  assert.equal(stale.timers.size, 0);
+  stale.click("Retry saving progress");
+  assert.equal(saved.getItem(activeKey), newer, "Retry must not turn a stale view into the writer");
+  active.unmount(); stale.unmount();
+});
+
+for (const native of [false, true]) {
+  const name = native ? "native" : "mixed";
+  await check(`${name}: removed recovery cannot be resurrected by a stale player`, () => {
+    const saved = storage(), app = createHost(saved, { native });
+    app.click("Start workout"); app.tick(5); app.click("Pause"); saved.removeItem(activeKey);
+    app.click("Resume"); assert.equal(saved.getItem(activeKey), null); assert.equal(app.timers.size, 0);
+    app.click("Retry saving progress"); assert.equal(saved.getItem(activeKey), null);
+    app.unmount();
+  });
+  await check(`${name}: storage event pauses immediately and preserves another view's newer recovery`, () => {
+    const saved = storage(), app = createHost(saved, { native }); app.click("Start workout"); app.tick(5);
+    const newer = JSON.stringify({ ...app.draft(), elapsedSeconds: 7, intervalElapsedSeconds: 7, participationSeconds: { "item-a": 7 } });
+    saved.setItem(activeKey, newer); app.lifecycle("storage", { key: activeKey });
+    assert.equal(app.timers.size, 0); app.tick(3); assert.equal(saved.getItem(activeKey), newer);
+    assert(text(app.tree).includes("another open view")); app.unmount();
+  });
+  await check(`${name}: another view's start invalidates a pending first authorization`, async () => {
+    const gate = pendingAuthorization(), saved = storage(), app = createHost(saved, { native, onBeforeRun: gate.authorize });
+    app.click("Start workout"); const newer = JSON.stringify({ version: native ? 2 : 3, planId: "newer-plan", elapsedSeconds: 8 });
+    saved.setItem(activeKey, newer); gate.requests[0].resolve(true); await app.drain();
+    assert.equal(app.starts, 0); assert.equal(app.timers.size, 0); assert.equal(saved.getItem(activeKey), newer);
+    app.unmount();
+  });
+  await check(`${name}: interval-transition write failure retains and restores the exact next cursor`, () => {
+    const saved = storage(), app = createHost(saved, { native }); app.click("Start workout"); app.tick(44);
+    let failed = false;
+    app.beforeEffects = () => { if (!failed && app.title() === "Rest") { failed = true; saved.failWrites = true; } };
+    app.tick(1); assert(failed); assert.equal(app.timers.size, 0);
+    assert.equal(app.draft().intervalIndex, 0); assert.equal(app.draft().intervalElapsedSeconds, 45);
+    saved.failWrites = false; app.click("Retry saving progress");
+    assert.equal(app.draft().intervalIndex, 1); assert.equal(app.draft().intervalElapsedSeconds, 0); assert.equal(app.draft().elapsedSeconds, 45);
+    app.unmount(); const reloaded = createHost(saved, { native });
+    assert.equal(reloaded.title(), "Rest"); assert.equal(reloaded.timers.size, 0);
+    reloaded.click("Resume"); reloaded.tick(1); assert.equal(reloaded.draft().elapsedSeconds, 46);
+    assert.equal(reloaded.draft().participationSeconds["item-a"], 45); reloaded.unmount();
+  });
+  await check(`${name}: completion cleanup cannot delete a new recovery written during handoff`, () => {
+    const saved = storage(), app = createHost(saved, { native }); app.click("Start workout"); app.tick(5);
+    const newer = JSON.stringify({ version: native ? 2 : 3, planId: "newer-workout", elapsedSeconds: 3 });
+    app.props = { ...app.props, onFinish: () => { saved.setItem(activeKey, newer); return true; } }; app.flush(); app.click("Finish early");
+    assert.equal(saved.getItem(activeKey), newer); app.unmount();
+  });
+  await check(`${name}: unreadable initial storage shows a blocked player instead of throwing or replacing unknown work`, () => {
+    const saved = storage(), getItem = saved.getItem;
+    saved.getItem = () => { throw new Error("Unavailable storage"); };
+    const app = createHost(saved, { native }); assert.equal(app.starts, 0); assert.equal(app.timers.size, 0);
+    saved.getItem = getItem; app.click("Retry saving progress");
+    assert(text(app.tree).includes("could not be read")); assert.equal(app.starts, 0); assert.equal(saved.getItem(activeKey), null);
     app.unmount();
   });
 }

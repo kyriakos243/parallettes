@@ -196,6 +196,9 @@ export type SyncDeltaResponse = Readonly<{
   conflicts: readonly EntityConflict[];
 }>;
 
+/** Optional atomic precondition for account sign-out, never reset/deletion. */
+export type VNextSignOutClearGuard = Readonly<{ assessmentDraft: AssessmentDraft | null }>;
+
 export type VNextShadowStore = Readonly<{
   saveAssessmentDraft(draft: AssessmentDraft): Promise<void>;
   readAssessmentDraft(athleteId: AthleteId): Promise<AssessmentDraft | null>;
@@ -225,6 +228,6 @@ export type VNextShadowStore = Readonly<{
     cursor: number,
   ): Promise<void>;
   getSyncCursor(athleteId: AthleteId): Promise<number>;
-  clearAthlete(athleteId: AthleteId): Promise<void>;
+  clearAthlete(athleteId: AthleteId, signOutGuard?: VNextSignOutClearGuard): Promise<void>;
   close(): void;
 }>;

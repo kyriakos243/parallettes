@@ -152,7 +152,7 @@ for (const letter of "BCDEF") assert(mediaSource.includes(`registerMotionGuides(
   `Combined media entry omits exact literal registration or retains a generator fallback ${letter}`);
 const productionSource = source("app/vnext/production/VNextProductionApp.tsx");
 assert(productionSource.includes('import "./combinedProgressionMedia"')
-  && productionSource.includes("catalogue: experiencedPlacementCatalogue")
+  && productionSource.includes("catalogue: restrictionSafetyCatalogue")
   && productionSource.includes("evaluatePlanMedia: evaluateCombinedProgressionPlanMedia"),
 "Production does not select one coherent combined release");
 const uiSource = source("app/vnext/releaseCandidate/VNextReleaseCandidateApp.tsx");
@@ -160,7 +160,10 @@ assert(uiSource.includes("const workoutBundle = plan ? bundleFor(plan.catalogueV
   && uiSource.includes("<WorkoutRunner plan={plan} bundle={workoutBundle}")
   && uiSource.includes("bundleFor(recoveryPlan.catalogueVersion)")
   && uiSource.includes("bundleFor(assessment.draft.catalogueVersion)")
-  && uiSource.includes("bundleFor((guidedRecovery?.draft ?? snapshot.assessmentDraft)?.catalogueVersion"),
+  && uiSource.includes("bundleFor(guidedRecovery?.version === 2 ? guidedRecovery.catalogueVersion")
+  && uiSource.includes(": progressionCatalogueVersion ?? (guidedRecovery?.draft ?? snapshot.assessmentDraft)?.catalogueVersion")
+  && uiSource.includes("runtime.commitProgressionCheck({ ...refreshInput(), catalogueVersion: pending.catalogueVersion, result: pending.result })")
+  && uiSource.includes("runtime.commitGuidedTest({ ...refreshInput(), draft: pending.draft, result: pending.result })"),
 "Browser workflow recovery no longer selects native workout/assessment/guided definitions");
 assert(uiSource.includes("catalogueVersions: vNextDefinitionBundles.map((bundle) => bundle.catalogueVersion)")
   && uiSource.includes("projectionVersions: [vNextProjectionPolicy.version]")

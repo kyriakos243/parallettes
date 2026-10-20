@@ -1,5 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Volume2, VolumeX, X } from "lucide-react";
+import { useWorkoutRunAuthorization, type WorkoutRunRequest } from "./useWorkoutRunAuthorization";
+import { createRecoveryStorageGuard, RecoveryStorageConflict } from "./recoveryStorage";
+import "./restrictionSafety.css";
 import { useWorkoutClock, type WorkoutPauseReason } from "./useWorkoutClock";
 import type {
   DefinitionBundle,
@@ -172,6 +175,8 @@ export const MixedWorkoutRunner = ({
   initialSelections = {},
   swapOptions = {},
   onStart,
+  onBeforeRun,
+  safetyVersion,
   onFinish,
   onClose,
 }: Readonly<{
@@ -181,13 +186,15 @@ export const MixedWorkoutRunner = ({
   initialSelections?: Readonly<Partial<Record<PlanItemId, WorkoutExerciseSelection>>>;
   swapOptions?: Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>;
   onStart: () => boolean | void;
+  onBeforeRun?: (request: WorkoutRunRequest) => Promise<boolean>;
+  safetyVersion?: string;
   onFinish: (facts: WorkoutExecutionFacts) => boolean | void;
   onClose: (started: boolean) => void;
 }>) => {
-  const restored = useMemo(() => typeof localStorage === "undefined"
-    ? undefined
-    : parseActiveDraft(localStorage.getItem(activeKey(plan.athleteId)), plan, bundle, initialSelections, swapOptions),
-  [bundle, initialSelections, plan, swapOptions]);
+  const checkpointStorage = useMemo(() => typeof localStorage === "undefined" ? undefined
+    : createRecoveryStorageGuard(activeKey(plan.athleteId)), [plan.athleteId, plan.id]);
+  const restored = useMemo(() => parseActiveDraft(checkpointStorage?.initialValue ?? null, plan, bundle, initialSelections, swapOptions),
+  [bundle, checkpointStorage, initialSelections, plan, swapOptions]);
   const [startedAt, setStartedAt] = useState<IsoTimestamp | undefined>(restored?.startedAt);
   const [intervalIndex, setIntervalIndex] = useState(restored?.intervalIndex ?? 0);
   const [intervalElapsedSeconds, setIntervalElapsedSeconds] = useState(restored?.intervalElapsedSeconds ?? 0);
@@ -199,9 +206,14 @@ export const MixedWorkoutRunner = ({
   );
   const [lockedPlanItemIds, setLockedPlanItemIds] = useState<readonly PlanItemId[]>(restored?.lockedPlanItemIds ?? []);
   const [running, setRunning] = useState(false);
+  const authorization = useWorkoutRunAuthorization(onBeforeRun);
+  const priorSafetyVersion = useRef(safetyVersion);
+  const [safetyChanged, setSafetyChanged] = useState(false);
   const [pauseReason, setPauseReason] = useState<WorkoutPauseReason | undefined>(restored?.pauseReason);
-  const [soundOn, setSoundOn] = useState(() => typeof localStorage === "undefined"
-    || localStorage.getItem("parallette25-vnext-timer-sound-v1") !== "off");
+  const [soundOn, setSoundOn] = useState(() => {
+    try { return typeof localStorage === "undefined" || localStorage.getItem("parallette25-vnext-timer-sound-v1") !== "off"; }
+    catch { return false; }
+  });
   const [swapPlanItemId, setSwapPlanItemId] = useState<PlanItemId>();
   const [swapDirection, setSwapDirection] = useState<SafeWorkoutSwap["direction"]>("similar");
   const structured = useMemo(() => structureWorkoutPlan(plan, bundle, selections), [bundle, plan, selections]);
@@ -215,15 +227,17 @@ export const MixedWorkoutRunner = ({
   const nextStructured = nextInterval
     ? structured.find((item) => item.planItemId === nextInterval.planItemId)
     : undefined;
-  const previewExercise = currentInterval.kind === "rest" && nextStructured
-    ? nextStructured.exercise
-    : currentExercise;
+  const previewStructured = currentInterval.kind === "rest" ? nextStructured : currentStructured;
+  const previewExercise = previewStructured?.exercise ?? currentExercise;
   const media = previewExercise.media[0];
   const motionPreset = media?.kind === "motion" ? media.reference : undefined;
   const remaining = Math.max(0, currentInterval.durationSeconds - intervalElapsedSeconds);
   const totalSeconds = timeline.reduce((sum, interval) => sum + interval.durationSeconds, 0);
   const progressPercent = totalSeconds > 0 ? Math.min(100, Math.round((elapsedSeconds / totalSeconds) * 100)) : 0;
   const completionRef = useRef(false);
+  const pendingFinish = useRef<WorkoutExecutionFacts | undefined>(undefined)
+  const checkpointFailed = useRef(false);
+  const [checkpointError, setCheckpointError] = useState<string>();
 
   const draft: ActiveWorkoutDraft | undefined = startedAt ? {
     version: 3,
@@ -242,9 +256,24 @@ export const MixedWorkoutRunner = ({
 
   const draftRef = useRef(draft);
   draftRef.current = draft;
-  const persistDraft = (): void => {
-    if (!completionRef.current && draftRef.current) {
-      localStorage.setItem(activeKey(plan.athleteId), JSON.stringify(draftRef.current));
+  const persistDraft = (retry = false): boolean => {
+    if (checkpointFailed.current && !retry) return false;
+    if (completionRef.current) return true;
+    try {
+      checkpointStorage?.assertCurrent();
+      if (draftRef.current) checkpointStorage?.write(JSON.stringify(draftRef.current));
+      checkpointFailed.current = false;
+      setCheckpointError(undefined);
+      return true;
+    } catch (reason) {
+      // Measured facts were updated synchronously before this write. Keep them
+      // in memory, stop the clock immediately and require an explicit retry.
+      checkpointFailed.current = true;
+      clock.stop();
+      setRunning(false);
+      setCheckpointError(reason instanceof RecoveryStorageConflict ? reason.message
+        : "Your latest workout progress could not be saved on this device. The timer is paused. Keep this screen open and retry saving before continuing or leaving.");
+      return false;
     }
   };
   const clock = useWorkoutClock({
@@ -276,11 +305,38 @@ export const MixedWorkoutRunner = ({
       persistDraft();
     },
   });
-  const pauseWorkout = (): void => {
+  const pauseWorkout = (): boolean => {
     clock.stop();
     setRunning(false);
-    persistDraft();
+    return persistDraft();
   };
+
+  useEffect(() => {
+    const changed = (event: StorageEvent): void => {
+      if (!completionRef.current && (event.key === activeKey(plan.athleteId) || event.key === null)) {
+        // Check only; never write a stale checkpoint in response to another view.
+        try { checkpointStorage?.assertCurrent(); }
+        catch (reason) {
+          authorization.cancel(); clock.stop(); setRunning(false);
+          checkpointFailed.current = true;
+          setCheckpointError(reason instanceof Error ? reason.message : "Saved training changed in another open view. Reload before continuing.");
+        }
+      }
+    };
+    window.addEventListener("storage", changed);
+    return () => window.removeEventListener("storage", changed);
+  }, [checkpointStorage, plan.athleteId]);
+
+  useEffect(() => {
+    if (priorSafetyVersion.current !== safetyVersion) {
+      priorSafetyVersion.current = safetyVersion;
+      authorization.cancel();
+      clock.stop();
+      setRunning(false);
+      persistDraft();
+      setSafetyChanged(true);
+    }
+  }, [safetyVersion]);
 
   const playCue = useCallback((frequency = 760, duration = .07): void => {
     if (!soundOn || document.visibilityState !== "visible") return;
@@ -306,12 +362,12 @@ export const MixedWorkoutRunner = ({
   }, [soundOn]);
 
   const finish = useCallback((completeCurrent = false): void => {
-    if (completionRef.current) return;
+    if (completionRef.current || checkpointFailed.current || !persistDraft()) return;
     clock.stop();
     setRunning(false);
     const measured = draftRef.current?.participationSeconds ?? participation;
     const completedAt = new Date().toISOString() as IsoTimestamp;
-    const facts = {
+    const facts = pendingFinish.current ?? {
       startedAt: startedAt ?? completedAt,
       completedAt,
       participationSeconds: Object.fromEntries(plan.items.map((item) => [item.id, measured[item.id] ?? 0])),
@@ -320,9 +376,18 @@ export const MixedWorkoutRunner = ({
         : completedPlanItemIds,
       performedByPlanItem: selections,
     } satisfies WorkoutExecutionFacts;
-    if (onFinish(facts) === false) return;
+    if (onFinish(facts) === false) {
+      pendingFinish.current = facts;
+      setCompletedPlanItemIds([...facts.completedPlanItemIds]);
+      if (draftRef.current) draftRef.current = { ...draftRef.current, completedPlanItemIds: facts.completedPlanItemIds };
+      checkpointFailed.current = true;
+      setCheckpointError("Your completed work could not be saved for review. Keep this screen open, retry saving, then finish again.");
+      return;
+    }
     completionRef.current = true;
-    localStorage.removeItem(activeKey(plan.athleteId));
+    // The coordinator now durably owns these exact facts. A leftover local
+    // timer cannot take precedence over its saved review/prepared completion.
+    try { checkpointStorage?.remove(); } catch { /* A newer draft must never be removed as cleanup. */ }
   }, [completedPlanItemIds, currentItem.id, onFinish, participation, plan.athleteId, plan.items, selections, startedAt, intervalIndex, timeline]);
 
   useEffect(() => {
@@ -361,13 +426,13 @@ export const MixedWorkoutRunner = ({
   useEffect(() => { persistDraft(); }, [completedPlanItemIds, elapsedSeconds, intervalElapsedSeconds, intervalIndex, participation, plan.athleteId, plan.id, selections, startedAt, pauseReason, lockedPlanItemIds]);
 
   const move = (offset: -1 | 1): void => {
-    pauseWorkout();
+    if (pendingFinish.current || !pauseWorkout()) return;
     setIntervalIndex((value) => Math.max(0, Math.min(timeline.length - 1, value + offset)));
     setIntervalElapsedSeconds(0);
   };
 
   const chooseSwap = (planItemId: PlanItemId, option?: SafeWorkoutSwap): void => {
-    if ((participation[planItemId] ?? 0) > 0 || lockedPlanItemIds.includes(planItemId)
+    if (pendingFinish.current || checkpointFailed.current || authorization.checking || (participation[planItemId] ?? 0) > 0 || lockedPlanItemIds.includes(planItemId)
       || (startedAt && workoutGroupHasStarted(planItemId, intervalIndex, groups, timeline))
       || (option && !allowedSelection(planItemId, option, swapOptions))) return;
     setSelections((current) => {
@@ -391,14 +456,19 @@ export const MixedWorkoutRunner = ({
 
   const toggleWorkout = (): void => {
     if (running) { pauseWorkout(); return; }
-    if (document.visibilityState !== "visible") return;
-    setPauseReason(undefined);
-    if (!startedAt) {
-      if (onStart() === false) return;
-      setStartedAt(new Date().toISOString() as IsoTimestamp);
-      playCue(880, .1);
-    }
-    setRunning(true);
+    if (pendingFinish.current || checkpointFailed.current || (startedAt && !persistDraft())) return;
+    authorization.run({ selections, planItemIds: [...new Set(timeline.slice(intervalIndex).map((item) => item.planItemId))] }, () => {
+      if (!persistDraft()) return false;
+      setPauseReason(undefined);
+      setSafetyChanged(false);
+      if (!startedAt) {
+        if (onStart() === false) return false;
+        setStartedAt(new Date().toISOString() as IsoTimestamp);
+        playCue(880, .1);
+      }
+      setRunning(true);
+      return true;
+    });
   };
 
   return (
@@ -420,12 +490,12 @@ export const MixedWorkoutRunner = ({
                 aria-pressed={soundOn}
                 aria-label={soundOn ? "Turn timer sound off" : "Turn timer sound on"}
                 onClick={() => setSoundOn((value) => {
-                  localStorage.setItem("parallette25-vnext-timer-sound-v1", value ? "off" : "on");
+                  try { localStorage.setItem("parallette25-vnext-timer-sound-v1", value ? "off" : "on"); } catch { /* Optional preference only. */ }
                   return !value;
                 })}
               >{soundOn ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
                 <span>{soundOn ? "Sound on" : "Sound off"}</span></button>
-              <button type="button" className="vnext-action" data-kind="secondary" aria-label={closeLabel} onClick={() => { pauseWorkout(); onClose(Boolean(startedAt)); }}><X className="vnext-rc-close-icon" aria-hidden="true" /><span>{closeLabel}</span></button>
+              <button type="button" className="vnext-action" data-kind="secondary" aria-label={closeLabel} onClick={() => { if (!pendingFinish.current && pauseWorkout()) onClose(Boolean(startedAt)); }}><X className="vnext-rc-close-icon" aria-hidden="true" /><span>{closeLabel}</span></button>
             </div>
           </header>
 
@@ -443,32 +513,36 @@ export const MixedWorkoutRunner = ({
             </div>
             <div className="vnext-rc-coaching">
               <p className="vnext-kicker vnext-rc-purpose">{currentInterval.kind === "rest" ? "Recover and set up" : currentItem.purpose.replaceAll("-", " ")}</p>
-              <h2>{currentStructured.variant.label}</h2>
-              <p className="vnext-rc-target">{currentStructured.targetLabel}</p>
-              <p className="vnext-rc-structure">{currentStructured.structureLabel}</p>
+              {previewStructured && <>
+                <h2>{previewStructured.variant.label}</h2>
+                <p className="vnext-rc-target">{previewStructured.targetLabel}</p>
+                <p className="vnext-rc-structure">{previewStructured.structureLabel}</p>
+              </>}
               {currentInterval.kind === "work" ? (
                 <>
                   <p>{currentExercise.instructions.how}</p>
                   <ul>{currentExercise.instructions.cues.map((cue) => <li key={cue}>{cue}</li>)}</ul>
                   {currentExercise.safetyNotes.length > 0 && <p className="vnext-authority">{currentExercise.safetyNotes.join(" ")}</p>}
                 </>
-              ) : <p>Relax the grip, breathe, and set the parallettes or assistance exactly before the next work interval.</p>}
+              ) : <p>{nextStructured ? "Relax the grip, breathe, and prepare for the movement shown next." : "Relax and breathe. Your workout is complete after this rest."}</p>}
             </div>
           </section>
 
           <div className="vnext-rc-player-controls">
+            {checkpointError && <div className="vnext-run-safety-message" role="alert"><p>{checkpointError}</p><button type="button" className="vnext-action" onClick={() => { persistDraft(true); }}>Retry saving progress</button></div>}
+            {(authorization.error || safetyChanged) && <p className="vnext-run-safety-message" role="alert">{authorization.error ?? "Your training information changed. Tap Resume to check the remaining work, or save and close."}</p>}
             <section className="vnext-rc-timer" aria-label="Workout timer">
               <span>{currentInterval.kind === "work" ? "Work" : "Rest"}</span>
               <strong aria-live="off">{displayTime(remaining)}</strong>
-              <small>{displayTime(elapsedSeconds)} elapsed • {running ? (clock.screenAwake ? "Screen staying on" : "Keep this screen open") : startedAt ? "Paused · tap Resume" : "Pauses when you leave the app"}</small>
-              {pauseReason && !running && <small role="status">{pauseReason === "hidden" ? "Paused when you left the app." : "Timer interrupted. Your place is saved."}</small>}
+              <small>{displayTime(elapsedSeconds)} elapsed • {running ? (clock.screenAwake ? "Screen staying on" : "Keep this screen open") : checkpointError ? "Paused · retry saving" : pendingFinish.current ? "Ready to finish" : startedAt ? "Paused · tap Resume" : "Pauses when you leave the app"}</small>
+              {pauseReason && !running && !checkpointError && <small role="status">{pauseReason === "hidden" ? "Paused when you left the app." : "Timer interrupted. Your place is saved."}</small>}
             </section>
 
             <div className="vnext-rc-player-actions">
-              <button type="button" className="vnext-action" disabled={!motionPreset} onClick={toggleWorkout}>{running ? "Pause" : startedAt ? "Resume" : "Start workout"}</button>
-              <button type="button" className="vnext-action" data-kind="secondary" disabled={intervalIndex === 0} onClick={() => move(-1)}>Previous interval</button>
-              <button type="button" className="vnext-action" data-kind="secondary" onClick={() => intervalIndex < timeline.length - 1 ? move(1) : finish()}>{intervalIndex < timeline.length - 1 ? "Skip interval" : "Finish workout"}</button>
-              <button type="button" className="vnext-action" data-kind="secondary" disabled={elapsedSeconds === 0} onClick={() => finish()}>Finish early</button>
+              <button type="button" className="vnext-action" disabled={Boolean(pendingFinish.current) || !motionPreset || authorization.checking || Boolean(checkpointError)} onClick={toggleWorkout}>{authorization.checking ? "Checking safety…" : running ? "Pause" : startedAt ? "Resume" : "Start workout"}</button>
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={Boolean(pendingFinish.current) || Boolean(checkpointError) || authorization.checking || intervalIndex === 0} onClick={() => move(-1)}>Previous interval</button>
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={Boolean(checkpointError) || authorization.checking} onClick={() => !pendingFinish.current && intervalIndex < timeline.length - 1 ? move(1) : finish()}>{!pendingFinish.current && intervalIndex < timeline.length - 1 ? "Skip interval" : "Finish workout"}</button>
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={Boolean(checkpointError) || authorization.checking || elapsedSeconds === 0} onClick={() => finish()}>Finish early</button>
             </div>
           </div>
         </div>
@@ -484,7 +558,7 @@ export const MixedWorkoutRunner = ({
                 <li key={item.planItemId} data-current={item.planItemId === currentItem.id}>
                   <div><strong>{index + 1}. {item.exercise.name}</strong><span>{item.structureLabel}</span></div>
                   {canChange && (swapOptions[item.planItemId]?.length ?? 0) > 0 && (
-                    <button type="button" onClick={() => { pauseWorkout(); setSwapPlanItemId(item.planItemId); setSwapDirection("similar"); }}>Change</button>
+                    <button type="button" disabled={Boolean(pendingFinish.current) || Boolean(checkpointError) || authorization.checking} onClick={() => { pauseWorkout(); setSwapPlanItemId(item.planItemId); setSwapDirection("similar"); }}>Change</button>
                   )}
                 </li>
               );

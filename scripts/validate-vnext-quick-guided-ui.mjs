@@ -57,7 +57,7 @@ const componentModule = (path) => {
     if (name === "../assessment/presentation") return { guidedTestPresentation };
     if (name === "../media/VNextMotionGuide") return { VNextMotionGuide: "OwnedMotionGuide" };
     if (name.endsWith(".css")) return {};
-    if (name === "./useWorkoutClock" || name === "./workoutClock") return componentModule(resolve(dirname(sourcePath), `${name}.ts`));
+    if (name === "./useWorkoutClock" || name === "./workoutClock" || name === "./guidedTimerAudio") return componentModule(resolve(dirname(sourcePath), `${name}.ts`));
     throw new Error(`Unexpected guided-check import ${name}`);
   });
   return module.exports;
@@ -86,7 +86,7 @@ const protocolFor = (kind) => {
 };
 const createHost = (kind, options = {}) => {
   const owner = { slots: [], cursor: 0, effects: [], dirty: true, key: undefined, tree: undefined,
-    timers: new Map(), serial: 0, commits: [], closes: 0, wakeRequests: [], monotonic: 0, wall: 1_792_281_600_000,
+    timers: new Map(), serial: 0, commits: [], closes: 0, wakeRequests: [], audio: [], audioContexts: [], audioResumes: 0, monotonic: 0, wall: 1_792_281_600_000,
     document: { ...eventTarget(), visibilityState: "visible" }, window: eventTarget(), protocol: protocolFor(kind) };
   owner.navigator = options.wakeLock ? { wakeLock: { request(type) {
     assert.equal(type, "screen");
@@ -102,6 +102,20 @@ const createHost = (kind, options = {}) => {
     setInterval(callback) { const id = ++owner.serial; owner.timers.set(id, callback); return id; },
     clearInterval(id) { owner.timers.delete(id); },
   });
+  if (options.audio) owner.window.AudioContext = class {
+    constructor() { owner.audioContexts.push(this); }
+    state = options.suspendedAudio ? "suspended" : "running";
+    currentTime = 0;
+    destination = {};
+    resume() { owner.audioResumes++; return new Promise(resolve => { owner.resumeAudio = () => { this.state = "running"; resolve(); }; }); }
+    close() { this.state = "closed"; return Promise.resolve(); }
+    createGain() { return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {} }, connect() {}, disconnect() {} }; }
+    createOscillator() {
+      const node = { frequency: {}, connect() {}, disconnect() {}, start(time) { node.started = time; },
+        stop(time) { if (time === undefined) { node.cancelled = true; node.onended?.(); } else node.end = time; } };
+      owner.audio.push(node); return node;
+    }
+  };
   const install = () => {
     host = owner;
     for (const [key, value] of Object.entries({ window: owner.window, document: owner.document, navigator: owner.navigator, performance: { now: () => owner.monotonic } })) {
@@ -196,13 +210,33 @@ try {
   });
   check("successful-attempts", (app) => {
     app.props = { ...app.props, initialResult: { outcome: "not-yet", measurement: { value: 0, unit: "attempts", attemptsTotal: 0 }, qualityCriteriaSatisfied: false, safetyCriteriaSatisfied: false } }; app.flush();
-    app.click("No attempt made"); app.click("Save corrected entry");
-    assert.equal(app.commits[0].measurement, undefined, "No attempt is saved without fabricated zero-count measurement");
-    assert.equal(app.commits[0].outcome, "not-yet");
+    app.props = { ...app.props, onNoAttempt: () => { app.noAttemptFinishes = (app.noAttemptFinishes ?? 0) + 1; } }; app.flush();
+    app.click("No attempt made");
+    assert.equal(app.commits.length, 0, "Choosing no attempt does not fabricate a failed performance");
+    assert(text(app.tree).includes("No result, training load or change to your progress will be saved"));
+    const finish = app.button("Finish without a result");
+    finish.props.onClick(); finish.props.onClick(); app.flush();
+    assert.equal(app.noAttemptFinishes, 1, "Double tap finishes locally once");
+    assert.equal(app.commits.length, 0, "No attempt never reaches evidence append");
   });
   check("range", (app) => {
     app.click("I met this target");
     assert.deepEqual(app.commits[0], { outcome: "clean", qualityCriteriaSatisfied: true, safetyCriteriaSatisfied: true });
+  });
+  check("duration-seconds", (app) => {
+    app.props = { ...app.props, onNoAttempt: () => { app.noAttemptFinishes = (app.noAttemptFinishes ?? 0) + 1; } }; app.flush();
+    app.click("Different result");
+    app.input("Seconds completed", "2");
+    app.click("No attempt made");
+    app.click("Enter an attempted result");
+    assert(text(app.tree).includes("Seconds completed"), "Returning to a real attempt retains its measured form");
+    app.click("No attempt made");
+    app.props = { ...app.props, busy: true }; app.flush();
+    assert.equal(app.button("Finish without a result").props.disabled, true);
+    app.props = { ...app.props, busy: false }; app.flush();
+    app.click("Finish without a result");
+    assert.equal(app.noAttemptFinishes, 1);
+    assert.equal(app.commits.length, 0, "An unattempted timed check cannot manufacture zero or failed evidence");
   });
   check("duration-seconds", (app) => {
     app.click("Pain or instability");
@@ -211,6 +245,34 @@ try {
     assert(app.button("Retry saving this result"));
     assert(!app.button("I held exactly"), "Prepared retry must hide fresh result actions");
     assert(!app.button("Use "), "Prepared retry must not invite another physical check");
+  });
+  check("repetitions", (app) => {
+    let discards=0;
+    app.props={...app.props,onDiscardUnsavedResult:()=>{discards++;}};app.flush();
+    assert(!app.button("Discard unsaved result"),'A fresh check must not offer pending-entry removal');
+    app.props={...app.props,retryingExactObservation:true,error:'Current safety changed. The entry is kept.'};app.flush();
+    app.click('Discard unsaved result');
+    assert.equal(discards,0,'Opening confirmation cannot discard the result');
+    assert(text(app.tree).includes('An unsaved result will not count toward progress'));
+    assert(text(app.tree).includes('Any result already saved stays in your progress'));
+    app.click('Keep result');
+    assert.equal(discards,0);
+    assert(app.button('Retry saving this result'),'Cancel keeps exact retry available');
+    app.click('Discard unsaved result');
+    app.props={...app.props,busy:true};app.flush();
+    assert(app.button('Discard pending result').props.disabled);
+    assert(app.button('Keep result').props.disabled);
+    app.props={...app.props,busy:false};app.flush();
+    const confirm=app.button('Discard pending result').props.onClick;
+    confirm();confirm();app.flush();
+    assert.equal(discards,1,'Double taps request one local discard');
+    assert.equal(app.commits.length,0,'Discard never submits a fabricated result');
+    // Failed removal retains the same pending form and permits an explicit retry.
+    app.props={...app.props,busy:true};app.flush();
+    app.props={...app.props,busy:false,error:'Pending entry could not be removed.'};app.flush();
+    app.click('Discard pending result');
+    assert.equal(discards,2);
+    assert.equal(app.commits.length,0);
   });
   check("repetitions", (app) => {
     app.click("Different result"); app.input("Reps completed", "5"); app.choose("Partial");
@@ -253,6 +315,68 @@ try {
     assert(app.button("Use "), "Reload begins with an idle helper, never a presumed completed hold");
     assert.equal(app.commits.length, 0);
   });
+  check("duration-seconds", (app) => {
+    app.click("Timer sound off");
+    assert(text(app.tree).includes("Sound is unavailable"));
+    assert.equal(app.button("Timer sound off").props["aria-pressed"], false);
+    app.click("Use "); app.tick(3);
+    assert.equal(app.timer(), `Hold${app.protocol.metric.minimum}s`, "Unsupported sound must never block the timer");
+  });
+  const audible = createHost("duration-seconds", { audio: true });
+  try {
+    audible.click("Use "); audible.tick(3);
+    assert.equal(audible.audio.length, 0, "Sound requires the athlete's choice");
+    audible.click("Stop timer"); audible.click("Timer sound off");
+    assert.equal(audible.button("Timer sound on").props["aria-pressed"], true);
+    audible.click("Start a new timer"); audible.tick(3);
+    assert.equal(audible.audio.length, 1, "One beep marks the actual hold start, after preparation");
+    assert(elements(audible.tree).some(node => node.props.role === "status" && text(node) === "Start holding now."));
+    assert.equal(elements(audible.tree).find(node => node.props.role === "timer").props["aria-live"], "off");
+    audible.tick(audible.protocol.metric.minimum);
+    assert.equal(audible.audio.length, 3, "Two beeps mark completion");
+    assert.equal(audible.commits.length, 0, "Audible completion never saves or confirms evidence");
+    audible.visible(false);
+    assert(audible.audio.every(node => node.cancelled), "Hide cancels even a just-started final cue");
+    audible.sample(60_000); audible.visible(true);
+    assert.equal(audible.audio.length, 3, "Returning cannot replay missed audio");
+    audible.click("Start a new timer"); audible.tick(3);
+    audible.click("Timer sound on");
+    assert(audible.audio.every(node => node.cancelled), "Muting cancels current sound immediately");
+    audible.tick(audible.protocol.metric.minimum);
+    assert.equal(audible.audio.length, 4, "Muted completion remains silent");
+    checks++;
+  } finally { audible.cleanup(); }
+  const pendingSound = createHost("duration-seconds", { audio: true, suspendedAudio: true });
+  try {
+    pendingSound.click("Timer sound off"); pendingSound.click("Use ");
+    pendingSound.tick(1); pendingSound.visible(false);
+    pendingSound.resumeAudio(); await pendingSound.drain(); pendingSound.sample(60_000); pendingSound.visible(true);
+    assert.equal(pendingSound.audio.length, 0, "Late audio resume cannot play an interrupted cue");
+    assert.equal(pendingSound.timer(), "");
+    pendingSound.click("Start a new timer"); pendingSound.tick(3);
+    assert.equal(pendingSound.audio.length, 1);
+    pendingSound.click("I held exactly"); pendingSound.tick(60);
+    assert(pendingSound.audio.every(node => node.cancelled), "Saving a reported result cancels the helper and all cues");
+    assert.equal(pendingSound.audio.length, 1, "A save response must not restart an unfinished helper");
+    checks++;
+  } finally { pendingSound.cleanup(); }
+  const interruptedSound = createHost("duration-seconds", { audio: true });
+  try {
+    interruptedSound.click("Timer sound off"); interruptedSound.click("Use "); interruptedSound.tick(3);
+    interruptedSound.audioContexts[0].state = "interrupted";
+    interruptedSound.visible(false); interruptedSound.visible(true);
+    assert.equal(interruptedSound.audio.length, 1);
+    interruptedSound.click("Start a new timer");
+    assert.equal(interruptedSound.audioResumes, 1, "A new user gesture must resume iOS's interrupted audio state");
+    interruptedSound.resumeAudio(); await interruptedSound.drain();
+    assert.equal(interruptedSound.audio.length, 1, "Resuming audio cannot replay the interrupted cue");
+    interruptedSound.tick(3);
+    assert.equal(interruptedSound.audio.length, 2, "The new hold has its own start cue");
+    interruptedSound.tick(interruptedSound.protocol.metric.minimum);
+    assert.equal(interruptedSound.audio.length, 4);
+    assert.equal(interruptedSound.commits.length, 0);
+    checks++;
+  } finally { interruptedSound.cleanup(); }
   const awake = createHost("duration-seconds", { wakeLock: true });
   try {
     awake.click("Use "); await awake.drain();

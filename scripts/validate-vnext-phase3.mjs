@@ -56,11 +56,13 @@ const policyModule = loadTypeScriptModule("app/vnext/projection/policy.ts", {
 const normalize = loadTypeScriptModule("app/vnext/projection/normalize.ts", {
   "./policy": policyModule,
 });
+const restrictionExposure = loadTypeScriptModule("app/vnext/projection/restrictionExposure.ts");
 const projection = loadTypeScriptModule("app/vnext/projection/project.ts", {
   "../contracts": contracts,
   "./contracts": projectionContracts,
   "./normalize": normalize,
   "./policy": policyModule,
+  "./restrictionExposure": restrictionExposure,
 });
 
 const bundle = {
