@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   DefinitionBundle,
   GuidedTestOffer,
@@ -7,6 +7,7 @@ import type {
 import { guidedTestPresentation } from "../assessment/presentation";
 import { VNextMotionGuide } from "../media/VNextMotionGuide";
 import { useWorkoutClock } from "./useWorkoutClock";
+import { createGuidedTimerAudio } from "./guidedTimerAudio";
 import "./quickGuided.css";
 
 export type GuidedTestFormResult = Readonly<{
@@ -27,6 +28,10 @@ type GuidedTestRunnerProps = Readonly<{
   hasSavedChecks?: boolean;
   initialResult?: GuidedTestFormResult;
   onCorrectInvalidEntry?: () => void;
+  /** Clear only local pending recovery; never remove an already saved observation. */
+  onDiscardUnsavedResult?: () => void;
+  /** Explicitly no physical attempt: finish locally without performance evidence. */
+  onNoAttempt?: () => void;
   onCommit: (result: GuidedTestFormResult) => void;
   onClose: () => void;
 }>;
@@ -40,6 +45,8 @@ const GuidedTestForm = ({
   hasSavedChecks = false,
   initialResult,
   onCorrectInvalidEntry,
+  onDiscardUnsavedResult,
+  onNoAttempt,
   onCommit,
   onClose,
 }: GuidedTestRunnerProps) => {
@@ -50,8 +57,27 @@ const GuidedTestForm = ({
   const [attemptsTotal, setAttemptsTotal] = useState(initialResult?.measurement?.attemptsTotal === undefined ? "" : String(initialResult.measurement.attemptsTotal));
   const [exertion, setExertion] = useState(initialResult?.perceivedExertion === undefined ? "" : String(initialResult.perceivedExertion));
   const [notes, setNotes] = useState(initialResult?.notes ?? "");
+  const [discardConfirmation, setDiscardConfirmation] = useState(false);
+  const [noAttempt, setNoAttempt] = useState(false);
+  const noAttemptRequested = useRef(false);
+  const discardRequested = useRef(false);
+  useEffect(() => { if (!busy) { discardRequested.current = false; noAttemptRequested.current = false; } }, [busy, error]);
   type HoldTimer = Readonly<{ stage: "idle" | "ready" | "holding" | "complete" | "interrupted"; remaining: number; run: number }>;
   const [holdTimer, setHoldTimer] = useState<HoldTimer>({ stage: "idle", remaining: 0, run: 0 });
+  const [soundOn, setSoundOn] = useState(false);
+  const [soundUnavailable, setSoundUnavailable] = useState(false);
+  const holdAudio = useMemo(createGuidedTimerAudio, []);
+  useEffect(() => {
+    const hide = (): void => { if (document.visibilityState !== "visible") holdAudio.cancel(); };
+    const cancel = (): void => holdAudio.cancel();
+    document.addEventListener("visibilitychange", hide);
+    window.addEventListener("pagehide", cancel);
+    return () => {
+      document.removeEventListener("visibilitychange", hide);
+      window.removeEventListener("pagehide", cancel);
+      holdAudio.dispose();
+    };
+  }, [holdAudio]);
   const holdTimerRef = useRef(holdTimer);
   const changeHoldTimer = (next: HoldTimer): void => {
     holdTimerRef.current = next;
@@ -71,6 +97,7 @@ const GuidedTestForm = ({
         // Start a fresh interval at the end of preparation. No preparation time
         // or queued callback can count toward the continuous hold itself.
         holdClock.stop();
+        if (soundOn && !holdAudio.play(current.stage === "ready" ? "start" : "finish")) setSoundUnavailable(true);
         changeHoldTimer({
           stage: current.stage === "ready" ? "holding" : "complete",
           remaining: current.stage === "ready" ? metric.minimum : 0,
@@ -79,12 +106,14 @@ const GuidedTestForm = ({
       }
     },
     onAutoPause: () => {
+      holdAudio.cancel();
       const current = holdTimerRef.current;
       changeHoldTimer({ stage: "interrupted", remaining: 0, run: current.run + 1 });
     },
   });
   const stopHoldTimer = (): void => {
     holdClock.stop();
+    holdAudio.cancel();
     changeHoldTimer({ stage: "interrupted", remaining: 0, run: holdTimerRef.current.run + 1 });
   };
   const needsMeasurement = metric.kind === "duration-seconds"
@@ -144,6 +173,10 @@ const GuidedTestForm = ({
     resultMeasurement?: ObservationMeasurement,
   ): void => {
     holdClock.stop();
+    holdAudio.cancel();
+    if (holdTimerRef.current.stage === "ready" || holdTimerRef.current.stage === "holding") {
+      changeHoldTimer({ stage: "interrupted", remaining: 0, run: holdTimerRef.current.run + 1 });
+    }
     onCommit({
       outcome: resultOutcome,
       ...(resultMeasurement ? { measurement: resultMeasurement } : {}),
@@ -192,7 +225,7 @@ const GuidedTestForm = ({
             <p className="vnext-kicker">Starting-point check</p>
             <h1 id="vnext-guided-title">{presentation.exercise.name}</h1>
           </div>
-          <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => { holdClock.stop(); onClose(); }}>Back</button>
+          <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => { holdClock.stop(); holdAudio.cancel(); onClose(); }}>Back</button>
         </div>
 
         {hasSavedChecks && !retryingExactObservation && <p className="vnext-help" role="status">Previous check saved. Rest before continuing. Back returns to your results so you can finish for today.</p>}
@@ -206,9 +239,16 @@ const GuidedTestForm = ({
             <p>{presentation.exercise.instructions.how}</p>
             {metric.kind === "duration-seconds" && !retryingExactObservation && (
               <div className="vnext-quick-guided-timer" aria-label="Optional hold timer">
+                <button type="button" className="vnext-action" data-kind="secondary" aria-pressed={soundOn} disabled={busy} onClick={() => {
+                  if (soundOn) { holdAudio.cancel(); setSoundOn(false); setSoundUnavailable(false); }
+                  else { const available = holdAudio.prepare(); setSoundOn(available); setSoundUnavailable(!available); }
+                }}>Timer sound {soundOn ? "on" : "off"}</button>
+                {soundOn && <p className="vnext-help">One beep starts the hold; two beeps finish it.</p>}
+                {soundUnavailable && <p className="vnext-help" role="status">Sound is unavailable. Follow the onscreen timer.</p>}
                 {holdTimer.stage === "ready" || holdTimer.stage === "holding" ? (
                   <>
-                    <p role="timer" aria-label={holdTimer.stage === "ready" ? "Get ready countdown" : "Hold time remaining"}>
+                    <p role="status">{holdTimer.stage === "ready" ? "Get ready. The hold starts after the countdown." : "Start holding now."}</p>
+                    <p role="timer" aria-live="off" aria-label={holdTimer.stage === "ready" ? "Get ready countdown" : "Hold time remaining"}>
                       <span>{holdTimer.stage === "ready" ? "Get ready" : "Hold"}</span><strong>{holdTimer.remaining}s</strong>
                     </p>
                     <button type="button" className="vnext-action" data-kind="secondary" onClick={stopHoldTimer}>Stop timer</button>
@@ -219,6 +259,8 @@ const GuidedTestForm = ({
                     {holdTimer.stage === "interrupted" && <p role="status">Timer stopped. Nothing was saved. Use your own measured result, or restart later when rested. Interrupted time cannot be added together.</p>}
                     <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || offer.availability !== "available"} onClick={() => {
                       holdClock.stop();
+                      holdAudio.cancel();
+                      if (soundOn) setSoundUnavailable(!holdAudio.prepare());
                       changeHoldTimer({ stage: "ready", remaining: 3, run: holdTimerRef.current.run + 1 });
                     }}>{holdTimer.stage === "idle" ? `Use ${metric.minimum}-second timer` : "Start a new timer"}</button>
                     {holdTimer.stage === "idle" && <p className="vnext-help">Optional · 3 seconds to get ready. Stops if you leave the app. Time alone never saves a result.</p>}
@@ -252,6 +294,23 @@ const GuidedTestForm = ({
                 // The coordinator ignores fresh form values while retrying and reuses its exact prepared observation.
                 saveResult(outcome ?? "not-yet", exactMeasurement);
               }}>{busy ? "Saving…" : "Retry saving this result"}</button>}
+              {onDiscardUnsavedResult && (discardConfirmation ? (
+                <section className="vnext-quick-guided-discard" aria-labelledby="vnext-guided-discard-title" role="alert">
+                  <h3 id="vnext-guided-discard-title">Discard this pending result?</h3>
+                  <p>This removes the pending entry from this device. An unsaved result will not count toward progress. Any result already saved stays in your progress.</p>
+                  <p>You can then update your restriction feedback or return to Today.</p>
+                  <div className="vnext-actions">
+                    <button type="button" className="vnext-action" autoFocus disabled={busy} onClick={() => setDiscardConfirmation(false)}>Keep result</button>
+                    <button type="button" className="vnext-action vnext-quick-guided-stop" data-kind="secondary" disabled={busy} onClick={() => {
+                      if (discardRequested.current) return;
+                      discardRequested.current = true;
+                      holdClock.stop();
+                      holdAudio.cancel();
+                      onDiscardUnsavedResult();
+                    }}>Discard pending result</button>
+                  </div>
+                </section>
+              ) : <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => setDiscardConfirmation(true)}>Discard unsaved result…</button>)}
             </>
           ) : (
             <>
@@ -279,8 +338,19 @@ const GuidedTestForm = ({
               )}
               {differentResult && (
                 <>
+                  {noAttempt && onNoAttempt ? <>
+                    <p className="vnext-help">You did not try this check. No result, training load or change to your progress will be saved.</p>
+                    <button type="button" className="vnext-submit" disabled={locked} onClick={() => {
+                      if (locked || noAttemptRequested.current) return;
+                      noAttemptRequested.current = true;
+                      holdClock.stop();
+                      holdAudio.cancel();
+                      onNoAttempt();
+                    }}>Finish without a result</button>
+                    <button type="button" className="vnext-action" data-kind="secondary" disabled={locked} onClick={() => setNoAttempt(false)}>Enter an attempted result</button>
+                  </> : <>
                   {needsMeasurement && measuredFields}
-                  {isAttempts && <button type="button" className="vnext-action" data-kind="secondary" disabled={locked} onClick={() => { setMeasurementValue(""); setAttemptsTotal(""); setOutcome("not-yet"); }}>No attempt made</button>}
+                  {onNoAttempt && <button type="button" className="vnext-action" data-kind="secondary" disabled={locked} onClick={() => setNoAttempt(true)}>No attempt made</button>}
                   <fieldset disabled={locked}>
                     <legend>Your result</legend>
                     <div className="vnext-rc-answer-grid">
@@ -304,6 +374,7 @@ const GuidedTestForm = ({
                     onClick={() => { if (outcome) saveResult(outcome, exactMeasurement); }}
                   >{busy ? "Saving…" : initialResult ? "Save corrected entry" : outcome === "clean" ? "Confirm clean result" : "Save result"}</button>
                   {!initialResult && <button type="button" className="vnext-action" data-kind="secondary" disabled={locked} onClick={() => setDifferentResult(false)}>Back to quick result</button>}
+                  </>}
                 </>
               )}
               <details className="vnext-quick-guided-details">

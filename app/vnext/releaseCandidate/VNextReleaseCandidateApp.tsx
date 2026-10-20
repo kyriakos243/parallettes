@@ -25,15 +25,22 @@ import {
   type SessionDemand,
   type VNextShadowStore,
   type WorkoutCompletionAnswer,
+  type RestrictionReportedEvent,
   generateVNextCustomSession,
   safeWorkoutSwaps,
 } from "../index";
 import { VNextExperience, type VNextWorkoutReviewFeedback } from "../ui";
+import type { WorkoutReviewDraft } from "../ui/VNextExperience";
+import { readWorkoutReviewDraft } from "./workoutReviewRecovery";
+import { createRecoveryStorageGuard, RecoveryStorageConflict } from "./recoveryStorage";
 import { buildSessionHistory } from "../ui/sessionHistory";
 import { confirmedSyncFingerprint, trainingSyncMessage, type TrainingSyncStatus } from "../ui/syncStatus";
 import { AssessmentRunner } from "./AssessmentRunner";
 import { GuidedTestRunner, type GuidedTestFormResult } from "./GuidedTestRunner";
 import { CustomSessionBuilder, type VNextCustomSessionRequest } from "./CustomSessionBuilder";
+import { RestrictionReportForm } from "./RestrictionReportForm";
+import { validateWorkoutStart } from "./workoutStartSafety";
+import type { WorkoutRunRequest } from "./useWorkoutRunAuthorization";
 import { shortWorkoutPreferenceKey } from "./shortWorkoutPreferences";
 import { isMixedWorkoutPlan } from "../mixedWorkout";
 import { ReliableWorkoutRunner } from "./ReliableWorkoutRunner";
@@ -65,7 +72,6 @@ import {
   runtimeDefinitionBundle,
 } from "./runtime";
 import {
-  clearActiveWorkoutDraft,
   hasActiveWorkoutDraft,
   recoverActiveWorkoutFacts,
   WorkoutRunner as FrozenWorkoutRunner,
@@ -119,16 +125,21 @@ type WorkoutRecovery = Readonly<{
   selections?: Readonly<Partial<Record<PlanItemId, SafeWorkoutSwap>>>;
   swapOptions?: Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>;
   facts?: WorkoutExecutionFacts;
+  reviewDraft?: WorkoutReviewDraft;
   prepared?: PreparedVNextWorkoutCompletion;
+  /** Advisory context only; saved plans and measured facts remain immutable. */
+  customRequest?: VNextCustomSessionRequest;
+  equipmentAtPreview?: VNextRuntimeSnapshot["intent"]["equipment"];
+  /** Exact retry for an explicitly submitted current restriction. */
+  pendingRestriction?: RestrictionReportedEvent;
 }>;
 
 type GuidedRecovery = Readonly<{
-  version: 1;
   athleteId: string;
-  draft: AssessmentDraft;
   offer: GuidedTestOffer;
   result: GuidedTestResultInput;
-}>;
+}> & (Readonly<{ version: 1; draft: AssessmentDraft }>
+  | Readonly<{ version: 2; kind: "progression"; catalogueVersion: DefinitionBundle["catalogueVersion"] }>);
 
 const workoutRecoveryKey = (athleteId: string, namespace: string): string =>
   `${storageKeyPrefix(namespace, "workout-recovery")}${athleteId}`;
@@ -208,6 +219,7 @@ const readWorkoutRecovery = (athleteId: string, namespace: string): WorkoutRecov
       : parsed.stage;
     return {
       ...parsed,
+      reviewDraft: readWorkoutReviewDraft(parsed.reviewDraft, plan.id, plan.items.map((item) => item.id)),
       stage: recoveredStage,
       origin: inferredOrigin,
       ...(parsed.facts ? { facts: {
@@ -222,16 +234,18 @@ const readWorkoutRecovery = (athleteId: string, namespace: string): WorkoutRecov
   }
 };
 
-const writeWorkoutRecovery = (recovery: WorkoutRecovery, namespace: string): void => {
-  localStorage.setItem(workoutRecoveryKey(recovery.athleteId, namespace), JSON.stringify(recovery));
+const writeWorkoutRecovery = (recovery: WorkoutRecovery, guard: ReturnType<typeof createRecoveryStorageGuard>): void => {
+  guard.write(JSON.stringify(recovery));
 };
 
 const readGuidedRecovery = (athleteId: string, namespace: string): GuidedRecovery | undefined => {
   const key = guidedRecoveryKey(athleteId, namespace);
   try {
     const parsed = JSON.parse(localStorage.getItem(key) ?? "null") as Partial<GuidedRecovery> | null;
-    if (!parsed || parsed.version !== 1 || parsed.athleteId !== athleteId
-      || parsed.draft?.athleteId !== athleteId || !parsed.offer || !parsed.result
+    if (!parsed || parsed.athleteId !== athleteId
+      || !((parsed.version === 1 && parsed.draft?.athleteId === athleteId)
+        || (parsed.version === 2 && parsed.kind === "progression" && Number.isSafeInteger(parsed.catalogueVersion) && parsed.catalogueVersion! > 0))
+      || !parsed.offer || !parsed.result
       || parsed.result.protocolId !== parsed.offer.protocolId) {
       localStorage.removeItem(key);
       return undefined;
@@ -243,8 +257,8 @@ const readGuidedRecovery = (athleteId: string, namespace: string): GuidedRecover
   }
 };
 
-const writeGuidedRecovery = (recovery: GuidedRecovery, namespace: string): void => {
-  localStorage.setItem(guidedRecoveryKey(recovery.athleteId, namespace), JSON.stringify(recovery));
+const writeGuidedRecovery = (recovery: GuidedRecovery, guard: ReturnType<typeof createRecoveryStorageGuard>): void => {
+  guard.write(JSON.stringify(recovery));
 };
 
 const downloadJson = (filename: string, value: unknown): void => {
@@ -317,14 +331,22 @@ const VNextAthleteApplication = ({
     () => readGuidedRecovery(athleteId, storageNamespace),
     [athleteId, storageNamespace],
   );
+  const workoutRecoveryStorage = useMemo(() => createRecoveryStorageGuard(workoutRecoveryKey(athleteId, storageNamespace)), [athleteId, storageNamespace]);
+  const guidedRecoveryStorage = useMemo(() => createRecoveryStorageGuard(guidedRecoveryKey(athleteId, storageNamespace)), [athleteId, storageNamespace]);
   const [snapshot, setSnapshot] = useState<VNextRuntimeSnapshot>();
   const [assessment, setAssessment] = useState<VNextRuntimeAssessmentState>();
   const [restartSetupOpen, setRestartSetupOpen] = useState(false);
   const [restartForRestrictions, setRestartForRestrictions] = useState(false);
   const [guidedOffer, setGuidedOffer] = useState<GuidedTestOffer | undefined>(initialGuidedRecovery?.offer);
+  const [progressionCatalogueVersion, setProgressionCatalogueVersion] = useState<DefinitionBundle["catalogueVersion"] | undefined>(
+    initialGuidedRecovery?.version === 2 ? initialGuidedRecovery.catalogueVersion : undefined,
+  );
   const [correctingGuidedEntry, setCorrectingGuidedEntry] = useState(false);
   const [guidedRecovery, setGuidedRecovery] = useState<GuidedRecovery | undefined>(initialGuidedRecovery);
   const [workoutRecovery, setWorkoutRecovery] = useState<WorkoutRecovery | undefined>(initialWorkoutRecovery);
+  const workoutRecoveryRef = useRef(workoutRecovery);
+  workoutRecoveryRef.current = workoutRecovery;
+  const [reviewCheckpointError, setReviewCheckpointError] = useState<string>();
   const [workoutSelections, setWorkoutSelections] = useState<Readonly<Partial<Record<PlanItemId, SafeWorkoutSwap>>>>(
     initialWorkoutRecovery?.selections ?? {},
   );
@@ -335,6 +357,7 @@ const VNextAthleteApplication = ({
   const [customOpen, setCustomOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [restrictionOpen, setRestrictionOpen] = useState(Boolean(initialWorkoutRecovery?.pendingRestriction));
   const [message, setMessage] = useState(deployment.openingMessage);
   const [error, setError] = useState<string>();
   const [savedWorkoutId, setSavedWorkoutId] = useState<string>();
@@ -355,25 +378,48 @@ const VNextAthleteApplication = ({
     : undefined;
 
   const persistWorkoutRecovery = useCallback((recovery: WorkoutRecovery): void => {
-    writeWorkoutRecovery(recovery, storageNamespace);
+    writeWorkoutRecovery(recovery, workoutRecoveryStorage);
+    workoutRecoveryRef.current = recovery;
     setWorkoutRecovery(recovery);
-  }, [storageNamespace]);
+  }, [workoutRecoveryStorage]);
+
+  const retainWorkoutReview = (draft: WorkoutReviewDraft): void => {
+    const current = workoutRecoveryRef.current;
+    if (!current || current.stage !== "review" || current.generated.plan?.id !== draft.planId) return;
+    const next = { ...current, reviewDraft: draft };
+    // Keep the newest answers in memory even when device storage is unavailable.
+    workoutRecoveryRef.current = next;
+    setWorkoutRecovery(next);
+    try {
+      writeWorkoutRecovery(next, workoutRecoveryStorage);
+      setReviewCheckpointError(undefined);
+    } catch (reason) {
+      setReviewCheckpointError(reason instanceof RecoveryStorageConflict ? reason.message
+        : "Your latest answers could not be saved on this device. Keep this screen open and retry before leaving or saving the workout.");
+    }
+  };
+  const retryWorkoutReviewCheckpoint = (): void => {
+    const current = workoutRecoveryRef.current;
+    if (current?.reviewDraft) retainWorkoutReview(current.reviewDraft);
+  };
 
   const clearWorkoutRecovery = useCallback((): void => {
-    localStorage.removeItem(workoutRecoveryKey(athleteId, storageNamespace));
+    workoutRecoveryStorage.remove();
+    workoutRecoveryRef.current = undefined;
     setWorkoutRecovery(undefined);
+    setReviewCheckpointError(undefined);
     setWorkoutSelections({});
-  }, [athleteId, storageNamespace]);
+  }, [workoutRecoveryStorage]);
 
   const persistGuidedRecovery = useCallback((recovery: GuidedRecovery): void => {
-    writeGuidedRecovery(recovery, storageNamespace);
+    writeGuidedRecovery(recovery, guidedRecoveryStorage);
     setGuidedRecovery(recovery);
-  }, [storageNamespace]);
+  }, [guidedRecoveryStorage]);
 
   const clearGuidedRecovery = useCallback((): void => {
-    localStorage.removeItem(guidedRecoveryKey(athleteId, storageNamespace));
+    guidedRecoveryStorage.remove();
     setGuidedRecovery(undefined);
-  }, [athleteId, storageNamespace]);
+  }, [guidedRecoveryStorage]);
 
   const refreshInput = useCallback((sessionDemand?: SessionDemand) => ({
     athleteId,
@@ -529,6 +575,22 @@ const VNextAthleteApplication = ({
   const displayedGenerated = workoutRecovery?.generated ?? snapshot?.generated;
   const plan = displayedGenerated?.plan;
   const workoutBundle = plan ? bundleFor(plan.catalogueVersion) : vNextDefinitionBundle;
+  // Keep the current review and its answers mounted while reporting a restriction.
+  const completionGenerated = workoutRecovery?.generated;
+  const completionPresentation = useMemo(() => executionFacts && completionGenerated
+    ? buildWorkoutCompletionPresentation({
+      bundle: workoutBundle,
+      generated: completionGenerated,
+      participationSecondsByPlanItem: executionFacts.participationSeconds,
+      performedByPlanItem: executionFacts.performedByPlanItem,
+    })
+    : undefined, [workoutBundle, completionGenerated, executionFacts]);
+  const previousRestrictionOpen = useRef(restrictionOpen);
+  useLayoutEffect(() => {
+    if (restrictionOpen) document.getElementById("vnext-restriction-report-title")?.focus();
+    else if (previousRestrictionOpen.current) document.getElementById("vnext-workout-restriction-action")?.focus();
+    previousRestrictionOpen.current = restrictionOpen;
+  }, [restrictionOpen]);
   const workoutSwapOptions = useMemo(() => !plan || !snapshot ? {} : Object.fromEntries(
     plan.items.map((item) => [item.id, safeWorkoutSwaps({
       plan,
@@ -567,7 +629,8 @@ const VNextAthleteApplication = ({
         draft,
         step: nextAssessmentStep(draft, bundleFor(draft.catalogueVersion)),
         ...(isAssessmentAtReview(draft, bundleFor(draft.catalogueVersion))
-          ? { review: buildAssessmentReview(draft, bundleFor(draft.catalogueVersion), current.state) } : {}),
+          ? { review: buildAssessmentReview(draft, bundleFor(draft.catalogueVersion), current.state, vNextProjectionPolicy,
+            draft.status === "committed" ? current.intent.equipment : undefined) } : {}),
       });
       setRestartSetupOpen(false);
       setMessage("Continue from your saved answers. You can go Back to change them.");
@@ -659,10 +722,23 @@ const VNextAthleteApplication = ({
       if (!currentOffer) throw new Error("This check is no longer available. Return to your starting points for the next safe check.");
       setSnapshot(committed.snapshot);
       setAssessment(undefined);
+      setProgressionCatalogueVersion(undefined);
       setGuidedOffer(currentOffer);
       setMessage(committed.clearedRestrictions > 0
         ? "Placement was saved and current restriction feedback cleared. The exact guided confirmation protocol is ready."
         : "Placement was saved first. The exact guided confirmation protocol is ready.");
+    });
+  };
+
+  const openProgressionCheck = (): void => {
+    const check = snapshot?.progressionCheck;
+    if (!check || workoutRecovery || guidedRecovery || busy) return;
+    runCommand(async () => {
+      const current = await runtime.startProgressionCheck({ ...refreshInput(), protocolId: check.offer.protocolId });
+      setSnapshot(current.snapshot);
+      setProgressionCatalogueVersion(current.check.catalogueVersion);
+      setGuidedOffer(current.check.offer);
+      setMessage("");
     });
   };
 
@@ -680,16 +756,16 @@ const VNextAthleteApplication = ({
     setGuidedOffer(pending.offer);
     runCommand(async () => {
       try {
-        const committed = await runtime.commitGuidedTest({
-          ...refreshInput(),
-          draft: pending.draft,
-          result: pending.result,
-        });
+        guidedRecoveryStorage.assertCurrent();
+        const committed = pending.version === 2
+          ? await runtime.commitProgressionCheck({ ...refreshInput(), catalogueVersion: pending.catalogueVersion, result: pending.result })
+          : await runtime.commitGuidedTest({ ...refreshInput(), draft: pending.draft, result: pending.result });
         setSnapshot(committed.snapshot);
         clearGuidedRecovery();
         setGuidedOffer(undefined);
+        setProgressionCatalogueVersion(undefined);
         const draft = committed.snapshot.assessmentDraft;
-        if (draft?.policyVersion === 2 && committed.snapshot.assessmentReview) {
+        if (pending.version === 1 && draft?.policyVersion === 2 && committed.snapshot.assessmentReview) {
           const review = committed.snapshot.assessmentReview;
           const next = review.guidedTests.find((offer) => offer.availability === "available");
           // Open instructions only. A saved clean result never starts a timer,
@@ -708,6 +784,25 @@ const VNextAthleteApplication = ({
     });
   };
 
+  const discardPendingGuidedResult = (): void => {
+    const pending = guidedRecovery;
+    if (!pending || busy || guidedSubmissionLocked.current) return;
+    runCommand(async () => {
+      const retained = localStorage.getItem(guidedRecoveryKey(athleteId, storageNamespace));
+      if (retained && retained !== JSON.stringify(pending)) {
+        throw new Error("The pending check changed in another view. Reopen the app before discarding it.");
+      }
+      // Clear only the local form/retry envelope. An already appended observation
+      // remains immutable even if its acknowledgement previously failed.
+      clearGuidedRecovery();
+      setGuidedOffer(undefined);
+      setProgressionCatalogueVersion(undefined);
+      setCorrectingGuidedEntry(false);
+      setSnapshot(await runtime.refresh(refreshInput()));
+      setMessage("Pending check closed. Previously saved observations and restrictions are kept.");
+    });
+  };
+
   const commitGuidedTest = (result: GuidedTestFormResult): void => {
     if (guidedRecovery) {
       if (correctingGuidedEntry) {
@@ -719,27 +814,38 @@ const VNextAthleteApplication = ({
       } else commitExactGuidedRecovery(guidedRecovery);
       return;
     }
-    if (!guidedOffer || !snapshot?.assessmentDraft) return;
+    if (!guidedOffer || (!progressionCatalogueVersion && !snapshot?.assessmentDraft)) return;
     const occurredAt = now();
-    commitExactGuidedRecovery({
-      version: 1,
-      athleteId,
-      draft: snapshot.assessmentDraft,
-      offer: guidedOffer,
-      result: {
+    const resultInput: GuidedTestResultInput = {
         eventId: `guided-event-${crypto.randomUUID()}`,
         observationSessionId: guidedObservationOccasionId(athleteId, occurredAt),
         occurredAt,
         recordedAt: occurredAt,
         protocolId: guidedOffer.protocolId,
         ...result,
-      },
+    };
+    commitExactGuidedRecovery(progressionCatalogueVersion
+      ? { version: 2, kind: "progression", athleteId, catalogueVersion: progressionCatalogueVersion, offer: guidedOffer, result: resultInput }
+      : { version: 1, athleteId, draft: snapshot!.assessmentDraft!, offer: guidedOffer, result: resultInput });
+  };
+
+  const finishGuidedWithoutAttempt = (): void => {
+    if (busy || guidedSubmissionLocked.current) return;
+    runCommand(async () => {
+      // This is an explicit form choice, not a failed performance observation.
+      // Only the local unsaved form is closed; historical observations stay intact.
+      clearGuidedRecovery();
+      setGuidedOffer(undefined);
+      setProgressionCatalogueVersion(undefined);
+      setCorrectingGuidedEntry(false);
+      setSnapshot(await runtime.refresh(refreshInput()));
+      setMessage("Check closed without a result. Your progress and training load are unchanged.");
     });
   };
 
   const submitWorkoutReview = (feedback: readonly VNextWorkoutReviewFeedback[]): void => {
     if (completionSubmissionLocked.current || workoutRecovery?.stage !== "review"
-      || !workoutRecovery.generated.plan || !executionFacts) return;
+      || !workoutRecovery.generated.plan || !executionFacts || workoutRecovery.pendingRestriction || reviewCheckpointError) return;
     completionSubmissionLocked.current = true;
     runCommand(async () => {
       try {
@@ -848,6 +954,7 @@ const VNextAthleteApplication = ({
     completionSubmissionLocked.current = true;
     runCommand(async () => {
       try {
+        workoutRecoveryStorage.assertCurrent();
         const committed = await runtime.commitWorkoutCompletion({ ...refreshInput(), prepared: pendingPrepared });
         rememberCompletedEmphasis(athleteId, workoutRecovery.generated, pendingPrepared, storageNamespace);
         const refreshed = await runtime.refresh(refreshInput());
@@ -954,7 +1061,8 @@ const VNextAthleteApplication = ({
       projectionPolicy: vNextProjectionPolicy,
     })])) as Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>;
     setWorkoutSelections({});
-    persistWorkoutRecovery({ version: 1, athleteId, stage: "preview", origin: "custom", generated, selections: {}, swapOptions });
+    persistWorkoutRecovery({ version: 1, athleteId, stage: "preview", origin: "custom", generated, selections: {}, swapOptions,
+      customRequest: request, equipmentAtPreview: refreshed.intent.equipment });
     setCustomOpen(false);
     setWorkoutOpen(false);
     setMessage(`${request.minutes}-minute workout ready. Review the exercises, then start when you’re ready.`);
@@ -1020,32 +1128,125 @@ const VNextAthleteApplication = ({
     }
   };
 
+  const checkWorkoutBeforeRun = (request: WorkoutRunRequest): Promise<boolean> => new Promise((resolve, reject) => {
+    runCommand(async () => {
+      try {
+        workoutRecoveryStorage.assertCurrent();
+        const recovery = workoutRecovery;
+        if (!recovery || (recovery.stage !== "preview" && recovery.stage !== "active") || recovery.pendingRestriction) {
+          throw new Error("Finish saving your restriction or workout review before continuing training.");
+        }
+        const refreshed = await runtime.refresh(refreshInput());
+        setSnapshot(refreshed);
+        const sameEquipment = recovery.equipmentAtPreview
+          && [...recovery.equipmentAtPreview].sort().join("|") === [...refreshed.intent.equipment].sort().join("|");
+        // Custom equipment is an explicit one-off choice. Keep it while the saved
+        // profile is unchanged; a later equipment change can only narrow it.
+        const equipment = recovery.customRequest
+          ? recovery.customRequest.equipment.filter((id) => sameEquipment || refreshed.intent.equipment.includes(id))
+          : refreshed.intent.equipment;
+        const result = validateWorkoutStart({
+          generated: recovery.generated,
+          bundle: bundleFor(recovery.generated.plan!.catalogueVersion),
+          state: refreshed.state,
+          intent: { ...refreshed.intent, equipment },
+          projectionPolicy: vNextProjectionPolicy,
+          selections: request.selections,
+          ...(recovery.stage === "active" ? { planItemIds: request.planItemIds } : {}),
+        });
+        if (!result.allowed) {
+          throw new Error(`${result.issues[0]?.message ?? "This workout is no longer suitable."} ${recovery.stage === "active"
+            ? "Your completed work is kept. Save and close, then end and review it from Today."
+            : "Return to Today and choose a fresh workout."}`);
+        }
+        if ((await store.readProjectionSources(athleteId)).sourceFingerprint !== refreshed.sources.sourceFingerprint) {
+          throw new Error("Your training information changed during the safety check. Tap Start or Resume to check again.");
+        }
+        workoutRecoveryStorage.assertCurrent();
+        resolve(true);
+      } catch (reason) {
+        reject(reason);
+        throw reason;
+      }
+    });
+  });
+
+  const saveWorkoutRestriction = (report: RestrictionReportedEvent): Promise<void> => new Promise((resolve, reject) => {
+    runCommand(async () => {
+      try {
+        const recovery = workoutRecovery;
+        if (!recovery || recovery.stage !== "review" || report.athleteId !== athleteId) {
+          throw new Error("The workout review is unavailable. Your work has not been removed.");
+        }
+        persistWorkoutRecovery({ ...recovery, pendingRestriction: report });
+        const result = await runtime.commitRestrictionReport({ ...refreshInput(), event: report });
+        setSnapshot(result.snapshot);
+        const { pendingRestriction: _pending, ...retained } = recovery;
+        persistWorkoutRecovery(retained);
+        setRestrictionOpen(false);
+        setMessage("Restriction saved. Affected movements are paused; finish saving your completed work below.");
+        resolve();
+      } catch (reason) {
+        reject(reason);
+        throw reason;
+      }
+    });
+  });
+
+  const captureWorkoutDiscard = (): (() => void) => {
+    const timerStorage = createRecoveryStorageGuard(`parallette25-vnext-rc-active-workout-v1:${athleteId}`);
+    if (timerStorage.initialValue !== null) {
+      const timer = JSON.parse(timerStorage.initialValue) as { athleteId?: string; planId?: string };
+      if (timer?.athleteId !== athleteId || timer.planId !== workoutRecovery?.generated.plan?.id) {
+        throw new RecoveryStorageConflict();
+      }
+    }
+    workoutRecoveryStorage.assertCurrent();
+    timerStorage.assertCurrent();
+    return () => {
+      // Check both records before deleting either. No async work may split this
+      // pair: a confirmation dialog can allow another view to save new work.
+      workoutRecoveryStorage.assertCurrent();
+      timerStorage.assertCurrent();
+      timerStorage.remove();
+      clearWorkoutRecovery();
+    };
+  };
+
   const closeWorkout = (started: boolean): void => {
-    setWorkoutOpen(false);
     if (started) {
+      setWorkoutOpen(false);
       setMessage("Workout saved on this device. Resume whenever you’re ready.");
       return;
     }
-    const origin = workoutRecovery?.origin ?? "today";
-    clearActiveWorkoutDraft(athleteId);
-    clearWorkoutRecovery();
-    setWorkoutSelections({});
-    setMessage(origin === "custom"
-      ? "Custom Session cancelled. Today’s normal workout is available again."
-      : "Returned to Today. No workout or evidence was saved because the timer never started.");
+    try {
+      const origin = workoutRecovery?.origin ?? "today";
+      captureWorkoutDiscard()();
+      setWorkoutOpen(false);
+      setWorkoutSelections({});
+      setMessage(origin === "custom"
+        ? "Custom Session cancelled. Today’s normal workout is available again."
+        : "Returned to Today. No workout or evidence was saved because the timer never started.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The saved workout could not be safely closed.");
+    }
   };
 
   const discardWorkout = (): void => {
     const recovery = workoutRecovery;
     if (!recovery || (recovery.stage !== "preview" && recovery.stage !== "active")) return;
-    if (recovery.stage === "active" && typeof window !== "undefined"
-      && !window.confirm("Discard this in-progress workout without saving its performed work?")) return;
-    clearActiveWorkoutDraft(athleteId);
-    clearWorkoutRecovery();
-    setWorkoutSelections({});
-    setMessage(recovery.origin === "custom"
-      ? "Custom Session discarded. Today’s normal workout is available again."
-      : "Saved workout discarded. Today has returned to the current recommendation.");
+    try {
+      const discard = captureWorkoutDiscard();
+      if (recovery.stage === "active" && typeof window !== "undefined"
+        && !window.confirm("Discard this in-progress workout without saving its performed work?")) return;
+      discard();
+      setWorkoutSelections({});
+      setMessage(recovery.origin === "custom"
+        ? "Custom Session discarded. Today’s normal workout is available again."
+        : "Saved workout discarded. Today has returned to the current recommendation.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The saved workout could not be safely discarded.");
+    }
   };
 
   const finishWorkout = (facts: WorkoutExecutionFacts): boolean => {
@@ -1096,25 +1297,27 @@ const VNextAthleteApplication = ({
   }
 
   if (customOpen) {
-    return <CustomSessionBuilder preferenceKey={shortWorkoutPreferenceKey(athleteId, storageNamespace)} goals={snapshot.presentations.goals} currentEquipment={snapshot.intent.equipment} defaultDemand={snapshot.intent.defaultSessionDemand} busy={busy} onClose={() => setCustomOpen(false)} onBuild={startCustomSession} />;
+    return <CustomSessionBuilder preferenceKey={shortWorkoutPreferenceKey(athleteId, storageNamespace)} goals={snapshot.presentations.goals} currentEquipment={snapshot.intent.equipment} defaultDemand={snapshot.intent.defaultSessionDemand} busy={busy} error={error} onClose={() => setCustomOpen(false)} onBuild={startCustomSession} />;
   }
 
   if (workoutOpen && plan) {
-    if (isMixedWorkoutPlan(plan)) return <MixedWorkoutRunner plan={plan} bundle={workoutBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} onClose={closeWorkout} onFinish={finishWorkout} />;
-    return <WorkoutRunner plan={plan} bundle={workoutBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} onClose={closeWorkout} onFinish={finishWorkout} />;
+    const safetyProps = deployment.kind === "production" ? { onBeforeRun: checkWorkoutBeforeRun, safetyVersion: snapshot.sources.sourceFingerprint } : {};
+    if (isMixedWorkoutPlan(plan)) return <MixedWorkoutRunner plan={plan} bundle={workoutBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} {...safetyProps} onClose={closeWorkout} onFinish={finishWorkout} />;
+    return <WorkoutRunner plan={plan} bundle={workoutBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} {...safetyProps} onClose={closeWorkout} onFinish={finishWorkout} />;
   }
 
   if (guidedOffer) {
-    return <GuidedTestRunner key={`${guidedOffer.protocolId}:${guidedRecovery?.result.eventId ?? "new"}:${correctingGuidedEntry ? "correct" : "retry"}`} offer={guidedOffer} bundle={bundleFor((guidedRecovery?.draft ?? snapshot.assessmentDraft)?.catalogueVersion ?? vNextDefinitionBundle.catalogueVersion)} busy={busy} error={error} retryingExactObservation={Boolean(guidedRecovery) && !correctingGuidedEntry} initialResult={correctingGuidedEntry ? guidedRecovery?.result : undefined} onCorrectInvalidEntry={guidedRecovery && hasInvalidGuidedAttemptCount(guidedRecovery.result) && !correctingGuidedEntry ? () => {
+    return <GuidedTestRunner key={`${guidedOffer.protocolId}:${guidedRecovery?.result.eventId ?? "new"}:${correctingGuidedEntry ? "correct" : "retry"}`} offer={guidedOffer} bundle={bundleFor(guidedRecovery?.version === 2 ? guidedRecovery.catalogueVersion : progressionCatalogueVersion ?? (guidedRecovery?.draft ?? snapshot.assessmentDraft)?.catalogueVersion ?? vNextDefinitionBundle.catalogueVersion)} busy={busy} error={error} retryingExactObservation={Boolean(guidedRecovery) && !correctingGuidedEntry} initialResult={correctingGuidedEntry ? guidedRecovery?.result : undefined} onCorrectInvalidEntry={guidedRecovery && hasInvalidGuidedAttemptCount(guidedRecovery.result) && !correctingGuidedEntry ? () => {
       setCorrectingGuidedEntry(true);
       setError(undefined);
     } : undefined} hasSavedChecks={Boolean(snapshot.assessmentReview?.checkedToday?.length)} onClose={() => {
       setGuidedOffer(undefined);
+      setProgressionCatalogueVersion(undefined);
       const draft = snapshot.assessmentDraft;
-      if (!guidedRecovery && draft?.policyVersion === 2 && snapshot.assessmentReview) {
+      if (!progressionCatalogueVersion && !guidedRecovery && draft?.policyVersion === 2 && snapshot.assessmentReview) {
         setAssessment({ draft, step: nextAssessmentStep(draft, bundleFor(draft.catalogueVersion)), review: snapshot.assessmentReview });
       }
-    }} onCommit={commitGuidedTest} />;
+    }} onCommit={commitGuidedTest} onNoAttempt={finishGuidedWithoutAttempt} onDiscardUnsavedResult={guidedRecovery ? discardPendingGuidedResult : undefined} />;
   }
 
   if (restartSetupOpen) {
@@ -1133,7 +1336,8 @@ const VNextAthleteApplication = ({
 
   if (assessment) {
     const review = assessment.review ?? (isAssessmentAtReview(assessment.draft, bundleFor(assessment.draft.catalogueVersion))
-      ? buildAssessmentReview(assessment.draft, bundleFor(assessment.draft.catalogueVersion), snapshot.state)
+      ? buildAssessmentReview(assessment.draft, bundleFor(assessment.draft.catalogueVersion), snapshot.state, vNextProjectionPolicy,
+        assessment.draft.status === "committed" ? snapshot.intent.equipment : undefined)
       : undefined);
     return <AssessmentRunner draft={assessment.draft} step={assessment.step} bundle={bundleFor(assessment.draft.catalogueVersion)} review={review} busy={busy} error={error} onAnswer={answerAssessment} onContextSubmit={updateAssessmentContext} onDeferSupporting={deferSupportingAssessment} onBack={backAssessment} onCommit={commitAssessment} onClose={() => runCommand(async () => {
       setSnapshot(await runtime.refresh(refreshInput()));
@@ -1175,21 +1379,17 @@ const VNextAthleteApplication = ({
     placementMessage: `Today’s checks are saved and count toward your training load. You can finish for today.${startingPractice.length ? ` Starting practice: ${startingPractice.join(", ")}, when recovered and current safety checks allow it.` : " Continue the remaining checks when ready."} Any practice below is optional and respects the load already recorded.`,
   } : baseTodayPresentation;
 
-  const completionPresentation = executionFacts && workoutRecovery
-    ? buildWorkoutCompletionPresentation({
-      bundle: workoutBundle,
-      generated: workoutRecovery.generated,
-      participationSecondsByPlanItem: executionFacts.participationSeconds,
-      performedByPlanItem: executionFacts.performedByPlanItem,
-    })
-    : undefined;
+  const showingRestrictionReport = restrictionOpen && workoutRecovery?.stage === "review";
 
   return (
     <div className="vnext-rc-root vnext-simple-app">
+      {showingRestrictionReport && <RestrictionReportForm athleteId={athleteId} catalogueVersion={vNextDefinitionBundle.catalogueVersion}
+        initialReport={workoutRecovery.pendingRestriction} onSave={saveWorkoutRestriction} onClose={() => setRestrictionOpen(false)} />}
+      <div hidden={showingRestrictionReport}>
       <aside className="vnext-rc-banner" aria-label={deployment.kind === "production" ? "Application and account status" : "Release candidate status"}>
         <span><strong>{deployment.bannerTitle}</strong> · {deployment.bannerDetail}</span>
         <div className="vnext-rc-banner-tools">
-          <button type="button" className="vnext-rc-account-button" onClick={() => setAccountOpen(true)}>{identity.mode === "account" ? `Account: ${identity.username}` : "On this device"}</button>
+          <button type="button" className="vnext-rc-account-button" disabled={Boolean(reviewCheckpointError)} onClick={() => setAccountOpen(true)}>{identity.mode === "account" ? `Account: ${identity.username}` : "On this device"}</button>
           <details>
             <summary>Offline &amp; data tools</summary>
             <div className="vnext-actions">
@@ -1205,17 +1405,32 @@ const VNextAthleteApplication = ({
       <p className="vnext-sync-status" data-state={syncStatus.phase} role="status">{syncMessage}</p>
       {(message || error) && <p className={`vnext-rc-message${error ? " is-error" : ""}`} role={error ? "alert" : "status"}>{error ?? message}{pendingPrepared && error ? " Your workout is kept on this device so you can retry." : ""}</p>}
       {pendingPrepared && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={retryPreparedCompletion}>Retry saving workout</button>}
-      {guidedRecovery && !guidedOffer && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={() => commitExactGuidedRecovery(guidedRecovery)}>Retry saving test result</button>}
+      {guidedRecovery && !guidedOffer && <button type="button" className="vnext-submit vnext-rc-retry" disabled={busy} onClick={() => {
+        setProgressionCatalogueVersion(guidedRecovery.version === 2 ? guidedRecovery.catalogueVersion : undefined);
+        setGuidedOffer(guidedRecovery.offer);
+      }}>Review pending test result</button>}
+      {reviewCheckpointError && <div className="vnext-run-safety-message" role="alert"><p>{reviewCheckpointError}</p><button type="button" className="vnext-action" onClick={retryWorkoutReviewCheckpoint}>Retry saving review</button></div>}
       <VNextExperience
-        setupNotice={!workflowLocked && snapshot.assessmentDraft?.status === "in-progress" ? (
-        <section className="vnext-panel vnext-rc-saved-setup" aria-label="Saved setup">
-          <span>Setup saved</span>
-          <div className="vnext-actions">
-            <button type="button" className="vnext-action" disabled={busy} onClick={() => startAssessment(snapshot.presentations.assessment.actions.find((action) => action.kind === "reassessment"))}>Resume setup</button>
-            <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => { setRestartForRestrictions(false); setRestartSetupOpen(true); }}>Start over</button>
-          </div>
-        </section>
-        ) : !workflowLocked && snapshot.assessmentDraft?.policyVersion === 2 && snapshot.assessmentReview && !snapshot.assessmentReview.checksComplete ? (
+        setupNotice={!workflowLocked ? <>
+          {snapshot.assessmentDraft?.status === "in-progress" && (
+            <section className="vnext-panel vnext-rc-saved-setup" aria-label="Saved setup">
+              <span>Setup saved</span>
+              <div className="vnext-actions">
+                <button type="button" className="vnext-action" disabled={busy} onClick={() => startAssessment(snapshot.presentations.assessment.actions.find((action) => action.kind === "reassessment"))}>Resume setup</button>
+                <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => { setRestartForRestrictions(false); setRestartSetupOpen(true); }}>Start over</button>
+              </div>
+            </section>
+          )}
+          {snapshot.progressionCheck ? (
+          <section className="vnext-panel vnext-rc-saved-setup" aria-label="Your next progress check">
+            <h3>Your next progress check</h3>
+            <p><strong>{snapshot.progressionCheck.offer.label} · {snapshot.progressionCheck.target}</strong></p>
+            <p>{snapshot.progressionCheck.why}</p>
+            <p>{snapshot.progressionCheck.when}</p>
+            <details><summary>What confirms progress?</summary><p>{snapshot.progressionCheck.confirmation}</p></details>
+            {snapshot.progressionCheck.offer.availability === "available" && <button type="button" className="vnext-action" disabled={busy} onClick={openProgressionCheck}>View check</button>}
+          </section>
+        ) : snapshot.assessmentDraft?.status !== "in-progress" && snapshot.assessmentDraft?.policyVersion === 2 && snapshot.assessmentReview && !snapshot.assessmentReview.checksComplete ? (
           <section className="vnext-panel vnext-rc-saved-setup" aria-label="Starting-point checks">
             <p><strong>Confirm your starting point</strong><br />A few relevant checks help match the workout to what you can do. Some skills need another day’s confirmation.</p>
             <button type="button" className="vnext-action" disabled={busy} onClick={() => runCommand(async () => {
@@ -1227,6 +1442,7 @@ const VNextAthleteApplication = ({
             })}>Continue checks</button>
           </section>
         ) : undefined}
+        </> : undefined}
         progress={snapshot.presentations.progress}
         skillDetails={snapshot.presentations.skillDetails}
         today={todayPresentation}
@@ -1238,6 +1454,9 @@ const VNextAthleteApplication = ({
         syncMessage={syncMessage}
         onDismissSummary={() => setSavedWorkoutId(undefined)}
         completion={completionPresentation}
+        reviewSessionId={completionPresentation ? workoutRecovery?.generated.plan?.id : undefined}
+        reviewDraft={workoutRecovery?.reviewDraft}
+        onReviewDraftChange={workoutRecovery?.stage === "review" ? retainWorkoutReview : undefined}
         busy={busy}
         workoutStartBlocker={workoutStartBlocker}
         workoutOrigin={workoutRecovery?.origin}
@@ -1252,7 +1471,7 @@ const VNextAthleteApplication = ({
           else delete next[planItemId];
           return next;
         }) : undefined}
-        onCustomSessionRequested={!workflowLocked && !busy ? () => setCustomOpen(true) : undefined}
+        onCustomSessionRequested={!workflowLocked && !busy ? () => { setError(undefined); setCustomOpen(true); } : undefined}
         onDemandChange={!workflowLocked && !busy ? (demand) => runCommand(async () => { const updated = await runtime.selectDailyDemand({ ...refreshInput(), sessionDemand: demand }); setWorkoutSelections({}); setSnapshot(updated); setMessage(`${demand === "technique" ? "Easier / Technique" : demand === "challenge" ? "Challenge" : "Standard"} selected for today’s workout.`); }) : undefined}
         onGoalSelectionChange={!workflowLocked && !busy ? (selection) => new Promise<void>((resolve, reject) => {
           runCommand(async () => {
@@ -1272,9 +1491,11 @@ const VNextAthleteApplication = ({
         onStartWorkout={!busy && plan && ((workoutRecovery?.stage === "active" || workoutRecovery?.stage === "preview") || (!workoutRecovery && snapshot.generated.ok && !mediaBlocked)) ? startOrResumeWorkout : undefined}
         onDiscardWorkout={!busy && (workoutRecovery?.stage === "preview" || workoutRecovery?.stage === "active") ? discardWorkout : undefined}
         onEndRecoveredWorkout={!busy && workoutRecovery?.stage === "active" ? endRecoveredWorkout : undefined}
-        onWorkoutReviewSubmitted={!busy && workoutRecovery?.stage === "review" ? submitWorkoutReview : undefined}
+        onWorkoutReviewSubmitted={!busy && !reviewCheckpointError && workoutRecovery?.stage === "review" ? submitWorkoutReview : undefined}
+        onWorkoutRestrictionRequested={!busy && !reviewCheckpointError && workoutRecovery?.stage === "review" ? () => setRestrictionOpen(true) : undefined}
         onRestrictionRequested={!workflowLocked && !busy ? () => startAssessment() : undefined}
       />
+      </div>
     </div>
   );
 };

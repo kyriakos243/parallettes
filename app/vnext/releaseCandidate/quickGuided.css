@@ -48,3 +48,8 @@
 .vnext-quick-guided-timer [role="timer"] { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: #164b40; font-weight: 800; }
 .vnext-quick-guided-timer [role="timer"] strong { font-variant-numeric: tabular-nums; font-size: 34px; }
 .vnext-quick-guided-timer [role="status"] { font-size: 13px; line-height: 1.45; }
+.vnext-quick-guided-discard { display: grid; gap: 10px; padding: 14px; border: 1px solid #d9baac; border-radius: 12px; background: #fff9ef; }
+.vnext-quick-guided-discard h3,
+.vnext-quick-guided-discard p { margin: 0; }
+.vnext-quick-guided-discard .vnext-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.vnext-quick-guided-discard button { min-height: 44px; white-space: normal; }

@@ -46,6 +46,7 @@ type CustomSessionBuilderProps = Readonly<{
   defaultDemand: SessionDemand;
   preferenceKey?: string;
   busy?: boolean;
+  error?: string;
   onClose: () => void;
   onBuild: (request: VNextCustomSessionRequest) => void;
 }>;
@@ -60,6 +61,7 @@ const CustomSessionForm = ({
   defaultDemand,
   preferenceKey,
   busy,
+  error,
   onClose,
   onBuild,
 }: CustomSessionBuilderProps) => {
@@ -160,6 +162,7 @@ const CustomSessionForm = ({
 
         </details>
         {equipment.length === 0 && <p role="alert">Choose at least one available training space or piece of equipment.</p>}
+        {error && <p className="vnext-authority" role="alert">{error} Choose another focus or check your available equipment, then try Preview again.</p>}
         <button type="button" className="vnext-submit" disabled={busy || equipment.length === 0} onClick={() => onBuild({ minutes, focus, equipment, demand })}>
           Preview {minutes}-minute workout
         </button>

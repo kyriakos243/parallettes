@@ -9,6 +9,7 @@ import {
   type DefinitionVersion,
   type EquipmentId,
   type IsoTimestamp,
+  type RestrictionReportedEvent,
   type SessionDemand,
   type SessionItemOutcome,
   type SessionPlan,
@@ -20,6 +21,7 @@ import {
   commitAssessment as persistAssessmentCommit,
   createAssessmentDraft,
   createGuidedTestEvidence,
+  createGuidedProtocolEvidence,
   createRestrictionClearance,
   createSessionRecordFromWorkoutReview,
   goBackAssessment,
@@ -27,6 +29,11 @@ import {
   isCanonicalIsoTimestamp,
   nextAssessmentStep,
   persistGuidedTestEvidence,
+  persistSubmittedAssessmentRestriction,
+  recommendProgressionCheck,
+  progressionCheckOffer,
+  guidedObservationOccasionId,
+  type ProgressionCheckRecommendation,
   type AssessmentAnswerValue,
   type AssessmentDraft,
   type AssessmentMode,
@@ -42,6 +49,7 @@ import {
 import type { LegacyV12ProfileSource } from "../legacyV12";
 import {
   convertLegacyV12Profile,
+  canonicalJson,
   sha256,
   VNEXT_PERSISTENCE_SCHEMA_VERSION,
   type AppendResult,
@@ -161,6 +169,7 @@ export type VNextRuntimeSnapshot = Readonly<{
   }>;
   assessmentDraft?: AssessmentDraft;
   assessmentReview?: AssessmentReview;
+  progressionCheck?: ProgressionCheckRecommendation;
   presentations: VNextRuntimePresentations;
 }>;
 
@@ -263,6 +272,19 @@ export type VNextRuntime = Readonly<{
     event: ReturnType<typeof createGuidedTestEvidence>;
     snapshot: VNextRuntimeSnapshot;
   }>>;
+  commitRestrictionReport(input: VNextRuntimeRefreshInput & Readonly<{
+    event: RestrictionReportedEvent;
+  }>): Promise<Readonly<{
+    append: AppendResult;
+    snapshot: VNextRuntimeSnapshot;
+  }>>;
+  startProgressionCheck(input: VNextRuntimeRefreshInput & Readonly<{
+    protocolId: GuidedTestResultInput["protocolId"];
+  }>): Promise<Readonly<{ check: ProgressionCheckRecommendation; snapshot: VNextRuntimeSnapshot }>>;
+  commitProgressionCheck(input: VNextRuntimeRefreshInput & Readonly<{
+    catalogueVersion: DefinitionVersion;
+    result: GuidedTestResultInput;
+  }>): Promise<Readonly<{ event: ReturnType<typeof createGuidedProtocolEvidence>; snapshot: VNextRuntimeSnapshot }>>;
   prepareWorkoutCompletion(input: Readonly<{
     generated: GeneratedSession;
     timerItemOutcomes: readonly VNextTimerItemOutcome[];
@@ -412,6 +434,31 @@ export const createVNextReleaseCandidateRuntime = (
     throw new TypeError("Runtime current definitions must be the final immutable history entry");
   }
   const bundleFor = (version: DefinitionVersion) => runtimeDefinitionBundle(catalogue, version);
+
+  const persistSavedAssessmentRestriction = async (athleteId: AthleteId): Promise<AssessmentDraft | null> => {
+    const draft = await store.readAssessmentDraft(athleteId);
+    if (draft) await persistSubmittedAssessmentRestriction(store, draft, bundleFor(draft.catalogueVersion));
+    return draft;
+  };
+
+  const saveAssessmentDraft = async (draft: AssessmentDraft): Promise<AssessmentDraft> => {
+    // Preserve a previously submitted report before Back, edits or restart can
+    // remove it. Save the new answer first so an interrupted evidence append
+    // remains retryable from the durable draft, including after an offline reload.
+    const previous = await persistSavedAssessmentRestriction(draft.athleteId);
+    // An append can fail after its draft was saved. Retrying the same submission
+    // from the still-visible form must reuse that original answer time/identity.
+    const retryShape = (value: AssessmentDraft) => ({
+      ...value,
+      updatedAt: undefined,
+      answers: value.answers.map(({ answeredAt: _answeredAt, ...answer }) => answer),
+      revisitAnswers: value.revisitAnswers?.map(({ answeredAt: _answeredAt, ...answer }) => answer),
+    });
+    if (previous?.id === draft.id && previous.revision === draft.revision
+      && canonicalJson(retryShape(previous)) === canonicalJson(retryShape(draft))) return previous;
+    await store.saveAssessmentDraft(draft);
+    return (await persistSavedAssessmentRestriction(draft.athleteId))!;
+  };
   const clock = dependencies.clock ?? defaultClock;
   const idFactory = dependencies.idFactory ?? defaultIdFactory;
 
@@ -419,13 +466,22 @@ export const createVNextReleaseCandidateRuntime = (
     input: VNextRuntimeRefreshInput,
     sourceChangeRetries: number,
   ): Promise<VNextRuntimeSnapshot> => {
+    // A positive safety answer takes effect before any plan is returned. Failure
+    // to save it rejects refresh rather than falling back to unrestricted work.
+    const savedDraft = await persistSavedAssessmentRestriction(input.athleteId);
     const sources = await store.readProjectionSources(input.athleteId);
     const intent = sources.intent;
     if (!intent) {
       throw new Error("vNext runtime has no Athlete Intent; call bootstrap before refresh");
     }
     const requestedAsOf = assertTimestamp(input.asOf ?? clock(), "Projection cutoff");
-    const asOf = atLeastTimestamp(requestedAsOf, intent.updatedAt, "Projection cutoff");
+    // Back or a no-symptoms edit can remove the answer without clearing its
+    // saved report. Retain the latest known local time even if monotonic draft
+    // edits have moved a few milliseconds ahead of the wall clock.
+    const localAssessmentAt = savedDraft?.updatedAt ?? intent.updatedAt;
+    const asOf = atLeastTimestamp(requestedAsOf,
+      atLeastTimestamp(intent.updatedAt, localAssessmentAt, "Submitted safety cutoff"),
+      "Projection cutoff");
     const trainabilityRequests = planningTrainabilityRequests(vNextDefinitionBundle);
     const [definitionFingerprint, trainabilityRequestFingerprint] = await Promise.all([
       sha256(vNextDefinitionBundles),
@@ -508,7 +564,8 @@ export const createVNextReleaseCandidateRuntime = (
     const assessmentDraft = await store.readAssessmentDraft(input.athleteId) ?? undefined;
     const assessmentReview = assessmentDraft
       && isAssessmentAtReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion))
-      ? { ...buildAssessmentReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state),
+      ? { ...buildAssessmentReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state, vNextProjectionPolicy,
+          assessmentDraft.status === "committed" ? intent.equipment : undefined),
         ...placementCheckSummary(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state, sources.evidenceEvents) }
       : undefined;
     const progressInput = {
@@ -518,6 +575,11 @@ export const createVNextReleaseCandidateRuntime = (
       generatedSession: generated,
       provenance,
     } as const;
+    const progressionCheck = recommendProgressionCheck({ bundle: vNextDefinitionBundle, state, intent,
+      projectionPolicy: vNextProjectionPolicy, generated, assessmentDraft,
+      evidenceEvents: sources.evidenceEvents,
+      hasPracticeHistory: sources.sessionRecords.some((record) => record.itemOutcomes.some((item) => (item.participationSeconds ?? 0) > 0))
+        || sources.evidenceEvents.some((event) => event.type === "performance_observed" && event.source === "guided-test") });
     const presentations: VNextRuntimePresentations = {
       provenance,
       progress: buildProgressAndGoals(progressInput),
@@ -550,6 +612,7 @@ export const createVNextReleaseCandidateRuntime = (
       projection,
       ...(assessmentDraft ? { assessmentDraft } : {}),
       ...(assessmentReview ? { assessmentReview } : {}),
+      ...(progressionCheck ? { progressionCheck } : {}),
       presentations,
     };
   };
@@ -627,7 +690,7 @@ export const createVNextReleaseCandidateRuntime = (
       // Draft and intent have separate local writes. Save the non-authoritative
       // draft first: interruption must never leave an old setup able to replace
       // goals that were already saved. A failed intent write remains retryable.
-      await store.saveAssessmentDraft(updatedDraft);
+      await saveAssessmentDraft(updatedDraft);
     }
     await store.putAthleteIntent(intent);
     return refresh({
@@ -690,13 +753,13 @@ export const createVNextReleaseCandidateRuntime = (
     const snapshot = bootstrapped.snapshot;
     const effectiveCreatedAt = atLeastTimestamp(
       createdAt,
-      snapshot.intent.updatedAt,
+      snapshot.asOf,
       "Assessment creation time",
     );
     const inferredMode: AssessmentMode = hasMeaningfulAthleteState(snapshot.state)
       ? "targeted-reconfirmation"
       : "new-placement";
-    const draft = createAssessmentDraft({
+    const createdDraft = createAssessmentDraft({
       ...(catalogue.placementVersion ? { placementVersion: catalogue.placementVersion } : {}),
       id: input.draftId ?? idFactory({
         kind: "assessment-draft",
@@ -711,7 +774,7 @@ export const createVNextReleaseCandidateRuntime = (
       mode: input.mode ?? inferredMode,
       ...(input.initialEquipment ? { initialEquipment: input.initialEquipment } : {}),
     });
-    await store.saveAssessmentDraft(draft);
+    const draft = await saveAssessmentDraft(createdDraft);
     return {
       assessment: {
         draft,
@@ -728,13 +791,13 @@ export const createVNextReleaseCandidateRuntime = (
       input.draft.updatedAt,
       "Assessment answer time",
     );
-    const draft = answerAssessmentStep(
+    const answeredDraft = answerAssessmentStep(
       input.draft,
       input.answer,
       answeredAt,
       assessmentBundle,
     );
-    await store.saveAssessmentDraft(draft);
+    const draft = await saveAssessmentDraft(answeredDraft);
     const atReview = isAssessmentAtReview(draft, assessmentBundle);
     const reviewState = atReview
       ? (await refresh({ athleteId: draft.athleteId, asOf: answeredAt })).state
@@ -743,7 +806,7 @@ export const createVNextReleaseCandidateRuntime = (
       draft,
       step: nextAssessmentStep(draft, assessmentBundle),
       ...(reviewState ? {
-        review: buildAssessmentReview(draft, assessmentBundle, reviewState),
+        review: buildAssessmentReview(draft, assessmentBundle, reviewState, vNextProjectionPolicy),
       } : {}),
     };
   };
@@ -751,18 +814,16 @@ export const createVNextReleaseCandidateRuntime = (
   const updateAssessmentContext: VNextRuntime["updateAssessmentContext"] = async (input) => {
     const bundle = bundleFor(input.draft.catalogueVersion);
     const at = strictlyAfterTimestamp(input.updatedAt ?? clock(), input.draft.updatedAt, "Setup context time");
-    const draft = reviseQuickSetupContext(input.draft, input.answers, at, bundle);
-    await store.saveAssessmentDraft(draft);
+    const draft = await saveAssessmentDraft(reviseQuickSetupContext(input.draft, input.answers, at, bundle));
     return { draft, step: nextAssessmentStep(draft, bundle) };
   };
 
   const deferSupportingAssessment: VNextRuntime["deferSupportingAssessment"] = async (input) => {
     const bundle = bundleFor(input.draft.catalogueVersion);
     const at = strictlyAfterTimestamp(input.updatedAt ?? clock(), input.draft.updatedAt, "Supporting choice time");
-    const draft = deferSupportingPlacement(input.draft, at, bundle);
-    await store.saveAssessmentDraft(draft);
+    const draft = await saveAssessmentDraft(deferSupportingPlacement(input.draft, at, bundle));
     const current = await refresh({ athleteId: draft.athleteId, asOf: at });
-    return { draft, step: nextAssessmentStep(draft, bundle), review: buildAssessmentReview(draft, bundle, current.state) };
+    return { draft, step: nextAssessmentStep(draft, bundle), review: buildAssessmentReview(draft, bundle, current.state, vNextProjectionPolicy) };
   };
 
   const backAssessment: VNextRuntime["backAssessment"] = async (input) => {
@@ -772,8 +833,7 @@ export const createVNextReleaseCandidateRuntime = (
       input.draft.updatedAt,
       "Assessment back-navigation time",
     );
-    const draft = goBackAssessment(input.draft, updatedAt, assessmentBundle);
-    await store.saveAssessmentDraft(draft);
+    const draft = await saveAssessmentDraft(goBackAssessment(input.draft, updatedAt, assessmentBundle));
     const atReview = isAssessmentAtReview(draft, assessmentBundle);
     const reviewState = atReview
       ? (await refresh({ athleteId: draft.athleteId, asOf: updatedAt })).state
@@ -782,7 +842,7 @@ export const createVNextReleaseCandidateRuntime = (
       draft,
       step: nextAssessmentStep(draft, assessmentBundle),
       ...(reviewState ? {
-        review: buildAssessmentReview(draft, assessmentBundle, reviewState),
+        review: buildAssessmentReview(draft, assessmentBundle, reviewState, vNextProjectionPolicy),
       } : {}),
     };
   };
@@ -797,7 +857,8 @@ export const createVNextReleaseCandidateRuntime = (
       athleteId: input.draft.athleteId,
       asOf: atLeastTimestamp(input.asOf ?? clock(), input.draft.updatedAt, "Assessment commit cutoff"),
     });
-    const review = buildAssessmentReview(input.draft, assessmentBundle, before.state);
+    const review = buildAssessmentReview(input.draft, assessmentBundle, before.state, vNextProjectionPolicy,
+      input.draft.status === "committed" ? before.intent.equipment : undefined);
     const committed = await persistAssessmentCommit(store, input.draft, assessmentBundle);
     const safetyAnswer = input.draft.answers.find(
       (answer) => answer.value.kind === "safety",
@@ -859,6 +920,8 @@ export const createVNextReleaseCandidateRuntime = (
       before.state,
       input.result,
       before.sources.evidenceEvents.find((event) => event.id === input.result.eventId),
+      vNextProjectionPolicy,
+      before.intent.equipment,
     );
     await persistGuidedTestEvidence(store, event);
     return {
@@ -869,6 +932,50 @@ export const createVNextReleaseCandidateRuntime = (
         asOf: atLeastTimestamp(input.asOf ?? clock(), input.result.recordedAt, "Guided-test refresh cutoff"),
       }),
     };
+  };
+
+  const commitRestrictionReport: VNextRuntime["commitRestrictionReport"] = async (input) => {
+    if (input.event.type !== "restriction_reported" || input.event.athleteId !== input.athleteId) {
+      throw new TypeError("Restriction report belongs to another athlete or is not a restriction");
+    }
+    bundleFor(input.event.catalogueVersion);
+    const append = await store.appendEvidenceEvent(input.event);
+    return {
+      append,
+      snapshot: await refresh({ ...input,
+        asOf: atLeastTimestamp(input.asOf ?? clock(), input.event.recordedAt, "Restriction refresh cutoff"),
+      }),
+    };
+  };
+
+  const startProgressionCheck: VNextRuntime["startProgressionCheck"] = async (input) => {
+    const snapshot = await refresh(input);
+    const check = snapshot.progressionCheck;
+    if (!check || check.offer.protocolId !== input.protocolId || check.offer.availability !== "available") {
+      throw new Error(check?.when ?? "This check is no longer the next safe step. Return to Today for an updated recommendation.");
+    }
+    return { check, snapshot };
+  };
+
+  const commitProgressionCheck: VNextRuntime["commitProgressionCheck"] = async (input) => {
+    const nativeBundle = bundleFor(input.catalogueVersion);
+    const before = await refresh({ ...input, asOf: atLeastTimestamp(input.asOf ?? clock(), input.result.recordedAt, "Progression check cutoff") });
+    const existing = before.sources.evidenceEvents.find((event) => event.id === input.result.eventId);
+    if (!existing) {
+      const protocol = nativeBundle.benchmarkProtocols.find((item) => item.id === input.result.protocolId);
+      const offer = protocol && progressionCheckOffer({ bundle: nativeBundle, state: before.state, intent: before.intent,
+        projectionPolicy: vNextProjectionPolicy, assessmentDraft: before.assessmentDraft }, protocol);
+      if (!offer || offer.availability !== "available" || before.progressionCheck?.offer.protocolId !== input.result.protocolId) {
+        throw new Error("This check is no longer available. Your result is kept for review; return to Today to check current safety.");
+      }
+      if (input.result.observationSessionId !== guidedObservationOccasionId(input.athleteId, input.result.occurredAt)) {
+        throw new TypeError("A progression check must retain its actual training occasion");
+      }
+    }
+    const event = createGuidedProtocolEvidence(input.athleteId, nativeBundle, input.result, existing);
+    await persistGuidedTestEvidence(store, event);
+    return { event, snapshot: await refresh({ ...input,
+      asOf: atLeastTimestamp(input.asOf ?? clock(), input.result.recordedAt, "Progression check refresh cutoff") }) };
   };
 
   const prepareWorkoutCompletion: VNextRuntime["prepareWorkoutCompletion"] = (input) => {
@@ -959,6 +1066,9 @@ export const createVNextReleaseCandidateRuntime = (
     backAssessment,
     commitAssessment,
     commitGuidedTest,
+    commitRestrictionReport,
+    startProgressionCheck,
+    commitProgressionCheck,
     prepareWorkoutCompletion,
     commitWorkoutCompletion,
   };

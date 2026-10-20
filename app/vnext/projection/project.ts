@@ -26,6 +26,7 @@ import {
 } from "../contracts";
 import { normalizeObservations } from "./normalize";
 import { projectionReasonCodes } from "./policy";
+import { restrictionExposureDomains } from "./restrictionExposure";
 import {
   milestoneKey,
   subjectKey,
@@ -932,15 +933,22 @@ const evaluateTrainabilityInternal = (
   const blockReasons: ReasonCode[] = [];
   const modifyReasons: ReasonCode[] = [];
   const equipment = new Set(input.intent.equipment);
-  if (exercise.equipment.some((item) => !equipment.has(item))) blockReasons.push(projectionReasonCodes.missingEquipment);
+  const additionalEquipment = (input.policy.additionalEquipmentRules ?? [])
+    .filter((rule) => rule.exerciseId === input.request.exerciseId
+      && rule.exerciseDefinitionVersion === input.request.exerciseDefinitionVersion
+      && rule.prescriptionVariantIds.includes(input.request.prescriptionVariantId))
+    .flatMap((rule) => rule.equipment);
+  if ([...exercise.equipment, ...additionalEquipment].some((item) => !equipment.has(item))) blockReasons.push(projectionReasonCodes.missingEquipment);
 
+  const restrictionExposure = restrictionExposureDomains(input.request, demand, input.policy);
   for (const restriction of input.state.activeRestrictions) {
     // Catalogue profiles are deliberately dense and use `low` for negligible
     // exposure. Only material (moderate/high) demand is affected by a domain
     // restriction; treating mere key presence as exposure would block every
-    // exercise, including unrelated floor recovery.
+    // exercise, including unrelated floor recovery. An explicit versioned
+    // safety audit can additionally identify physical contact despite low load.
     const overlaps = restriction.demandDomains.some((domain) =>
-      demand[domain] === "moderate" || demand[domain] === "high");
+      restrictionExposure.has(domain));
     if (!overlaps) continue;
     (restriction.decision === "block" ? blockReasons : modifyReasons).push(projectionReasonCodes.activeRestriction);
   }

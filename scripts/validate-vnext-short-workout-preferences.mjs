@@ -102,6 +102,30 @@ assert.equal(builds.at(-1).focus.kind, "capacity");
 assert.deepEqual(Object.keys(JSON.parse(storage.getItem(keyA))).sort(), ["focusToken", "minutes", "version"], "Only convenience duration/focus may be retained, never a generated plan/equipment/demand");
 assert.equal(storage.values.size, 1);
 
+// A rejected safe-plan preview must explain the failure without losing the
+// athlete's current choices or preventing a changed focus from being retried.
+const noSafeSession = "No safe short session is available for that focus and equipment today.";
+tree = render({ error: noSafeSession });
+const restrictionAlert = tree.find(node => node.props.role === "alert" && text(node).includes(noSafeSession));
+assert.ok(restrictionAlert, "A no-safe-session result must be visible in the retained builder");
+assert.match(text(restrictionAlert), /Choose another focus.*try Preview again/);
+assert.equal(selectedMinutes(tree), 15);
+assert.equal(focusSelect(tree).props.value, compressionToken);
+assert.equal(checkbox(tree, "Wall").props.checked, true);
+assert.equal(checkbox(tree, "Parallettes").props.checked, false);
+assert.equal(button(tree, "Easier / Technique").props["aria-pressed"], true);
+assert.ok(!preview(tree).props.disabled, "An unsuccessful preview must not lock the form");
+focusSelect(tree).props.onChange({ target: { value: "general" } });
+tree = render({ error: noSafeSession });
+preview(tree).props.onClick();
+assert.equal(builds.at(-1).focus.kind, "general");
+assert.equal(builds.at(-1).minutes, 15);
+assert.deepEqual(builds.at(-1).equipment, ["floor", "wall"]);
+assert.equal(builds.at(-1).demand, "technique");
+tree = render({ error: undefined });
+assert.ok(!tree.some(node => node.props.role === "alert" && text(node).includes(noSafeSession)), "A cleared preview error must disappear");
+focusSelect(tree).props.onChange({ target: { value: compressionToken } });
+
 tree = render({ preferenceKey: keyB });
 assert.equal(selectedMinutes(tree), 5, "Switching athletes remounts the form without carrying choices");
 assert.equal(focusSelect(tree).props.value, graphToken);
@@ -158,4 +182,4 @@ preferences.rememberShortWorkoutPreferences(keyA, fallback);
 preferences.clearShortWorkoutPreferences(keyA);
 assert.equal(storage.getItem(keyA), null);
 delete globalThis.localStorage;
-console.log("Short-workout memory checks passed: actual form close/reopen/reload, stable focus tokens, profile defaults, account/namespace isolation, unavailable focus, malformed data and storage failures.");
+console.log("Short-workout checks passed: visible safe-plan errors and retry with retained choices; actual form close/reopen/reload, stable focus tokens, profile defaults, account/namespace isolation, unavailable focus, malformed data and storage failures.");

@@ -10,6 +10,7 @@ import {
   type DemandDomain,
   type DerivedAthleteState,
   type EvidenceEventId,
+  type EquipmentId,
   type IsoTimestamp,
   type ObservationMeasurement,
   type ObservationSessionId,
@@ -44,6 +45,8 @@ import {
 import { vNextAssessmentPolicy } from "./policy";
 import { placementEntryRuleFor, placementReadinessSatisfied, placementSubjectDemonstrated } from "../placementEntry";
 import { milestoneBenchmarkId } from "../definitions/ids";
+import type { ProjectionPolicy } from "../projection";
+import { currentCheckSafetyBlockers } from "./checkSafety";
 
 const placementRule = (draft: AssessmentDraft, protocol: BenchmarkProtocol) => {
   if (draft.policyVersion !== 2 || !draft.answers.some((answer) => answer.value.kind === "inactivity" && answer.value.inactivity === "active")
@@ -68,7 +71,7 @@ const subjectKey = (subject: BenchmarkSubject): string => subject.kind === "mile
   ? `milestone:${subject.milestone.graphId}:${subject.milestone.nodeId}`
   : `capacity:${subject.capacity.capacityId}:${subject.capacity.facetId}`;
 
-const stateSatisfiesSubject = (
+export const stateSatisfiesSubject = (
   subject: BenchmarkSubject,
   state: DerivedAthleteState | undefined,
 ): boolean => {
@@ -103,7 +106,7 @@ const prerequisiteSatisfied = (
   return protocol ? stateSatisfiesSubject(protocol.subject, state) : false;
 };
 
-const protocolPrerequisitesSatisfied = (
+export const protocolPrerequisitesSatisfied = (
   protocol: BenchmarkProtocol,
   bundle: DefinitionBundle,
   state: DerivedAthleteState | undefined,
@@ -147,13 +150,22 @@ const availabilityFor = (
   protocol: BenchmarkProtocol,
   state: DerivedAthleteState | undefined,
   reason: GuidedTestOffer["reason"],
+  currentPolicy?: ProjectionPolicy,
+  currentEquipment?: readonly EquipmentId[],
 ): Pick<GuidedTestOffer, "availability" | "blockers"> => {
   const blockers: string[] = [];
-  const equipment = new Set(selectedAssessmentEquipment(draft));
+  const equipment = new Set(currentEquipment ?? selectedAssessmentEquipment(draft));
   if (protocol.conditions.equipment.some((item) => !equipment.has(item))) blockers.push("missing-equipment");
   const demands = demandDomainsForAssessmentProtocol(bundle, protocol.id);
   const restricted = restrictionDomains(draft, bundle, state);
+  if (currentPolicy) blockers.push(...currentCheckSafetyBlockers({ protocol, bundle, state,
+    equipment: [...equipment], restrictedDomains: restricted, policy: currentPolicy }));
   if (demands.some((domain) => restricted.has(domain))) blockers.push("active-restriction");
+  const exerciseVersion = bundle.exercises.find((item) => item.id === protocol.exerciseId)?.definitionVersion;
+  if (state?.trainabilityEvaluations.some((item) => item.exerciseId === protocol.exerciseId
+    && item.exerciseDefinitionVersion === exerciseVersion
+    && item.prescriptionVariantId === protocol.prescriptionVariantId
+    && item.reasonCodes.some((code) => code === "active-restriction"))) blockers.push("active-restriction");
   const inversion = draft.answers.find((answer) => answer.value.kind === "inversion")?.value;
   const anchor = protocolAnswerRecords(draft, undefined, bundle).find((item) => item.anchor.protocolId === protocol.id)?.anchor;
   if (anchor?.inversionExposure === "full"
@@ -195,7 +207,8 @@ const availabilityFor = (
 const offerKey = (offer: Pick<GuidedTestOffer, "protocolId">): string => offer.protocolId;
 
 /** Dependency-ordered checks for the selected goal only; no fabricated predecessor evidence. */
-const placementReviewChecks = (draft: AssessmentDraft, bundle: DefinitionBundle, state?: DerivedAthleteState) => {
+const placementReviewChecks = (draft: AssessmentDraft, bundle: DefinitionBundle, state?: DerivedAthleteState,
+  currentPolicy?: ProjectionPolicy, currentEquipment?: readonly EquipmentId[]) => {
   const roots = draft.mode === "targeted-reconfirmation"
     ? draft.targetedProtocolIds.map((id) => protocolById(bundle, id))
     : selectedAssessmentGoals(draft).flatMap((graphId) => {
@@ -227,7 +240,7 @@ const placementReviewChecks = (draft: AssessmentDraft, bundle: DefinitionBundle,
       const any = node?.prerequisiteRule?.anyOf ?? [];
       if (any.length && !any.some((ref) => prerequisiteSatisfied(ref, bundle, state))) {
         const options = any.map(forRef).filter((item): item is BenchmarkProtocol => Boolean(item));
-        const next = options.find((item) => availabilityFor(draft, bundle, item, state, "confirm-provisional").availability === "available") ?? options[0];
+        const next = options.find((item) => availabilityFor(draft, bundle, item, state, "confirm-provisional", currentPolicy, currentEquipment).availability === "available") ?? options[0];
         if (next) visit(next);
       }
     } else {
@@ -240,7 +253,7 @@ const placementReviewChecks = (draft: AssessmentDraft, bundle: DefinitionBundle,
     }
     const reason = draft.mode === "targeted-reconfirmation" ? "reconfirm-existing" as const : "confirm-provisional" as const;
     candidates.push({ protocolId: protocol.id, subject: protocol.subject, label: protocol.label, reason,
-      ...availabilityFor(draft, bundle, protocol, state, reason) });
+      ...availabilityFor(draft, bundle, protocol, state, reason, currentPolicy, currentEquipment) });
   };
   let checkedCount = 0;
   for (const root of roots) {
@@ -258,6 +271,8 @@ export const buildAssessmentReview = (
   draft: AssessmentDraft,
   bundle: DefinitionBundle,
   state?: DerivedAthleteState,
+  currentPolicy?: ProjectionPolicy,
+  currentEquipment?: readonly EquipmentId[],
 ): AssessmentReview => {
   assertAssessmentDraft(draft, bundle);
   if (!isAssessmentAtReview(draft, bundle)) throw new TypeError("Assessment is not ready for review");
@@ -301,7 +316,7 @@ export const buildAssessmentReview = (
         subject: protocol.subject,
         label: protocol.label,
         reason,
-        ...availabilityFor(draft, bundle, protocol, state, reason),
+        ...availabilityFor(draft, bundle, protocol, state, reason, currentPolicy, currentEquipment),
       } satisfies GuidedTestOffer];
     })
     .sort((left, right) => Number(left.availability === "blocked") - Number(right.availability === "blocked")
@@ -316,7 +331,7 @@ export const buildAssessmentReview = (
     ...timing,
     provisional,
     guidedTests,
-    ...(draft.policyVersion === 2 ? placementReviewChecks(draft, bundle, state) : {}),
+    ...(draft.policyVersion === 2 ? placementReviewChecks(draft, bundle, state, currentPolicy, currentEquipment) : {}),
     restrictionReported,
     completionMessage: draft.policyVersion === 2
       ? "Your answers are estimates. Start with the available checks below; each saved result updates your workout. A checked ordinary variation becomes your starting practice when recovered, without claiming harder skills. Some skills need confirmation on another day. Stop when tired or uncomfortable; you can continue later."
@@ -328,6 +343,56 @@ export const buildAssessmentReview = (
 
 const eventIdFor = async (draft: AssessmentDraft, key: string): Promise<EvidenceEventId> =>
   parseStableId("event", `assessment-${await sha256({ draftId: draft.id, key })}`);
+
+/** An explicitly submitted restriction is independent of unfinished placement. */
+const submittedRestrictionEvidence = async (
+  draft: AssessmentDraft,
+  bundle: DefinitionBundle,
+): Promise<RestrictionReportedEvent | undefined> => {
+  assertAssessmentDraft(draft, bundle);
+  const answer = draft.answers.find((item) => item.value.kind === "safety");
+  if (answer?.value.kind !== "safety" || answer.value.severity === "none") return undefined;
+  return {
+    schemaVersion: DOMAIN_SCHEMA_VERSION,
+    id: parseStableId("event", `assessment-safety-${await sha256({ draftId: draft.id, answer })}`),
+    athleteId: draft.athleteId,
+    occurredAt: answer.answeredAt,
+    recordedAt: answer.answeredAt,
+    source: "self-assessment",
+    catalogueVersion: draft.catalogueVersion,
+    type: "restriction_reported",
+    severity: answer.value.severity,
+    demandDomains: answer.value.demandDomains ?? [],
+    bodyRegions: answer.value.bodyRegions ?? [],
+    ...(answer.value.notes ? { notes: answer.value.notes } : {}),
+  };
+};
+
+/**
+ * Recover a submitted positive report before planning or changing its draft.
+ * No-symptoms answers and Back prefills never clear or create observations.
+ * Native partial/complete assessment commits keep their original event bytes.
+ */
+export const persistSubmittedAssessmentRestriction = async (
+  store: VNextShadowStore,
+  draft: AssessmentDraft,
+  bundle: DefinitionBundle,
+): Promise<void> => {
+  if (draft.status === "committed") return;
+  const event = await submittedRestrictionEvidence(draft, bundle);
+  if (!event) return;
+  const sources = await store.readProjectionSources(draft.athleteId);
+  const legacyId = await eventIdFor(draft, "context-restriction");
+  const legacy = sources.evidenceEvents.find((item) => item.id === legacyId);
+  if (legacy?.type === "restriction_reported") {
+    const { id: _oldId, recordedAt: _oldRecordedAt, ...oldReport } = legacy;
+    const { id: _newId, recordedAt: _newRecordedAt, ...newReport } = event;
+    if (canonicalJson(oldReport) === canonicalJson(newReport)) return;
+  }
+  const existing = sources.evidenceEvents.find((item) => item.id === event.id);
+  if (existing && canonicalJson(existing) === canonicalJson(event)) return;
+  await store.appendEvidenceEvent(event);
+};
 
 const assessmentOutcome = (
   response: ReturnType<typeof protocolAnswerRecords>[number]["answer"]["value"]["response"],
@@ -427,7 +492,15 @@ export const commitAssessment = async (
   evidenceEvents: readonly AthleteEvidenceEvent[];
 }>> => {
   const review = buildAssessmentReview(draft, bundle);
-  const evidenceEvents = await buildAssessmentEvidence(draft, bundle);
+  const nativeEvidence = await buildAssessmentEvidence(draft, bundle);
+  const submittedRestriction = await submittedRestrictionEvidence(draft, bundle);
+  const sources = submittedRestriction ? await store.readProjectionSources(draft.athleteId) : undefined;
+  const legacyRestrictionId = await eventIdFor(draft, "context-restriction");
+  const useSubmittedRestriction = submittedRestriction
+    && !sources?.evidenceEvents.some((event) => event.id === legacyRestrictionId)
+    && sources?.evidenceEvents.some((event) => event.id === submittedRestriction.id);
+  const evidenceEvents = nativeEvidence.map((event) => event.id === legacyRestrictionId && useSubmittedRestriction
+    ? submittedRestriction : event);
   const changedIntent = draft.mode === "new-placement"
     || draft.answers.some((answer) => answer.value.kind === "goals" || answer.value.kind === "equipment");
   if (changedIntent) await store.putAthleteIntent(buildAssessmentIntent(draft));
@@ -474,11 +547,23 @@ export const createGuidedTestEvidence = (
   state: DerivedAthleteState | undefined,
   input: GuidedTestResultInput,
   existingEvent?: AthleteEvidenceEvent,
+  currentPolicy?: ProjectionPolicy,
+  currentEquipment?: readonly EquipmentId[],
 ): AthleteEvidenceEvent => {
-  const offer = buildAssessmentReview(draft, bundle, state).guidedTests.find((candidate) =>
+  const offer = buildAssessmentReview(draft, bundle, state, currentPolicy, currentEquipment).guidedTests.find((candidate) =>
     candidate.protocolId === input.protocolId);
   if (!existingEvent && !offer) throw new TypeError("Guided result was not offered by the current assessment review");
   if (!existingEvent && offer?.availability !== "available") throw new TypeError(`Guided test is blocked: ${offer?.blockers.join(", ")}`);
+  return createGuidedProtocolEvidence(draft.athleteId, bundle, input, existingEvent);
+};
+
+/** Exact native result builder. Callers must validate the current offered check first. */
+export const createGuidedProtocolEvidence = (
+  athleteId: AthleteId,
+  bundle: DefinitionBundle,
+  input: GuidedTestResultInput,
+  existingEvent?: AthleteEvidenceEvent,
+): AthleteEvidenceEvent => {
   if (!isCanonicalIsoTimestamp(input.occurredAt) || !isCanonicalIsoTimestamp(input.recordedAt)
     || Date.parse(input.recordedAt) < Date.parse(input.occurredAt)) {
     throw new TypeError("Guided test timestamps must be canonical and ordered");
@@ -492,7 +577,7 @@ export const createGuidedTestEvidence = (
   const event: AthleteEvidenceEvent = {
     schemaVersion: DOMAIN_SCHEMA_VERSION,
     id: parseStableId("event", input.eventId),
-    athleteId: draft.athleteId,
+    athleteId,
     occurredAt: input.occurredAt,
     recordedAt: input.recordedAt,
     source: "guided-test",

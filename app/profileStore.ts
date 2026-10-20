@@ -1,4 +1,5 @@
-import type { VNextShadowStore } from "./vnext/persistence/contracts";
+import type { VNextShadowStore, VNextSignOutClearGuard } from "./vnext/persistence/contracts";
+import type { AthleteId } from "./vnext/contracts";
 import type { LegacyV12ProfileSource } from "./vnext/legacyV12";
 import type {
   ShadowSyncSummary,
@@ -220,10 +221,10 @@ const openDb = (): Promise<IDBDatabase | null> => new Promise((resolve) => {
 
 // Security lifecycle only: vNext remains a shadow feature, but signed-out or
 // factory-reset browsers must not retain its isolated account data.
-const clearVNextShadowAthlete = async (profileId: string, databaseName?: string): Promise<void> => {
+const clearVNextShadowAthlete = async (profileId: string, databaseName?: string, signOutGuard?: VNextSignOutClearGuard): Promise<void> => {
   if (typeof indexedDB === "undefined") return;
   const { clearVNextShadowAthleteData } = await import("./vnext/persistence/indexedDb");
-  await clearVNextShadowAthleteData(profileId, databaseName ? { databaseName } : {});
+  await clearVNextShadowAthleteData(profileId, databaseName ? { databaseName } : {}, signOutGuard);
 };
 
 const clearVNextShadowDevice = async (): Promise<void> => {
@@ -236,9 +237,11 @@ const clearVNextShadowDevice = async (): Promise<void> => {
 const clearVNextWorkflowState = (profileId: string, namespace: string): void => {
   const identityStorageKey = `parallette25-${namespace}-identity-v1`;
   const legacyAthleteStorageKey = `parallette25-${namespace}-athlete-v1`;
-  for (const kind of ["emphasis", "workout-recovery", "guided-recovery", "active-workout"]) {
+  for (const kind of ["short-workout", "emphasis", "workout-recovery", "guided-recovery", "active-workout"]) {
     localStorage.removeItem(`parallette25-${namespace}-${kind}-v1:${profileId}`);
   }
+  // Both production runner readers retain this original, athlete-scoped key.
+  localStorage.removeItem(`parallette25-vnext-rc-active-workout-v1:${profileId}`);
   try {
     const identity = JSON.parse(localStorage.getItem(identityStorageKey) ?? "null") as { athleteId?: unknown } | null;
     if (identity?.athleteId === profileId) localStorage.removeItem(identityStorageKey);
@@ -789,11 +792,87 @@ export async function readLegacyProfileForVNextMigration(
     : undefined;
 }
 
+export type VNextPendingSignOutWork = Readonly<{
+  descriptions: readonly string[];
+  fingerprint: string;
+}>;
+
+export class VNextPendingWorkError extends Error {
+  constructor(readonly pendingWork: VNextPendingSignOutWork) {
+    super("Finish and save your pending training before signing out, or explicitly discard it from this device.");
+    this.name = "VNextPendingWorkError";
+  }
+}
+
+const pendingVNextSignOutWork = async (
+  profileId: string,
+  namespace: string,
+  store?: Pick<VNextShadowStore, "readAssessmentDraft">,
+): Promise<Readonly<{
+  pendingWork?: VNextPendingSignOutWork;
+  localValues: Readonly<Record<string, string | null>>;
+  signOutGuard: VNextSignOutClearGuard;
+}>> => {
+  const draft = store ? await store.readAssessmentDraft(profileId as AthleteId) : null;
+  const snapshot: Record<string, unknown> = {};
+  const localValues: Record<string, string | null> = {};
+  const descriptions = new Set<string>();
+  if (draft?.status === "in-progress") {
+    snapshot.assessment = draft;
+    descriptions.add("unfinished setup");
+  }
+  const keys = new Set([
+    `parallette25-${namespace}-workout-recovery-v1:${profileId}`,
+    `parallette25-${namespace}-guided-recovery-v1:${profileId}`,
+    `parallette25-${namespace}-active-workout-v1:${profileId}`,
+    `parallette25-vnext-rc-active-workout-v1:${profileId}`,
+  ]);
+  let workoutDescription: string | undefined;
+  for (const key of keys) {
+    const raw = localStorage.getItem(key);
+    localValues[key] = raw;
+    if (raw === null) continue;
+    snapshot[key] = raw;
+    if (key.includes("guided-recovery")) descriptions.add("an unfinished guided check");
+    else if (key.includes("active-workout")) workoutDescription ??= "an unfinished workout";
+    else {
+      let stage: unknown;
+      try { stage = (JSON.parse(raw) as { stage?: unknown } | null)?.stage; }
+      catch { /* An unreadable recovery entry still requires explicit discard. */ }
+      workoutDescription = stage === "preview" ? "a saved workout preview"
+        : stage === "review" || stage === "prepared" ? "a workout waiting to be saved"
+          : "an unfinished workout";
+    }
+  }
+  if (workoutDescription) descriptions.add(workoutDescription);
+  const checked = { localValues, signOutGuard: { assessmentDraft: draft } };
+  if (descriptions.size === 0) return checked;
+  // Consent applies only to these exact local drafts, including future fields.
+  // A newly changed draft needs a fresh decision; no content is put in the UI.
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(stableValue(snapshot))));
+  return { ...checked, pendingWork: {
+    descriptions: [...descriptions],
+    fingerprint: Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""),
+  } };
+};
+
 /**
- * End the shared bearer session and clear only this athlete's isolated vNext
- * device data. The v1.2 local profile mirror is not read or mutated here.
+ * End the shared bearer session and clear this athlete's vNext device data only
+ * after exact unfinished-work consent and acknowledged observation upload.
+ * The v1.2 local profile mirror is not read or mutated here.
  */
-export async function signOutVNextAccount(profileId: string, databaseName?: string): Promise<void> {
+export async function signOutVNextAccount(
+  profileId: string,
+  databaseName?: string,
+  options: Readonly<{ discardPendingWorkFingerprint?: string }> = {},
+): Promise<void> {
+  const namespace = databaseName === VNEXT_PRODUCTION_SHADOW_DATABASE ? VNEXT_PRODUCTION_STORAGE_NAMESPACE : "vnext-rc";
+  let checked: Awaited<ReturnType<typeof pendingVNextSignOutWork>> | undefined;
+  const requirePendingWorkDecision = async (store?: Parameters<typeof pendingVNextSignOutWork>[2]) => {
+    checked = await pendingVNextSignOutWork(profileId, namespace, store);
+    const pending = checked.pendingWork;
+    if (pending && pending.fingerprint !== options.discardPendingWorkFingerprint) throw new VNextPendingWorkError(pending);
+  };
   if (typeof indexedDB !== "undefined") {
     const [{ createVNextShadowStore }, { parseStableId }] = await Promise.all([
       import("./vnext/persistence/indexedDb"),
@@ -803,6 +882,7 @@ export async function signOutVNextAccount(profileId: string, databaseName?: stri
     const athleteId = parseStableId("athlete", profileId);
 
     try {
+      await requirePendingWorkDecision(store);
       if (REMOTE_API && sessionFor(profileId)) {
         try {
           await syncVNextShadowObservations(store, profileId);
@@ -816,20 +896,38 @@ export async function signOutVNextAccount(profileId: string, databaseName?: stri
       if (pending.length > 0) {
         throw new Error("Connect and sync this athlete before signing out so unsynced progress is not removed from this device.");
       }
+      // Sync may take time. Do not discard work that changed after the choice.
+      await requirePendingWorkDecision(store);
     } finally {
       store.close();
     }
+  } else {
+    await requirePendingWorkDecision();
   }
 
-  if (REMOTE_API && sessionFor(profileId)) {
-    try { await api("/auth/logout", { method: "POST" }, profileId); }
-    catch { /* Local sign-out must still complete while offline. */ }
+  // Fingerprinting and IndexedDB reads above yield. Close that final window
+  // synchronously before locking the local account and removing its recovery.
+  for (const [key, value] of Object.entries(checked!.localValues)) {
+    if (localStorage.getItem(key) !== value) {
+      throw new Error("Your training changed in another open view. Review the latest work, then try signing out again.");
+    }
   }
+
+  // The request captures its bearer synchronously. Lock this account locally
+  // before waiting on the network so another open view cannot keep training
+  // during a slow logout after the unfinished-work decision has been checked.
+  const logout = REMOTE_API && sessionFor(profileId)
+    ? api("/auth/logout", { method: "POST" }, profileId).catch(() => undefined)
+    : Promise.resolve();
   clearSession(profileId);
-  await clearVNextShadowAthlete(profileId, databaseName);
-  clearVNextWorkflowState(profileId, databaseName === VNEXT_PRODUCTION_SHADOW_DATABASE
-    ? VNEXT_PRODUCTION_STORAGE_NAMESPACE
-    : "vnext-rc");
+  await clearVNextShadowAthlete(profileId, databaseName, checked!.signOutGuard);
+  for (const [key, value] of Object.entries(checked!.localValues)) {
+    if (localStorage.getItem(key) !== value) {
+      throw new Error("New unfinished training arrived while signing out. Account access is locked, and that local work has been kept. Sign in again to review it.");
+    }
+  }
+  clearVNextWorkflowState(profileId, namespace);
+  await logout;
 }
 
 export async function validateProfileSession(profileId: string): Promise<ProfileRecord | null> {
