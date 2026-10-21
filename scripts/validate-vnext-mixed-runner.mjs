@@ -68,6 +68,8 @@ const componentModule = (path) => {
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment: "Fragment" };
     if (name === "lucide-react") return { Volume2: "Volume2", VolumeX: "VolumeX", X: "X" };
     if (name === "../index") return workout;
+    if (name === "../workoutGuidance") return load("app/vnext/workoutGuidance.ts");
+    if (name === "../practiceDose") return load("app/vnext/practiceDose.ts");
     if (name === "../mixedWorkout") return mixed;
     if (name === "./useWorkoutClock" || name === "./workoutClock" || name === "./useWorkoutRunAuthorization" || name === "./recoveryStorage") {
       return componentModule(resolve(dirname(sourcePath), `${name}.ts`));
@@ -157,7 +159,7 @@ const createHost = (saved = storage(), options = {}) => {
   const owner = { slots: [], cursor: 0, effects: [], dirty: true, tree: undefined, timers: new Map(), serial: 0,
     saved, facts: [], starts: 0, closes: [], props: undefined, monotonic: 0, wall: 1_792_281_600_000,
     wakeRequests: [], document: { ...eventTarget(), visibilityState: "visible" }, window: eventTarget() };
-  owner.props = { plan: options.native ? nativePlan : plan, bundle, origin: "custom", initialSelections: {}, swapOptions,
+  owner.props = { plan: options.plan ?? (options.native ? nativePlan : plan), bundle: options.bundle ?? bundle, origin: "custom", initialSelections: {}, swapOptions,
     onStart: () => { owner.starts++; }, onFinish: (facts) => { owner.facts.push(facts); }, onClose: (started) => owner.closes.push(started) };
   if (options.onBeforeRun) owner.props.onBeforeRun = options.onBeforeRun;
   if (options.safetyVersion !== undefined) owner.props.safetyVersion = options.safetyVersion;
@@ -928,5 +930,27 @@ for (const native of [false, true]) {
     app.unmount();
   });
 }
+
+await check("generator 5 player and restored draft retain explicit exit targets and native rest", () => {
+  const realBundle = load("app/vnext/production/trainingQuality.ts").trainingQualityCatalogue.bundle;
+  const exit = realBundle.exercises.find(e => e.id === "grounded-side-exit-rehearsal");
+  const variant = exit.prescriptionVariants[0];
+  const dosePlan = { ...plan, generatorPolicyVersion: 5, intendedDurationSeconds: 180,
+    items: [{ ...plan.items[0], purpose: "primary-development", exerciseId: exit.id,
+      exerciseDefinitionVersion: exit.definitionVersion, prescriptionVariantId: variant.id,
+      plannedSeconds: 180, demand: variant.demand }] };
+  const saved = storage(), options = { plan: dosePlan, bundle: realBundle };
+  const app = createHost(saved, options);
+  assert(text(app.tree).includes("1–2 controlled exits per side"));
+  assert(!text(app.tree).includes("6–12 reps"));
+  app.click("Start workout"); app.tick(10); app.click("Pause");
+  const before = app.draft(); app.unmount();
+  const reopened = createHost(saved, options);
+  assert.equal(reopened.draft().elapsedSeconds, before.elapsedSeconds);
+  assert(text(reopened.tree).includes("1–2 controlled exits per side"));
+  const timeline = mixed.workoutExecutionTimeline(dosePlan, realBundle);
+  assert.equal(timeline.filter(i => i.kind === "rest").reduce((sum, i) => sum + i.durationSeconds, 0), 90);
+  reopened.unmount();
+});
 
 console.log(`Workout reliability: ${checks} actual player/hook/controller lifecycle scenarios passed.`);

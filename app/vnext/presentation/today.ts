@@ -6,7 +6,8 @@ import type {
   TodayWorkoutPresentation,
 } from "./contracts";
 import { presentationFamilyLabel } from "./progress";
-import { structureWorkoutItem, type WorkoutExerciseSelection } from "../workoutUx";
+import type { WorkoutExerciseSelection } from "../workoutUx";
+import { hasPracticeDosePolicy, isWallLinePractice, structurePracticeWorkoutItem } from "../practiceDose";
 import type { PlanItemId } from "../contracts";
 import { isMixedWorkoutPlan, workoutExecutionGroups } from "../mixedWorkout";
 import { planningReasonCodes } from "../planning/policy";
@@ -121,6 +122,10 @@ const simpleIntensityReason = (
       && candidate.prescriptionVariantId === item.prescriptionVariantId;
   });
   if (evaluation?.decision === "modify") return "Adjusted to match current restrictions and availability.";
+  const item = generated.plan?.items.find((candidate) => candidate.id === explanation.planItemId);
+  if (generated.plan && hasPracticeDosePolicy(generated.plan) && item && isWallLinePractice(item)) {
+    return "At most three controlled sets, keeping a comfortable range and the planned rest.";
+  }
   if (generated.sessionDemand === "technique") return "Uses today’s easier, technique-focused dose.";
   if (generated.sessionDemand === "challenge") return "Uses a larger dose of work that was already available.";
   return "Uses the normal quality dose for this movement.";
@@ -155,7 +160,7 @@ export const buildTodayWorkoutPresentation = (
     const exercise = bundle.exercises.find((candidate) => candidate.id === item.exerciseId
       && candidate.definitionVersion === item.exerciseDefinitionVersion);
     const explanation = explanationByItem.get(item.id);
-    const structured = structureWorkoutItem(item, bundle);
+    const structured = structurePracticeWorkoutItem(generated.plan!, item, bundle);
     const group = groups.find((entry) => entry.items.some((movement) => movement.planItemId === item.id));
     const rotation = group?.mode === "rounds";
     const orderReason = rotation
@@ -193,6 +198,8 @@ export const buildTodayWorkoutPresentation = (
     demand,
     blocks,
     durationLabel: Number.isInteger(minutes) ? `${minutes} minutes` : `${minutes.toFixed(1)} minutes`,
+    ...(hasPracticeDosePolicy(generated.plan) && generated.durationException
+      ? { durationMessage: generated.durationException.message } : {}),
     authorityNotice: "Your goals guide the focus. The system still decides the safe progression, exercise and dose from current evidence and restrictions.",
     exposesRawAlgorithmDecisions: false,
   };

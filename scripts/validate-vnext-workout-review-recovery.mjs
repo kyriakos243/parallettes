@@ -33,6 +33,7 @@ const compiled = ts.transpileModule(`${readFileSync("app/vnext/ui/VNextExperienc
 }).outputText;
 new Function("module", "exports", "require", compiled)(module, module.exports, (name) => {
   if (name === "react") return hooks;
+  if (name === "../workoutGuidance") return load("app/vnext/workoutGuidance.ts");
   if (name === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment: "Fragment" };
   if (name === "../media/VNextMotionGuide") return { VNextMotionGuide: "OwnedMotionGuide" };
   if (name === "./SkillRoadmap") return { SkillRoadmap: "SkillRoadmap" };

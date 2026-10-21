@@ -239,6 +239,20 @@ Sync reader capability **2** is a transport compatibility field, independent of 
 
 The full local checks and browser update/offline rehearsal passed with synthetic data; the owner then confirmed both physical iPhone/iPad checks and authorised release. Saved training/account data is preserved and no schema migration occurred. Exact publication, recovery and timestamp-only reconciliation evidence is in release runbook §32. Initial upgrade guidance and acceptance details are in [the four-improvement QA report](VNEXT_FOUR_IMPROVEMENTS_QA.md).
 
+### 5.18 Foreground account continuity — local candidate, 2026-10-20
+
+An accepted account interface stays mounted during foreground session revalidation while its existing unexpired local bearer is checked. A transient/offline validation result retains the established offline-first allowance. Cold opens and changed credentials still require validation before observation access mounts; absent, expired, rejected or identity-mismatched sessions lock access. Same-tab sign-out, session storage changes/clear, visibility and expiry checks remain; generation fencing prevents an older successful check reopening a newer lock, and disposed identities ignore late results.
+
+This changes UI lifecycle only: no schema, namespace, token scope, training observation, account identity, sync reader capability or recovery format changes. Native definitions 1–8, generator readers 1–4, projection 11 and reader capability 2 remain. Menu-only guidance filtering must never remove a saved native selection from timer parsing or safety validation. Frozen native player/timing and accepted media evidence remain byte-identical. The three local corrections use synthetic checks only and are not deployed.
+
+### 5.19 Versioned practice dose — local candidate, 2026-10-21
+
+Mixed generators **5** for ordinary/capacity plans own the new routine practice cap and exit target. Immutable policy version/references and semantic plan identity distinguish future plans. A version-aware reader derives the target from the native plan; native generators/readers 1–4, all definitions 1–8, exact protocols and old plan/record payloads remain intact. No Session Plan/Record field, observation schema, database schema/name, account, namespace, ID, reset, migration or projection-policy change occurs. Saved previews, active drafts, completed records and exports retain their own policy; a new plan is required to receive the new dose.
+
+Sync reader capability **3** includes generator-5 execution/recovery semantics. The candidate Worker rejects older/missing capabilities before touching training storage; a future minimum stops the client before applying changes, moving its cursor or acknowledging its outbox. This is transport negotiation, not a rewrite of observation bytes. The new client remains compatible with the preceding capability-2 Worker, but **an eventual release must publish the capability-3 Worker before the new client**, then update all owner devices/tabs before creating new plans. Old offline bundles are not globally disabled; retain the new readers if a later rollback disables the new generator. Sole-window safe activation, saved outboxes and all pending-work safeguards remain.
+
+Focused tests cover client/Worker acceptance, old-client rejection, native targets, early-finish immutable retry, offline IndexedDB reopening, repeated backup import and History. Full local checks/build and synthetic browser QA pass; production remains `9d6666cf69bfe5b52ea6` with Worker capability 2. No production storage was read or written by the implementation/QA fixture. Static public manifest verification is the only live check in this task. No deployment is authorised.
+
 ## 6. Target Persistence and Sync
 
 ### 6.1 Static versioned definitions

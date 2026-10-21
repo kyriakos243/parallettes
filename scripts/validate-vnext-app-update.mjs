@@ -181,7 +181,7 @@ const protectedStore = new Proxy(reopened, { get(target, key) {
 } });
 await assert.rejects(syncObservationDeltas(protectedStore, athleteId, async (request) => {
   assert.equal(request.readerVersion, VNEXT_SYNC_READER_VERSION);
-  return { schemaVersion: 1, minimumReaderVersion: 3, cursor: 1, hasMore: false, changes: [], acknowledged: [], conflicts: [] };
+  return { schemaVersion: 1, minimumReaderVersion: VNEXT_SYNC_READER_VERSION + 1, cursor: 1, hasMore: false, changes: [], acknowledged: [], conflicts: [] };
 }), /shadow-sync-update-required/);
 assert.equal(applyCalls, 0); assert.equal(acknowledgeCalls, 0);
 assert.equal(canonicalJson(await reopened.readSyncUpload(athleteId, 20)), before);
@@ -189,7 +189,7 @@ const transport = createAuthenticatedShadowTransport(async () => new Response("{
 await assert.rejects(transport({ schemaVersion: 1, cursor: 0, limit: 1, upload: [] }), /shadow-sync-update-required/);
 pass("future reader requirement stops sync before local writes, cursor movement or acknowledgements");
 let dbCalls = 0;
-for (const readerVersion of [undefined, 1, "2"]) {
+for (const readerVersion of [undefined, 1, 2, "3"]) {
   const response = await handleVNextShadowSync({}, { DB: new Proxy({}, { get() { dbCalls++; throw new Error("DB must not be touched"); } }) },
     "https://qa.invalid", { profile_id: athleteId }, {
       readJson: async () => ({ schemaVersion: 1, readerVersion, cursor: 0, limit: 1, upload: [] }),

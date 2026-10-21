@@ -1,5 +1,5 @@
 import type { DefinitionBundle, SessionPlan, SessionRecord, SessionItemOutcome } from "../contracts";
-import { structureWorkoutItem, prescriptionTargetLabel } from "../workoutUx";
+import { structurePracticeWorkoutItem } from "../practiceDose";
 
 export type HistoryMovement = Readonly<{
   id: string;
@@ -74,7 +74,7 @@ export const buildSessionHistory = (
         const variant = performed?.prescriptionVariants.find((candidate) => candidate.id === outcome?.performedPrescriptionVariantId);
         let plannedPrescription: string | undefined;
         if (!legacy && bundle && exercise?.prescriptionVariants.some((candidate) => candidate.id === item.prescriptionVariantId)) {
-          plannedPrescription = structureWorkoutItem(item, bundle).structureLabel;
+          plannedPrescription = structurePracticeWorkoutItem(plan!, item, bundle).structureLabel;
         }
         const unknownTime = Boolean(legacy || outcome?.participationBasis === "legacy-unknown");
         return {
@@ -83,7 +83,7 @@ export const buildSessionHistory = (
           plannedPrescription,
           ...(!legacy && performed && variant && outcome?.status !== "skipped" ? {
             performedName: performed.name,
-            performedTarget: prescriptionTargetLabel(variant.target),
+            performedTarget: structurePracticeWorkoutItem(plan!, item, bundle!, { exerciseId: performed.id, exerciseDefinitionVersion: performed.definitionVersion, prescriptionVariantId: variant.id }).targetLabel,
           } : {}),
           performed: Boolean(outcome && (outcome.participationSeconds > 0 || (unknownTime && outcome.status !== "skipped"))),
           ...(!legacy && outcome && outcome.status !== "skipped" && (!performed || !variant) ? { performedNote: "Actual variation not recorded." } : {}),

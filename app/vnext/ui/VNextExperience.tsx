@@ -9,6 +9,7 @@ import { HistoryView, WorkoutSavedSummary } from "./HistoryPanels";
 import type { VNextRecentSession } from "./sessionHistory";
 export type { VNextRecentSession } from "./sessionHistory";
 import type { SafeWorkoutSwap } from "../workoutUx";
+import { workoutSwapChoices, workoutVariantLabel } from "../workoutGuidance";
 import type {
   AssessmentEntryAction,
   AssessmentEntryPresentation,
@@ -122,10 +123,15 @@ const detailAssessmentEntry = (
   const expectedKind = detail.assessmentAction.kind === "start-reconfirmation"
     ? "reconfirmation"
     : "guided-test";
-  return assessment.actions.find((action) => action.kind === expectedKind
+  const exact = assessment.actions.find((action) => action.kind === expectedKind
     && action.graphId === detail.graphId
     && action.protocolIds.some((protocolId) =>
       detail.assessmentAction.protocolIds.includes(protocolId)));
+  // A new device can have synced evidence without the local setup draft that
+  // supplied its check offers. Keep an honest route to the existing check flow.
+  return exact ?? (detail.confidence.state === "confirmation-building"
+    ? assessment.actions.find((action) => action.kind === "reassessment")
+    : undefined);
 };
 
 const familyStateRowLabel = (
@@ -410,7 +416,7 @@ const TodayView = ({
               </article>
           )}
           {completion.prompts.length === 0 && (
-            <p className="vnext-help">No development or test movement had enough performed work to need a rating. Preparation and recovery timing will still be saved accurately.</p>
+            <p className="vnext-help">No development or test movement had enough performed work to need a rating. Your recorded activity will still be saved accurately.</p>
           )}
           <div className="vnext-actions vnext-review-navigation">
             {currentReviewIndex > 0 && (
@@ -462,6 +468,7 @@ const TodayView = ({
           </section>
 
           {today.placementMessage && <p className="vnext-panel" role="status">{today.placementMessage}</p>}
+          {today.durationMessage && <p className="vnext-panel">{today.durationMessage}</p>}
           {!completion && <div className="vnext-primary-workout-actions" aria-label="Workout actions">
             <button
               type="button"
@@ -554,10 +561,10 @@ const TodayView = ({
                 const exerciseName = selected?.exerciseName ?? block.exerciseName;
                 const mediaReference = selected?.mediaReference ?? block.mediaReference;
                 const prescriptionLabel = selected
-                  ? `${selected.variantLabel} • ${selected.targetLabel}`
+                  ? `${workoutVariantLabel(selected.variantLabel)} • ${selected.targetLabel}`
                   : block.prescriptionLabel;
                 const setStructureLabel = selected?.structureLabel ?? block.setStructureLabel;
-                const alternatives = workoutSwapOptions[block.planItemId] ?? [];
+                const alternatives = workoutSwapChoices(workoutSwapOptions[block.planItemId] ?? []);
                 const swapOpen = swapPlanItemId === block.planItemId;
                 const directionOptions = alternatives.filter((option) => option.direction === swapDirection);
                 return (
@@ -609,7 +616,7 @@ const TodayView = ({
                               }}
                             >
                               <strong>{option.exerciseName}</strong>
-                              <span>{option.variantLabel} • {option.targetLabel}</span>
+                              <span>{workoutVariantLabel(option.variantLabel)} • {option.targetLabel}</span>
                               <small>{option.reason}</small>
                             </button>
                           )) : (
@@ -899,6 +906,8 @@ const ProgressView = ({
   const details = useMemo(() => detailByGraph(skillDetails), [skillDetails]);
   const detail = selectedGraphId ? details.get(selectedGraphId) : undefined;
   const detailAssessment = detail ? detailAssessmentEntry(detail, assessment) : undefined;
+  const detailActionLabel = detailAssessment?.kind === "reassessment" && detail?.assessmentAction.kind !== "reassess"
+    ? detailAssessment.label : detail?.assessmentAction.label;
 
   return (
     <section className="vnext-view" aria-labelledby="vnext-progress-heading">
@@ -952,13 +961,13 @@ const ProgressView = ({
               onClick={() => {
                 if (detailAssessment) onAssessmentRequested?.(detailAssessment);
                 announce(detailAssessment
-                  ? `${detail.assessmentAction.label} selected.`
+                  ? `${detailActionLabel} selected.`
                   : "This check is not available from the current evidence.");
               }}
             >
               {detailAssessment?.availability === "blocked"
                 ? "Not available now"
-                : detail.assessmentAction.label}
+                : detailActionLabel}
             </button>
           </section>
           {detail.demonstratedMilestones.length > 0 && (

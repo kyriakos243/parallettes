@@ -9,7 +9,8 @@ import type { GeneratedSession } from "../planning/contracts";
 import { vNextGeneratorPolicy } from "../planning/policy";
 import { highDemandDomains } from "../planning/utils";
 import { evaluateTrainability, projectionReasonCodes, type ProjectionPolicy } from "../projection";
-import { safeWorkoutSwaps, type SafeWorkoutSwap, type WorkoutExerciseSelection } from "../workoutUx";
+import type { SafeWorkoutSwap, WorkoutExerciseSelection } from "../workoutUx";
+import { safePracticeWorkoutSwaps as safeWorkoutSwaps, hasPracticeDosePolicy, isWallLinePractice, WALL_LINE_PRACTICE_SECONDS } from "../practiceDose";
 
 export type WorkoutStartSafetyIssue = Readonly<{
   planItemId?: PlanItemId;
@@ -70,6 +71,10 @@ export const validateWorkoutStart = (input: Input): Readonly<{
   const effectivePlan = { ...plan, items: effectiveItems };
   const originalEvaluations = new Map((input.generated.trainabilityUsed ?? []).map((entry) => [identityKey(entry), entry]));
   const problemFor = (item: SessionPlanItem, selection: WorkoutExerciseSelection): string | undefined => {
+    if (hasPracticeDosePolicy(plan) && isWallLinePractice({ ...item, exerciseId: selection.exerciseId })
+      && item.plannedSeconds > WALL_LINE_PRACTICE_SECONDS) {
+      return "This wall-line practice exceeds its current set limit. Return to Today for a new workout.";
+    }
     const movement = resolve(selection);
     if (!movement) return "A saved movement is unavailable in its original workout version.";
     const { exercise, variant } = movement;

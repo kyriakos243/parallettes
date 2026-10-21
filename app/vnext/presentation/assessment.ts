@@ -70,13 +70,20 @@ const actionForOffer = (
   input: AssessmentEntryInput,
 ): AssessmentEntryAction => {
   const graphId = graphIdForProtocol(input.bundle, offer.protocolId);
+  const subject = offer.subject;
+  const confirmationBuilding = subject.kind === "milestone"
+    && input.state.nodeStates.some((finding) => finding.milestone.graphId === subject.milestone.graphId
+      && finding.milestone.nodeId === subject.milestone.nodeId
+      && finding.lifecycle === "demonstrated" && finding.confidence === "current");
+  const reconfirming = offer.reason === "reconfirm-existing" && !confirmationBuilding;
   return {
     id: `${offer.reason}:${offer.protocolId}`,
-    kind: offer.reason === "reconfirm-existing" ? "reconfirmation" : "guided-test",
-    label: offer.reason === "reconfirm-existing"
+    kind: reconfirming ? "reconfirmation" : "guided-test",
+    label: confirmationBuilding ? `Complete confirmation for ${offer.label}` : reconfirming
       ? `Reconfirm ${offer.label}`
       : `Check ${offer.label}`,
-    description: offer.reason === "confirm-provisional"
+    description: confirmationBuilding ? "Your clean result is saved. Complete the remaining qualifying checks before progressing."
+      : offer.reason === "confirm-provisional"
       ? "Confirm a provisional placement with the approved movement standard."
       : offer.reason === "resolve-uncertainty"
         ? "Use a short guided test to replace uncertainty with an observed result."

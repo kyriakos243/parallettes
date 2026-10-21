@@ -6,6 +6,7 @@ import type { VNextCustomContentFilter, VNextCustomSessionMinutes } from "./cust
 import { planningReasonCodes } from "./policy";
 import { stableHash } from "./utils";
 import { projectionReasonCodes } from "../projection/policy";
+import { capPracticeSession, PRACTICE_DOSE_LIMIT } from "./practiceDose";
 
 /**
  * Mixed generator v2 changes newly generated plans only. A modified development
@@ -15,7 +16,7 @@ import { projectionReasonCodes } from "../projection/policy";
  * guidance. Its separate immutable identity keeps native v2 replay unchanged.
  * Version 4 retains that dose and records the unfinished-first focus policy.
  */
-const applyDose = (input: GenerateSessionInput, generated: GeneratedSession, policyVersion: 2 | 3 | 4): GeneratedSession => {
+const applyDose = (input: GenerateSessionInput, generated: GeneratedSession, policyVersion: 2 | 3 | 4 | 5): GeneratedSession => {
   if (!generated.ok || !generated.plan) return generated;
   const original = generated.plan;
   const version = parseDefinitionVersion(policyVersion);
@@ -52,12 +53,15 @@ const applyDose = (input: GenerateSessionInput, generated: GeneratedSession, pol
     targetSeconds: generated.durationException?.targetSeconds ?? original.intendedDurationSeconds,
     actualSeconds,
     reasonCode: planningReasonCodes.doseModified,
-    message: "Today's workout is shorter because current feedback calls for fewer sets. The removed work is not replaced.",
+    message: policyVersion === 5 && generated.durationException?.reasonCode === PRACTICE_DOSE_LIMIT
+      ? "Today's workout is shorter because wall-line practice has a set limit and current feedback calls for fewer sets. Planned rest is retained; removed work is not replaced."
+      : "Today's workout is shorter because current feedback calls for fewer sets. The removed work is not replaced.",
   } : generated.durationException;
   const definitionReferences = original.definitionReferences.map((reference) => reference.kind === "policy" && reference.id === original.generatorPolicyId
     ? { ...reference, version } : reference);
   const rationale = original.rationale.map((reason) => {
-    if (reduced && [planningReasonCodes.exactDuration, planningReasonCodes.shorterSafetyException].includes(reason.code as typeof planningReasonCodes.exactDuration)) {
+    if (reduced && ([planningReasonCodes.exactDuration, planningReasonCodes.shorterSafetyException].includes(reason.code as typeof planningReasonCodes.exactDuration)
+      || policyVersion === 5 && reason.code === PRACTICE_DOSE_LIMIT)) {
       return { ...reason, code: planningReasonCodes.doseModified, message: durationException!.message };
     }
     let message = reason.message;
@@ -107,4 +111,16 @@ export const generateProgressionCustomPlan = (input: GenerateSessionInput, minut
   contentFilter?: VNextCustomContentFilter): GeneratedSession => {
   const current = { ...input, preferUnfinishedTargets: true };
   return applyDose(current, generateMixedVNextCustomSession(current, minutes, contentFilter), 4);
+};
+
+/** Future plans only; versions 1–4 retain their exact native semantics. */
+export const generatePracticeSessionPlan = (input: GenerateSessionInput): GeneratedSession => {
+  const current = { ...input, preferUnfinishedTargets: true };
+  return applyDose(current, capPracticeSession(generateMixedVNextSession(current)), 5);
+};
+
+export const generatePracticeCustomPlan = (input: GenerateSessionInput, minutes: VNextCustomSessionMinutes,
+  contentFilter?: VNextCustomContentFilter): GeneratedSession => {
+  const current = { ...input, preferUnfinishedTargets: true };
+  return applyDose(current, capPracticeSession(generateMixedVNextCustomSession(current, minutes, contentFilter)), 5);
 };
