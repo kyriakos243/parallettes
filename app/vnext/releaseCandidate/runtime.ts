@@ -33,6 +33,7 @@ import {
   persistGuidedTestEvidence,
   persistSubmittedAssessmentRestriction,
   recommendProgressionCheck,
+  describeProgressionCheck,
   progressionCheckOffer,
   guidedObservationOccasionId,
   type ProgressionCheckRecommendation,
@@ -612,11 +613,16 @@ export const createVNextReleaseCandidateRuntime = (
       evidenceEvents: sources.evidenceEvents,
       hasPracticeHistory: sources.sessionRecords.some((record) => record.itemOutcomes.some((item) => (item.participationSeconds ?? 0) > 0))
         || sources.evidenceEvents.some((event) => event.type === "performance_observed" && event.source === "guided-test") });
+    const skillDetails = presentationFamilyOrder.map((graphId) => buildSkillDetail(progressInput, graphId));
+    const directProtocolIds = new Set(skillDetails.flatMap((detail) => detail.assessmentAction.kind === "reassess"
+      ? [] : detail.assessmentAction.protocolIds));
+    const directGuidedTestOffers = vNextDefinitionBundle.benchmarkProtocols.filter((protocol) => directProtocolIds.has(protocol.id))
+      .map((protocol) => progressionCheckOffer({ bundle: vNextDefinitionBundle, state, intent,
+        projectionPolicy: vNextProjectionPolicy, assessmentDraft }, protocol));
     const presentations: VNextRuntimePresentations = {
       provenance,
       progress: buildProgressAndGoals(progressInput),
-      skillDetails: presentationFamilyOrder.map((graphId) =>
-        buildSkillDetail(progressInput, graphId)),
+      skillDetails,
       today: buildTodayWorkoutPresentation({ bundle: vNextDefinitionBundle, generated }),
       goals: buildGoalControls(vNextDefinitionBundle, intent),
       assessment: buildAssessmentEntryPoints({
@@ -627,6 +633,7 @@ export const createVNextReleaseCandidateRuntime = (
         hasExistingObservationHistory: sources.evidenceEvents.length > 0
           || sources.sessionRecords.length > 0,
         ...(assessmentReview ? { guidedTestOffers: assessmentReview.guidedTests } : {}),
+        directGuidedTestOffers,
       }),
       restrictions: buildRestrictionPresentation({ bundle: vNextDefinitionBundle, state,
         evidenceEvents: sources.evidenceEvents, includeRecoveryActions: vNextProjectionPolicy.scopedSymptomRecovery }),
@@ -993,10 +1000,18 @@ export const createVNextReleaseCandidateRuntime = (
     };
   };
 
+  const requestedProgressionCheck = (snapshot: VNextRuntimeSnapshot, protocolId: GuidedTestResultInput["protocolId"], nativeBundle = vNextDefinitionBundle) => {
+    const offered = snapshot.progressionCheck?.offer.protocolId === protocolId
+      || snapshot.presentations.assessment.skillActions?.some((action) => action.protocolIds.includes(protocolId));
+    const protocol = offered && nativeBundle.benchmarkProtocols.find((item) => item.id === protocolId);
+    return protocol ? describeProgressionCheck({ bundle: nativeBundle, state: snapshot.state, intent: snapshot.intent,
+      projectionPolicy: vNextProjectionPolicy, assessmentDraft: snapshot.assessmentDraft }, protocol) : undefined;
+  };
+
   const startProgressionCheck: VNextRuntime["startProgressionCheck"] = async (input) => {
     const snapshot = await refresh(input);
-    const check = snapshot.progressionCheck;
-    if (!check || check.offer.protocolId !== input.protocolId || check.offer.availability !== "available") {
+    const check = requestedProgressionCheck(snapshot, input.protocolId);
+    if (!check || check.offer.availability !== "available") {
       throw new Error(check?.when ?? "This check is no longer the next safe step. Return to Today for an updated recommendation.");
     }
     return { check, snapshot };
@@ -1007,10 +1022,8 @@ export const createVNextReleaseCandidateRuntime = (
     const before = await refresh({ ...input, asOf: atLeastTimestamp(input.asOf ?? clock(), input.result.recordedAt, "Progression check cutoff") });
     const existing = before.sources.evidenceEvents.find((event) => event.id === input.result.eventId);
     if (!existing) {
-      const protocol = nativeBundle.benchmarkProtocols.find((item) => item.id === input.result.protocolId);
-      const offer = protocol && progressionCheckOffer({ bundle: nativeBundle, state: before.state, intent: before.intent,
-        projectionPolicy: vNextProjectionPolicy, assessmentDraft: before.assessmentDraft }, protocol);
-      if (!offer || offer.availability !== "available" || before.progressionCheck?.offer.protocolId !== input.result.protocolId) {
+      const check = requestedProgressionCheck(before, input.result.protocolId, nativeBundle);
+      if (!check || check.offer.availability !== "available") {
         throw new Error("This check is no longer available. Your result is kept for review; return to Today to check current safety.");
       }
       if (input.result.observationSessionId !== guidedObservationOccasionId(input.athleteId, input.result.occurredAt)) {

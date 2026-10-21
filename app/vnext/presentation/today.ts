@@ -7,7 +7,7 @@ import type {
 } from "./contracts";
 import { presentationFamilyLabel } from "./progress";
 import type { WorkoutExerciseSelection } from "../workoutUx";
-import { hasPracticeDosePolicy, isWallLinePractice, structurePracticeWorkoutItem } from "../practiceDose";
+import { hasPracticeDosePolicy, hasUsefulDosePolicy, isWallLinePractice, structurePracticeWorkoutItem } from "../practiceDose";
 import type { PlanItemId } from "../contracts";
 import { isMixedWorkoutPlan, workoutExecutionGroups } from "../mixedWorkout";
 import { planningReasonCodes } from "../planning/policy";
@@ -125,6 +125,10 @@ const simpleIntensityReason = (
   const item = generated.plan?.items.find((candidate) => candidate.id === explanation.planItemId);
   if (generated.plan && hasPracticeDosePolicy(generated.plan) && item && isWallLinePractice(item)) {
     return "At most three controlled sets, keeping a comfortable range and the planned rest.";
+  }
+  if (generated.plan && hasUsefulDosePolicy(generated.plan) && item?.exerciseId === "pike-elevation"
+    && item.purpose !== "guided-test" && !item.benchmarkProtocolId) {
+    return "At most three controlled sets, keeping the target and planned rest.";
   }
   if (generated.sessionDemand === "technique") return "Uses today’s easier, technique-focused dose.";
   if (generated.sessionDemand === "challenge") return "Uses a larger dose of work that was already available.";

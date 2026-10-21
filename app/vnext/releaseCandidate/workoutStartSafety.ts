@@ -10,7 +10,7 @@ import { vNextGeneratorPolicy } from "../planning/policy";
 import { highDemandDomains } from "../planning/utils";
 import { evaluateTrainability, projectionReasonCodes, type ProjectionPolicy } from "../projection";
 import type { SafeWorkoutSwap, WorkoutExerciseSelection } from "../workoutUx";
-import { safePracticeWorkoutSwaps as safeWorkoutSwaps, hasPracticeDosePolicy, isWallLinePractice, WALL_LINE_PRACTICE_SECONDS } from "../practiceDose";
+import { safePracticeWorkoutSwaps as safeWorkoutSwaps, hasPracticeDosePolicy, isWallLinePractice, WALL_LINE_PRACTICE_SECONDS, usefulDoseExceeded } from "../practiceDose";
 
 export type WorkoutStartSafetyIssue = Readonly<{
   planItemId?: PlanItemId;
@@ -74,6 +74,9 @@ export const validateWorkoutStart = (input: Input): Readonly<{
     if (hasPracticeDosePolicy(plan) && isWallLinePractice({ ...item, exerciseId: selection.exerciseId })
       && item.plannedSeconds > WALL_LINE_PRACTICE_SECONDS) {
       return "This wall-line practice exceeds its current set limit. Return to Today for a new workout.";
+    }
+    if (usefulDoseExceeded(effectivePlan, item, selection)) {
+      return "This movement exceeds its current useful dose. Return to Today for a new workout.";
     }
     const movement = resolve(selection);
     if (!movement) return "A saved movement is unavailable in its original workout version.";

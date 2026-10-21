@@ -182,6 +182,7 @@ export const buildAssessmentEntryPoints = (
       ? "Check a skill again after time away, uncertainty or a change in restrictions."
       : "Find a starting point, then build confidence through practice and guided checks.",
     actions: [baseAction, ...offers, ...reconfirmations, ...(postRestriction ? [postRestriction] : [])],
+    ...(input.directGuidedTestOffers ? { skillActions: input.directGuidedTestOffers.map((offer) => actionForOffer(offer, input)) } : {}),
     canManuallyClaimSkills: false,
     authorityNotice: "Your answers help choose suitable practice. Guided checks and qualifying training confirm skills.",
   };

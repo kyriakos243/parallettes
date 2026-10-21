@@ -100,8 +100,8 @@ includesAll(sources.guided, ["Starting-point check", "Target", "Equipment", "Ass
 includesAll(sources.workout, ["aria-label=\"Workout timer\"", "Save & close", "Finish early", "role=\"alert\"", "Up next:", "vnext-rc-session-progress"], "workout execution");
 includesAll(sources.custom, [
   "([5, 10, 15, 20] as const)",
-  "If you have 25 minutes, use Today",
-  "Preview {minutes}-minute workout",
+  "Choose your maximum time and focus",
+  "Preview workout",
   '<details className="vnext-custom-settings">',
 ], "Custom Session builder");
 includesAll(sources.account, [

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { loadTypeScriptModule as load } from "./lib/load-typescript.mjs";
 
 const failures = [];
 let assertions = 0;
@@ -101,6 +102,7 @@ globalThis.fetch = async (url, init = {}) => {
 const loaded = { exports: {} };
 const sessionSignals = [];
 new Function("exports", "module", "require", compiled)(loaded.exports, loaded, (specifier) => {
+  if (specifier === "./accountRequest") return load("app/accountRequest.ts");
   if (specifier === "./accountSessionSignals") return {
     ACCOUNT_SESSION_STORAGE_KEY: "parallette25-account-sessions-v1",
     announceAccountSessionChange: (detail) => sessionSignals.push(detail),

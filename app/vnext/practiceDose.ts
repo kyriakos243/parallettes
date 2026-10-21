@@ -1,14 +1,39 @@
 import type { DefinitionBundle, PlanItemId, SessionPlan, SessionPlanItem } from "./contracts";
 import { safeWorkoutSwaps, structureWorkoutItem, type StructuredWorkoutItem, type WorkoutExerciseSelection } from "./workoutUx";
 
-/** Generator 5 owns these practice targets. Native definitions/checks stay intact. */
+/** Generators 5–6 own these practice targets. Native definitions/checks stay intact. */
 export const hasPracticeDosePolicy = (plan: Pick<SessionPlan, "generatorPolicyId" | "generatorPolicyVersion">): boolean =>
-  plan.generatorPolicyVersion === 5
+  (plan.generatorPolicyVersion === 5 || plan.generatorPolicyVersion === 6)
   && ["vnext-mixed-workout-generator", "vnext-mixed-capacity-workout-generator"].includes(plan.generatorPolicyId);
 
 export const WALL_LINE_PRACTICE_SECONDS = 180;
 export const isWallLinePractice = (item: Pick<SessionPlanItem, "exerciseId" | "purpose" | "benchmarkProtocolId">): boolean =>
   item.exerciseId === "wall-shoulder-flexion-line-drill" && item.purpose !== "guided-test" && !item.benchmarkProtocolId;
+
+/** Generator 6 adds the routine Pike ceiling; benchmarks are always exact. */
+export const hasUsefulDosePolicy = (plan: Pick<SessionPlan, "generatorPolicyId" | "generatorPolicyVersion">): boolean =>
+  plan.generatorPolicyVersion === 6 && hasPracticeDosePolicy(plan);
+
+export const routinePracticeLimitSeconds = (item: Pick<SessionPlanItem, "exerciseId" | "purpose" | "benchmarkProtocolId">): number | undefined => {
+  if (item.purpose === "guided-test" || item.benchmarkProtocolId) return undefined;
+  return item.exerciseId === "pike-elevation" || isWallLinePractice(item) ? 180 : undefined;
+};
+
+/** Aggregate across swaps too: two blocks cannot silently double the drill. */
+export const usefulDoseExceeded = (plan: SessionPlan, item: SessionPlanItem, selection?: WorkoutExerciseSelection): boolean => {
+  if (!hasUsefulDosePolicy(plan)) return false;
+  const effective = selection ? { ...item, exerciseId: selection.exerciseId,
+    exerciseDefinitionVersion: selection.exerciseDefinitionVersion, prescriptionVariantId: selection.prescriptionVariantId } : item;
+  const limit = routinePracticeLimitSeconds(effective);
+  // Native Today blocks never exceed eight minutes. This also rejects a
+  // corrupted oversized Custom block without changing historical readers.
+  const development = effective.purpose !== "preparation" && effective.purpose !== "recovery"
+    && effective.purpose !== "guided-test" && !effective.benchmarkProtocolId;
+  const maximum = limit ?? (development ? 480 : Infinity);
+  const total = plan.items.filter((entry) => entry.id !== item.id && entry.exerciseId === effective.exerciseId
+    && entry.purpose !== "guided-test" && !entry.benchmarkProtocolId).reduce((sum, entry) => sum + entry.plannedSeconds, effective.plannedSeconds);
+  return total > maximum;
+};
 
 export const structurePracticeWorkoutItem = (
   plan: Pick<SessionPlan, "generatorPolicyId" | "generatorPolicyVersion">,
@@ -33,7 +58,7 @@ export const structurePracticeWorkoutPlan = (
 
 /** Keep native safety authority; never offer the capped drill in a longer block. */
 export const safePracticeWorkoutSwaps = (input: Parameters<typeof safeWorkoutSwaps>[0]): ReturnType<typeof safeWorkoutSwaps> =>
-  safeWorkoutSwaps(input).filter((option) => !hasPracticeDosePolicy(input.plan)
+  safeWorkoutSwaps(input).filter((option) => !usefulDoseExceeded(input.plan, input.item, option)).filter((option) => !hasPracticeDosePolicy(input.plan)
     || !isWallLinePractice({ ...input.item, exerciseId: option.exerciseId })
     || input.item.plannedSeconds <= WALL_LINE_PRACTICE_SECONDS).map((option) => {
     const structured = structurePracticeWorkoutItem(input.plan, input.item, input.bundle, option);

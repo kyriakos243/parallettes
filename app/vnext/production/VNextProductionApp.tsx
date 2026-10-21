@@ -2,7 +2,7 @@ import { trainingQualityCatalogue } from "./trainingQuality";
 import { useEffect, useMemo, useState } from "react";
 import "./combinedProgressionMedia";
 import { evaluateCombinedProgressionPlanMedia } from "./combinedProgressionRelease";
-import { generatePracticeSessionPlan, generatePracticeCustomPlan } from "../planning/feedbackDose";
+import { generateUsefulDoseSessionPlan, generateUsefulDoseCustomPlan } from "../planning/feedbackDose";
 import { isStableId, parseStableId, type VNextShadowStore } from "../index";
 import {
   VNextAccountGate,
@@ -101,7 +101,14 @@ const prepareProductionAthlete = async ({
   runtime: VNextRuntime;
 }>): Promise<Readonly<{ message?: string }>> => {
   const boundary = await import("../../profileStore");
-  const legacyRead = await boundary.readLegacyProfileForVNextMigration(identity.athleteId, identity.mode);
+  const localSources = await store.readProjectionSources(identity.athleteId);
+  const hasNativeIntent = Boolean(localSources.intent);
+  const legacyRead = await boundary.readLegacyProfileForVNextMigration(identity.athleteId, identity.mode,
+    { localOnly: hasNativeIntent });
+  // Already reconciled native training opens locally. Remote delta exchange is
+  // handled by the app's background sync. A pending v1 handoff still uses the
+  // original remote-first/reset-boundary conversion below.
+  if (hasNativeIntent && legacyRead?.provenance !== "device-local-pending-vnext-handoff") return {};
   const legacy = legacyRead?.profile;
   let migrationStatus: "inserted" | "duplicate" | "not-applicable" = "not-applicable";
   let syncUnavailable = false;
@@ -169,7 +176,7 @@ const prepareProductionAthlete = async ({
 const PRODUCTION_DEPLOYMENT: VNextApplicationDeployment = {
   kind: "production",
   catalogue: trainingQualityCatalogue,
-  workoutGenerators: { generateSession: generatePracticeSessionPlan, generateCustomSession: generatePracticeCustomPlan },
+  workoutGenerators: { generateSession: generateUsefulDoseSessionPlan, generateCustomSession: generateUsefulDoseCustomPlan },
   evaluatePlanMedia: evaluateCombinedProgressionPlanMedia,
   productKicker: "Parallette25",
   openingMessage: "Opening your evidence-led training…",
