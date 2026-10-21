@@ -1,3 +1,4 @@
+import { safePracticeWorkoutSwaps as safeWorkoutSwaps } from "../practiceDose";
 import { correctInvalidGuidedAttemptResult, hasInvalidGuidedAttemptCount } from "../assessment/guidedRecovery";
 import { guidedObservationOccasionId } from "../assessment/evidence";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType } from "react";
@@ -28,7 +29,6 @@ import {
   type RestrictionReportedEvent,
   type RestrictionClearedEvent,
   generateVNextCustomSession,
-  safeWorkoutSwaps,
 } from "../index";
 import { VNextExperience, type VNextWorkoutReviewFeedback } from "../ui";
 import type { WorkoutReviewDraft } from "../ui/VNextExperience";
@@ -45,6 +45,7 @@ import { validateWorkoutStart } from "./workoutStartSafety";
 import type { WorkoutRunRequest } from "./useWorkoutRunAuthorization";
 import { shortWorkoutPreferenceKey } from "./shortWorkoutPreferences";
 import { createAppUpdateController, hasUnfinishedUpdateWork, type AppUpdateState } from "./appUpdate";
+import { createAccountAccessController, type AccountAccess } from "./accountAccess";
 import "./appUpdate.css";
 import { isMixedWorkoutPlan } from "../mixedWorkout";
 import { ReliableWorkoutRunner } from "./ReliableWorkoutRunner";
@@ -1624,68 +1625,40 @@ export const VNextReleaseCandidateApp = ({
   const [identity, setIdentity] = useState<VNextRcIdentity | undefined>(
     () => readVNextRcIdentity(storageNamespace),
   );
-  const [accountAccess, setAccountAccess] = useState<"checking" | "allowed" | "locked">(
+  const [accountAccess, setAccountAccess] = useState<AccountAccess>(
     identity?.mode === "account" ? "checking" : "allowed",
   );
-  const accountValidationGeneration = useRef(0);
   useEffect(() => {
-    let active = true;
     if (!identity || identity.mode === "local") {
       setAccountAccess("allowed");
-      return () => { active = false; };
+      return;
     }
-    const validate = (): void => {
-      if (!active) return;
-      const generation = ++accountValidationGeneration.current;
-      setAccountAccess("checking");
-      void validateVNextRcAccountIdentity(identity).then(async (status) => {
-        const localSessionPresent = status !== "invalid"
-          && await hasVNextRcAccountSession(identity);
-        if (active && generation === accountValidationGeneration.current) {
-          setAccountAccess(localSessionPresent ? "allowed" : "locked");
-        }
-      }).catch(() => {
-        if (active && generation === accountValidationGeneration.current) {
-          setAccountAccess("locked");
-        }
-      });
-    };
-    const ensureLocalSession = (): void => {
-      void hasVNextRcAccountSession(identity).then((present) => {
-        if (active && !present) {
-          accountValidationGeneration.current += 1;
-          setAccountAccess("locked");
-        }
-      }).catch(() => {
-        if (active) {
-          accountValidationGeneration.current += 1;
-          setAccountAccess("locked");
-        }
-      });
-    };
+    const access = createAccountAccessController({
+      hasSession: () => hasVNextRcAccountSession(identity),
+      validateSession: () => validateVNextRcAccountIdentity(identity),
+      onAccessChange: setAccountAccess,
+    });
     const onSessionChange = (event: Event): void => {
       const detail = (event as CustomEvent<AccountSessionChangedDetail>).detail;
       if (detail?.profileId !== identity.athleteId) return;
       if (!detail.active) {
-        accountValidationGeneration.current += 1;
-        setAccountAccess("locked");
+        access.lock();
       }
-      else validate();
+      else void access.validate();
     };
     const onStorage = (event: StorageEvent): void => {
-      if (event.key === ACCOUNT_SESSION_STORAGE_KEY) validate();
+      if (event.key === ACCOUNT_SESSION_STORAGE_KEY || event.key === null) void access.validate();
     };
     const onVisibility = (): void => {
-      if (document.visibilityState === "visible") validate();
+      if (document.visibilityState === "visible") void access.validate({ preserveMounted: true });
     };
-    validate();
+    void access.validate();
     window.addEventListener(ACCOUNT_SESSION_CHANGED_EVENT, onSessionChange);
     window.addEventListener("storage", onStorage);
     document.addEventListener("visibilitychange", onVisibility);
-    const expiryCheck = window.setInterval(ensureLocalSession, 30_000);
+    const expiryCheck = window.setInterval(() => void access.ensureLocalSession(), 30_000);
     return () => {
-      active = false;
-      accountValidationGeneration.current += 1;
+      access.dispose();
       window.removeEventListener(ACCOUNT_SESSION_CHANGED_EVENT, onSessionChange);
       window.removeEventListener("storage", onStorage);
       document.removeEventListener("visibilitychange", onVisibility);

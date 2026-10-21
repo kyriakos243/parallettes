@@ -173,13 +173,13 @@ const ownerMediaApprovals = Object.entries(VNEXT_PHASE10_OWNER_APPROVED_MEDIA_FI
  * 520c65f9-2d89-4044-9481-b9ba05911363. Its private evidence proves the
  * retained v1 deployment, recoverable D1 snapshot, exact additive schema,
  * coherent Worker authority switch and active rollback controls.
- * On 2026-10-20 the owner accepted the four-improvement update/offline
- * preview on iPhone and iPad and explicitly authorised production release.
- * This artifact retains native definitions 1–8, generator readers 1–4,
+ * On 2026-10-21 the owner accepted the live-account/dose preview on both
+ * iPhone and iPad and explicitly authorised production release.
+ * This artifact retains native definitions 1–8, generator readers 1–5,
  * saved observations, outboxes and recovery namespaces. Fresh full/accounts
  * exports passed isolated restore and all 14 consistency invariants in
- * FileVault-protected storage. The compatible reader-capability Worker was
- * deployed before the client; schema and authority remain unchanged.
+ * FileVault-protected storage. The compatible reader-capability-3 Worker was published before the client;
+ * schema and authority remain unchanged.
  * Historical migration authorisations below do not instruct a new cutover.
  * A repair must retain current readers; do not downgrade or reset data.
  * Preserve original catalogues and all observation data.
@@ -206,7 +206,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   },
   phase11ReleaseArtifact: {
     status: "frozen",
-    sourceFingerprint: "4ecf34d7dd15facd8026b75b225859516158db9975e26d3ffcd608922e8e8dd3",
+    sourceFingerprint: "ecf2ed601e9373d84be69d5554298d9b4f61611b1a63e7196b6df4f58b3f4768",
   },
   preflight: [
     {
@@ -217,17 +217,17 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
     {
       id: "phase11-release-artifact-frozen",
       status: "passed",
-      evidence: "dist-set:4ecf34d7dd15facd8026b75b225859516158db9975e26d3ffcd608922e8e8dd3",
+      evidence: "dist-set:ecf2ed601e9373d84be69d5554298d9b4f61611b1a63e7196b6df4f58b3f4768",
     },
     {
       id: "recoverable-production-snapshots-verified",
       status: "passed",
-      evidence: "current-backup:2026-10-20T18:52:41.772273+00:00;isolated-full-and-accounts-restore:ok;14-invariants-zero;owner-retained;filevault-on",
+      evidence: "current-backup:2026-10-21T06:24:16.814365+00:00;isolated-full-and-accounts-restore:ok;14-invariants-zero;owner-retained;filevault-on",
     },
     {
       id: "compatible-schema-api-app-worker-order-ready",
       status: "passed",
-      evidence: "worker:704e9631-d125-41f3-92e3-95ceef080938;schema:2e5ff8e06af41b2e0aad00671d13c995c938ba5fc0db2db1023f9f5549dddc9d",
+      evidence: "worker:af71a995-758c-42ab-aaa4-abacd8f5ff69;reader-capability:3;schema:2e5ff8e06af41b2e0aad00671d13c995c938ba5fc0db2db1023f9f5549dddc9d",
     },
     {
       id: "live-migration-idempotency-and-reconciliation-ready",
@@ -252,7 +252,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   ],
   productionGrant: {
     status: "granted",
-    releaseArtifactFingerprint: "4ecf34d7dd15facd8026b75b225859516158db9975e26d3ffcd608922e8e8dd3",
+    releaseArtifactFingerprint: "ecf2ed601e9373d84be69d5554298d9b4f61611b1a63e7196b6df4f58b3f4768",
     authorizations: {
       deployCompatibleRelease: true,
       runIdempotentLiveMigration: true,

@@ -130,9 +130,9 @@ const confidencePresentation = (
     message: "This is a useful starting point, not a confirmed achievement.",
   };
   if (finding.lifecycle === "demonstrated" && finding.confidence === "current") return {
-    state: "check-needed",
-    label: "Demonstrated — confirmation building",
-    message: "This has been demonstrated, but its approved confirmation policy must be completed before it unlocks progression.",
+    state: "confirmation-building",
+    label: "Confirmation in progress",
+    message: "A clean result is saved. Complete the remaining confirmation checks before progressing.",
   };
   if (finding.confidence === "current") return {
     state: "current",
@@ -203,7 +203,9 @@ const demonstratedStatePresentation = (
     kind: "demonstrated",
     label: node.label,
     supportingText: finding.confidence === "current"
-      ? "Demonstrated with current supporting evidence."
+      ? finding.lifecycle === "demonstrated"
+        ? "Demonstrated; confirmation is still in progress."
+        : "Demonstrated with current supporting evidence."
       : "Previously demonstrated. A current check may be recommended before loading it again.",
     milestone: finding.milestone,
     historyRetained: true,
@@ -444,6 +446,11 @@ const availabilityFor = (
       ? "Your achievement is maintained. Today’s range, assistance or dose will be adjusted."
       : "Today’s range, assistance or dose will be adjusted.",
   };
+  if (confidence.state === "confirmation-building") return {
+    state: "confirmation",
+    label: "Confirmation in progress",
+    message: confidence.message,
+  };
   if (confidence.state === "check-needed" || confidence.state === "conflicting-evidence") return {
     state: "reconfirmation",
     label: "Reconfirmation due",
@@ -468,6 +475,11 @@ const recommendedFocusFor = (
     kind: "restricted",
     label: "Respect the current restriction",
     message: "Keep the achievement in history and use only unaffected training until reconfirmation is appropriate.",
+  };
+  if (availability.state === "confirmation") return {
+    kind: "confirm",
+    label: "Complete confirmation",
+    message: availability.message,
   };
   if (availability.state === "reconfirmation") return {
     kind: "reconfirm",
@@ -520,7 +532,16 @@ const familySummary = (
   const selected = demonstratedState.milestone
     ? stateFor(input.state, demonstratedState.milestone)
     : undefined;
-  const confidence = confidencePresentation(selected);
+  let confidence = confidencePresentation(selected);
+  if (confidence.state === "confirmation-building" && selected) {
+    const protocols = nodeFor(input.bundle, selected.milestone)?.benchmarkProtocolIds
+      .flatMap((id) => input.bundle.benchmarkProtocols.find((protocol) => protocol.id === id) ?? []) ?? [];
+    const standards = protocols.map((protocol) => {
+      const { qualifyingObservations: results, minimumDistinctSessions: occasions } = protocol.confirmation;
+      return `${protocol.label}: ${results} qualifying ${results === 1 ? "result" : "results"} across at least ${occasions} ${occasions === 1 ? "training occasion" : "separate training occasions"}.`;
+    });
+    confidence = { ...confidence, message: `A clean result is saved. Complete the required confirmation before harder work.${standards.length ? ` ${standards.join(" ")}` : ""}` };
+  }
   const projectedNextTarget = nextTargetFor(graph, input);
   const nextTarget = projectedNextTarget
     && demonstratedState.kind === "provisional"
@@ -734,11 +755,12 @@ export const buildSkillDetail = (
     ? nodeFor(input.bundle, summary.nextTarget.milestone)?.benchmarkProtocolIds ?? []
     : [];
   const needsReconfirmation = summary.availability.state === "reconfirmation";
+  const needsConfirmation = summary.confidence.state === "confirmation-building";
   const currentProtocolIds = summary.demonstratedState.milestone
     ? nodeFor(input.bundle, summary.demonstratedState.milestone)?.benchmarkProtocolIds ?? []
     : [];
-  const protocolIds = needsReconfirmation ? currentProtocolIds : nextTargetProtocolIds;
-  const targetCanBeChecked = summary.nextTarget?.state === "achievable"
+  const protocolIds = needsReconfirmation || needsConfirmation ? currentProtocolIds : nextTargetProtocolIds;
+  const targetCanBeChecked = needsConfirmation || summary.nextTarget?.state === "achievable"
     || summary.nextTarget?.state === "developing"
     || summary.nextTarget?.state === "reconfirmation";
   return {
@@ -758,7 +780,7 @@ export const buildSkillDetail = (
       label: needsReconfirmation
         ? "Reconfirm current ability"
         : targetCanBeChecked && protocolIds.length
-          ? "Check this next step"
+          ? needsConfirmation ? "Complete confirmation" : "Check this next step"
           : "Review the required starting points",
       graphId,
       protocolIds: needsReconfirmation || targetCanBeChecked ? protocolIds : [],

@@ -219,8 +219,11 @@ assert(/setAccountAccess\(next\.mode === "account" \? "checking" : "allowed"\)/u
   "Selecting a saved account can mount its observation store before the new identity is validated");
 assert(/ACCOUNT_SESSION_CHANGED_EVENT[\s\S]*addEventListener\("storage"[\s\S]*visibilitychange[\s\S]*setInterval/u.test(appSource),
   "A mounted account path does not lock on same-tab, cross-tab, visibility or expiry-session changes");
-assert(/accountValidationGeneration[\s\S]*generation === accountValidationGeneration\.current[\s\S]*localSessionPresent/u.test(appSource)
-  && /!detail\.active[\s\S]*accountValidationGeneration\.current \+= 1/u.test(appSource),
+const accessSource = readFileSync("app/vnext/releaseCandidate/accountAccess.ts", "utf8");
+assert(/createAccountAccessController/u.test(appSource)
+  && /!detail\.active[\s\S]*access\.lock\(\)/u.test(appSource)
+  && /selected === generation/u.test(accessSource)
+  && /status !== "invalid" && await input\.hasSession\(\)/u.test(accessSource),
 "A stale successful session validation can reopen an account after a newer invalidation signal");
 assert(/mode: "local"/u.test(gateSource) && /mode: "account"/u.test(gateSource)
   && /Use on this device/u.test(gateSource),

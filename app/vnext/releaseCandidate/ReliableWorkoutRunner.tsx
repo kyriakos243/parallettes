@@ -13,6 +13,7 @@ import type {
   WorkoutExerciseSelection,
 } from "../index";
 import { structureWorkoutPlan } from "../index";
+import { workoutSwapChoices, workoutVariantLabel } from "../workoutGuidance";
 
 const VNextMotionGuide = lazy(async () => ({
   default: (await import("../media/VNextMotionGuide")).VNextMotionGuide,
@@ -458,7 +459,7 @@ export const ReliableWorkoutRunner = ({
   const blockIndex = plan.items.findIndex((item) => item.id === currentItem.id);
   const swapTarget = swapPlanItemId ? plan.items.find((item) => item.id === swapPlanItemId) : undefined;
   const alternatives = swapTarget ? swapOptions[swapTarget.id] ?? [] : [];
-  const visibleAlternatives = alternatives.filter((option) => option.direction === swapDirection);
+  const visibleAlternatives = workoutSwapChoices(alternatives).filter((option) => option.direction === swapDirection);
   const closeLabel = startedAt
     ? "Save & close"
     : origin === "custom"
@@ -525,7 +526,7 @@ export const ReliableWorkoutRunner = ({
             <div className="vnext-rc-coaching">
               <p className="vnext-kicker vnext-rc-purpose">{currentInterval.kind === "rest" ? "Recover and set up" : currentItem.purpose.replaceAll("-", " ")}</p>
               {previewStructured && <>
-                <h2>{previewStructured.variant.label}</h2>
+                <h2>{workoutVariantLabel(previewStructured.variant.label)}</h2>
                 <p className="vnext-rc-target">{previewStructured.targetLabel}</p>
                 <p className="vnext-rc-structure">{previewStructured.structureLabel}</p>
               </>}
@@ -582,7 +583,7 @@ export const ReliableWorkoutRunner = ({
             </div>
             {visibleAlternatives.length ? visibleAlternatives.map((option) => (
               <button key={`${option.exerciseId}:${option.prescriptionVariantId}`} type="button" className="vnext-swap-option" onClick={() => chooseSwap(swapTarget.id, option)}>
-                <strong>{option.exerciseName}</strong><span>{option.variantLabel} • {option.targetLabel}</span><small>{option.reason}</small>
+                <strong>{option.exerciseName}</strong><span>{workoutVariantLabel(option.variantLabel)} • {option.targetLabel}</span><small>{option.reason}</small>
               </button>
             )) : <p className="vnext-help">No {swapDirection} alternative remains compatible with this block and today’s safety rules.</p>}
             {selections[swapTarget.id] && <button type="button" className="vnext-plan-swap" onClick={() => chooseSwap(swapTarget.id)}>Restore recommended movement</button>}

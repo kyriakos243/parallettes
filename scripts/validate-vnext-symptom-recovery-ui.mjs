@@ -42,6 +42,7 @@ const compile = (path, extra = "") => {
   }).outputText;
   new Function("module", "exports", "require", output)(module, module.exports, (name) => {
     if (name === "react") return hooks;
+    if (name === "../workoutGuidance") return load("app/vnext/workoutGuidance.ts");
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment: "Fragment" };
     if (name === "../assessment/evidence") return evidence;
     if (name === "../contracts") return contracts;

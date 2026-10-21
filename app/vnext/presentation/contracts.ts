@@ -56,13 +56,13 @@ export type DemonstratedStatePresentation = Readonly<{
 }>;
 
 export type ConfidencePresentation = Readonly<{
-  state: "not-established" | "current" | "check-needed" | "conflicting-evidence";
+  state: "not-established" | "confirmation-building" | "current" | "check-needed" | "conflicting-evidence";
   label: string;
   message: string;
 }>;
 
 export type AvailabilityPresentation = Readonly<{
-  state: "available" | "modified" | "restricted" | "reconfirmation";
+  state: "available" | "modified" | "restricted" | "confirmation" | "reconfirmation";
   label: string;
   message: string;
 }>;
@@ -84,7 +84,7 @@ export type TargetPresentation = Readonly<{
 }>;
 
 export type RecommendedFocusPresentation = Readonly<{
-  kind: "primary" | "secondary" | "maintenance" | "build" | "restricted" | "reconfirm";
+  kind: "primary" | "secondary" | "maintenance" | "build" | "restricted" | "confirm" | "reconfirm";
   label: string;
   message: string;
 }>;
@@ -218,6 +218,7 @@ export type TodayWorkoutPresentation = Readonly<{
     intensity: string;
   }>[];
   durationLabel?: string;
+  durationMessage?: string;
   authorityNotice: string;
   exposesRawAlgorithmDecisions: false;
 }>;
