@@ -91,6 +91,18 @@ const whenLabel = (offer: GuidedTestOffer): string => offer.blockers.includes("a
           : offer.availability === "blocked" ? "Complete the earlier readiness checks before attempting this movement."
             : "Before your next workout, after warming up and when comfortable and recovered. The check counts toward today's training.";
 
+/** The same exact protocol and current safety gate serve Today and skill detail. */
+export const describeProgressionCheck = (
+  input: CheckContext,
+  protocol: BenchmarkProtocol,
+  why = `Confirm ${protocol.label} using the displayed movement standard. Your earlier achievements are kept.`,
+): ProgressionCheckRecommendation => {
+  const offer = progressionCheckOffer(input, protocol);
+  return { catalogueVersion: input.bundle.catalogueVersion, offer, target: targetLabel(protocol), why,
+    when: whenLabel(offer),
+    confirmation: `This standard needs ${protocol.confirmation.qualifyingObservations} qualifying result${protocol.confirmation.qualifyingObservations === 1 ? "" : "s"} across at least ${protocol.confirmation.minimumDistinctSessions} separate training occasion${protocol.confirmation.minimumDistinctSessions === 1 ? "" : "s"}. Earlier achievements are kept.` };
+};
+
 /** One actionable next check; ordinary feedback never becomes an exact measurement. */
 export const recommendProgressionCheck = (input: CheckContext & Readonly<{
   generated: GeneratedSession;
@@ -146,7 +158,6 @@ export const recommendProgressionCheck = (input: CheckContext & Readonly<{
   // do not turn one check prompt into an invitation to test every other skill.
   const protocol = candidates[0];
   if (!protocol) return undefined;
-  const offer = progressionCheckOffer(input, protocol);
   const goal = bundle.graphs.find((graph) => graph.id === input.generated.emphasis!.primary.graphId)?.label ?? "your main goal";
   const activeSources = new Set(state.recentLoad.exposures.flatMap((item) => item.source.kind === "evidence-event" ? [item.source.eventId] : []));
   const latestResult = input.evidenceEvents?.filter((event) => event.type === "performance_observed"
@@ -157,8 +168,5 @@ export const recommendProgressionCheck = (input: CheckContext & Readonly<{
     : latestResult?.type === "performance_observed" && latestResult.outcome === "clean"
       ? "A qualifying result is saved. Repeat this same standard on a separate training occasion to finish confirmation."
       : "Workout feedback records useful practice; this check records the exact movement standard needed for the next step.";
-  return { catalogueVersion: bundle.catalogueVersion, offer, target: targetLabel(protocol),
-    why: `To progress toward ${goal}, confirm ${protocol.label}. ${resultMessage}`,
-    when: whenLabel(offer),
-    confirmation: `This standard needs ${protocol.confirmation.qualifyingObservations} qualifying result${protocol.confirmation.qualifyingObservations === 1 ? "" : "s"} across at least ${protocol.confirmation.minimumDistinctSessions} separate training occasion${protocol.confirmation.minimumDistinctSessions === 1 ? "" : "s"}. Earlier achievements are kept.` };
+  return describeProgressionCheck(input, protocol, `To progress toward ${goal}, confirm ${protocol.label}. ${resultMessage}`);
 };

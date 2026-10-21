@@ -8,7 +8,7 @@ import {
 } from "./vnext-session-validation.js";
 
 const SCHEMA_VERSION = 1;
-const MINIMUM_READER_VERSION = 3;
+const MINIMUM_READER_VERSION = 4;
 // Keep the upload side comfortably inside the Workers Free 50-subrequest
 // budget even for validation-heavy migration pages. Delta reads have their
 // own independent item and byte bounds.

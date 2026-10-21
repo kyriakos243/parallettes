@@ -647,7 +647,7 @@ const cloudRequest = (path, init = {}, origin = allowedOrigin) => new Request(`$
   ...init,
   headers: { origin, ...(init.headers ?? {}) },
 });
-const emptySync = { schemaVersion: 1, readerVersion: 3, cursor: 0, upload: [], limit: 20 };
+const emptySync = { schemaVersion: 1, readerVersion: 4, cursor: 0, upload: [], limit: 20 };
 const unauthenticated = await worker.fetch(cloudRequest("/vnext/shadow/sync", {
   method: "POST",
   headers: { "content-type": "application/json" },

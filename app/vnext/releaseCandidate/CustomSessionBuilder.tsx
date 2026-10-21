@@ -118,10 +118,10 @@ const CustomSessionForm = ({
           <div><p className="vnext-kicker">Custom session</p><h1 id="vnext-custom-title" ref={heading} tabIndex={-1}>Short workout</h1></div>
           <button type="button" className="vnext-action" data-kind="secondary" onClick={onClose}>Close</button>
         </header>
-        <p>Choose your time and focus. If you have 25 minutes, use Today for the full workout.</p>
+        <p>Choose your maximum time and focus. Your workout may be shorter when the useful work is complete.</p>
 
         <fieldset>
-          <legend>Duration</legend>
+          <legend>Time available</legend>
           <div className="vnext-custom-choice-row">
             {([5, 10, 15, 20] as const).map((value) => <button key={value} type="button" aria-pressed={minutes === value} onClick={() => remember({ minutes: value, focusToken })}>{value} min</button>)}
           </div>
@@ -164,7 +164,7 @@ const CustomSessionForm = ({
         {equipment.length === 0 && <p role="alert">Choose at least one available training space or piece of equipment.</p>}
         {error && <p className="vnext-authority" role="alert">{error} Choose another focus or check your available equipment, then try Preview again.</p>}
         <button type="button" className="vnext-submit" disabled={busy || equipment.length === 0} onClick={() => onBuild({ minutes, focus, equipment, demand })}>
-          Preview {minutes}-minute workout
+          Preview workout
         </button>
       </section>
     </main>

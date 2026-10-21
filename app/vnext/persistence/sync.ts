@@ -19,8 +19,8 @@ export type ShadowSyncSummary = Readonly<{
 
 const encodedSize = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength;
 const MAX_UPLOAD_ITEMS_PER_REQUEST = 8;
-// Includes linked symptoms and native generator 1–5 practice/recovery readers.
-export const VNEXT_SYNC_READER_VERSION = 3;
+// Includes linked symptoms and native generator 1–6 useful-dose/practice/recovery readers.
+export const VNEXT_SYNC_READER_VERSION = 4;
 
 const boundedUpload = (
   cursor: number,

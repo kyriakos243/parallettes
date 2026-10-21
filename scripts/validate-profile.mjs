@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { loadTypeScriptModule as load } from "./lib/load-typescript.mjs";
 
 const source = readFileSync("app/profileStore.ts", "utf8")
   .replaceAll("import.meta.env.VITE_PROFILE_API_URL", "undefined");
@@ -17,6 +18,7 @@ globalThis.localStorage = {
 globalThis.indexedDB = undefined;
 const loaded = { exports: {} };
 new Function("exports", "module", "require", compiled)(loaded.exports, loaded, (specifier) => {
+  if (specifier === "./accountRequest") return load("app/accountRequest.ts");
   if (specifier === "./accountSessionSignals") return {
     ACCOUNT_SESSION_STORAGE_KEY: "parallette25-account-sessions-v1",
     announceAccountSessionChange: () => {},

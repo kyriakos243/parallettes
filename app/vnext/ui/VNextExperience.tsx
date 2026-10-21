@@ -123,7 +123,7 @@ const detailAssessmentEntry = (
   const expectedKind = detail.assessmentAction.kind === "start-reconfirmation"
     ? "reconfirmation"
     : "guided-test";
-  const exact = assessment.actions.find((action) => action.kind === expectedKind
+  const exact = [...assessment.skillActions ?? [], ...assessment.actions].find((action) => action.kind === expectedKind
     && action.graphId === detail.graphId
     && action.protocolIds.some((protocolId) =>
       detail.assessmentAction.protocolIds.includes(protocolId)));
@@ -952,6 +952,7 @@ const ProgressView = ({
             <h3>Recommended focus</h3>
             <p>{detail.recommendedFocus.message}</p>
             <p className="vnext-trust-note">{detail.demonstratedState.supportingText}</p>
+            {detailAssessment?.availability === "blocked" && <p className="vnext-help">{detailAssessment.blockers.join(" ")}</p>}
             <button
               type="button"
               className="vnext-action"

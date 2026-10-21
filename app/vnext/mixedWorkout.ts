@@ -7,7 +7,7 @@ import { structurePracticeWorkoutPlan as structureWorkoutPlan } from "./practice
 export const MIXED_WORKOUT_POLICY_ID = "vnext-mixed-workout-generator";
 export const MIXED_CAPACITY_POLICY_ID = "vnext-mixed-capacity-workout-generator";
 export const isMixedWorkoutPlan = (plan: Pick<SessionPlan, "generatorPolicyId" | "generatorPolicyVersion">): boolean =>
-  (plan.generatorPolicyVersion === 1 || plan.generatorPolicyVersion === 2 || plan.generatorPolicyVersion === 3 || plan.generatorPolicyVersion === 4 || plan.generatorPolicyVersion === 5)
+  (plan.generatorPolicyVersion === 1 || plan.generatorPolicyVersion === 2 || plan.generatorPolicyVersion === 3 || plan.generatorPolicyVersion === 4 || plan.generatorPolicyVersion === 5 || plan.generatorPolicyVersion === 6)
   && [MIXED_WORKOUT_POLICY_ID, MIXED_CAPACITY_POLICY_ID].includes(plan.generatorPolicyId);
 
 export type WorkoutExecutionGroup = Readonly<{

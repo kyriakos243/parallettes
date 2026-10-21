@@ -953,4 +953,28 @@ await check("generator 5 player and restored draft retain explicit exit targets 
   reopened.unmount();
 });
 
+await check("generator 6 Pike practice preserves three sets, target, rest, paused recovery and measured-only completion", () => {
+  const realBundle = load("app/vnext/production/trainingQuality.ts").trainingQualityCatalogue.bundle;
+  const exercise = realBundle.exercises.find(e => e.id === "pike-elevation");
+  const variant = exercise.prescriptionVariants[0];
+  const dosePlan = { ...plan, generatorPolicyVersion: 6, intendedDurationSeconds: 180,
+    items: [{ ...plan.items[0], purpose: "primary-development", exerciseId: exercise.id,
+      exerciseDefinitionVersion: exercise.definitionVersion, prescriptionVariantId: variant.id,
+      plannedSeconds: 180, demand: variant.demand }] };
+  const saved = storage(), options = { plan: dosePlan, bundle: realBundle };
+  const app = createHost(saved, options);
+  assert(text(app.tree).includes("3 sets")); assert(text(app.tree).includes("8–12 reps"));
+  app.click("Start workout"); app.tick(30);
+  assert.equal(app.title(), "Rest"); assert(text(app.tree).includes("8–12 reps"));
+  app.click("Pause"); const before = app.draft(); app.unmount();
+  const reopened = createHost(saved, options);
+  assert.equal(reopened.draft().elapsedSeconds, before.elapsedSeconds);
+  assert.equal(reopened.timers.size, 0);
+  reopened.click("Resume"); reopened.tick(150);
+  assert.equal(reopened.facts.length, 1);
+  assert.equal(reopened.facts[0].participationSeconds[dosePlan.items[0].id], 90);
+  assert.equal(reopened.saved.getItem(activeKey), null);
+  reopened.unmount();
+});
+
 console.log(`Workout reliability: ${checks} actual player/hook/controller lifecycle scenarios passed.`);

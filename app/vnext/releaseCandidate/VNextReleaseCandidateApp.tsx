@@ -46,6 +46,8 @@ import type { WorkoutRunRequest } from "./useWorkoutRunAuthorization";
 import { shortWorkoutPreferenceKey } from "./shortWorkoutPreferences";
 import { createAppUpdateController, hasUnfinishedUpdateWork, type AppUpdateState } from "./appUpdate";
 import { createAccountAccessController, type AccountAccess } from "./accountAccess";
+import { createBackgroundSync, serialSyncStore, type SerialOperation } from "./backgroundSync";
+import { startupRecoveryMessage } from "./startupRecovery";
 import "./appUpdate.css";
 import { isMixedWorkoutPlan } from "../mixedWorkout";
 import { ReliableWorkoutRunner } from "./ReliableWorkoutRunner";
@@ -366,6 +368,8 @@ const VNextAthleteApplication = ({
   const [restrictionRecovery, setRestrictionRecovery] = useState<RestrictionRecoveryContext>();
   const [message, setMessage] = useState(deployment.openingMessage);
   const [error, setError] = useState<string>();
+  const [startupFailure, setStartupFailure] = useState<ReturnType<typeof startupRecoveryMessage>>();
+  const [startupUpdateSafe, setStartupUpdateSafe] = useState(false);
   const [savedWorkoutId, setSavedWorkoutId] = useState<string>();
   const [online, setOnline] = useState(navigator.onLine);
   const [syncStatus, setSyncStatus] = useState<TrainingSyncStatus>({ phase: "idle" });
@@ -382,7 +386,11 @@ const VNextAthleteApplication = ({
   const completionSubmissionLocked = useRef(false);
   const guidedSubmissionLocked = useRef(false);
   const lastAutomaticSyncFingerprint = useRef<string | undefined>(undefined);
-  updateSafe.current = Boolean(snapshot) && !busy && !workoutRecovery && !guidedRecovery
+  const dailyDemand = useRef<{ day: string; demand: SessionDemand } | undefined>(undefined);
+  const syncController = useRef<ReturnType<typeof createBackgroundSync> | undefined>(undefined);
+  const syncGeneration = useRef(0);
+  const syncInFlight = useRef(false);
+  updateSafe.current = (Boolean(snapshot) || Boolean(startupFailure && startupUpdateSafe)) && !busy && !syncInFlight.current && !workoutRecovery && !guidedRecovery
     && !assessment && !guidedOffer && !workoutOpen && !customOpen && !accountOpen
     && !restrictionOpen && !restrictionRecovery && !restartSetupOpen && !reviewCheckpointError && !goalEditing;
 
@@ -437,15 +445,19 @@ const VNextAthleteApplication = ({
     setGuidedRecovery(undefined);
   }, [guidedRecoveryStorage]);
 
-  const refreshInput = useCallback((sessionDemand?: SessionDemand) => ({
+  const refreshInput = useCallback((sessionDemand?: SessionDemand) => {
+    const asOf = now();
+    const demand = sessionDemand ?? (dailyDemand.current?.day === asOf.slice(0, 10) ? dailyDemand.current.demand : undefined);
+    return {
     athleteId,
-    asOf: now(),
+    asOf,
     seed: `${athleteId}:${new Date().toISOString().slice(0, 10)}`,
-    ...(sessionDemand ? { sessionDemand } : {}),
+    ...(demand ? { sessionDemand: demand } : {}),
     ...(readPreviousEmphasis(athleteId, storageNamespace)
       ? { previousEmphasis: readPreviousEmphasis(athleteId, storageNamespace) }
       : {}),
-  }), [athleteId, storageNamespace]);
+    };
+  }, [athleteId, storageNamespace]);
 
   const runCommand = useCallback((command: () => Promise<void>): void => {
     if (updateLocked.current) return;
@@ -462,35 +474,53 @@ const VNextAthleteApplication = ({
     });
   }, []);
 
+  const openTraining = useCallback((): void => {
+    setStartupFailure(undefined);
+    setStartupUpdateSafe(false);
+    setMessage(deployment.openingMessage);
+    runCommand(async () => {
+      try {
+        const preparation = await deployment.prepareAthlete?.({ identity, store, runtime });
+        const result = await runtime.bootstrap(refreshInput());
+        setSnapshot(result.snapshot);
+        if (initialWorkoutRecovery?.stage === "active") {
+          setMessage("Your paused workout is ready to resume.");
+        } else if (initialWorkoutRecovery?.stage === "preview") {
+          setMessage(`Your ${initialWorkoutRecovery.origin === "custom" ? "Custom Session" : "Today workout"} preview was restored. It has not recorded training.`);
+        } else if (initialWorkoutRecovery?.stage === "review") {
+          setMessage("Your workout is ready to save. Finish the short review.");
+        } else if (initialWorkoutRecovery?.stage === "prepared") {
+          setMessage("Your workout is ready to save again. Retrying will not create a duplicate.");
+        } else if (initialGuidedRecovery) {
+          setMessage("Your test result is ready to save again. Retrying will not create a duplicate.");
+        } else if (result.snapshot.assessmentDraft?.status === "in-progress") {
+          setMessage("");
+        } else if (result.createdDefaultIntent) {
+          const started = await runtime.startAssessment({ ...refreshInput(), mode: "new-placement" });
+          setSnapshot(started.snapshot);
+          setAssessment(started.assessment);
+          setMessage("A few questions will help choose your starting point. You can finish later.");
+        } else {
+          setMessage(preparation?.message ?? "");
+        }
+      } catch (reason) {
+        // Do not activate over an unreadable or unfinished setup. Other saved
+        // workout/check/timer journals are rechecked by the update controller.
+        try {
+          const draft = await store.readAssessmentDraft(athleteId);
+          setStartupUpdateSafe(draft?.status !== "in-progress");
+        } catch { setStartupUpdateSafe(false); }
+        setStartupFailure(startupRecoveryMessage(reason));
+        throw reason;
+      }
+    });
+  }, [athleteId, deployment, identity, initialGuidedRecovery, initialWorkoutRecovery, refreshInput, runCommand, runtime, store]);
+
   useEffect(() => {
     if (bootstrapStarted.current) return;
     bootstrapStarted.current = true;
-    runCommand(async () => {
-      const preparation = await deployment.prepareAthlete?.({ identity, store, runtime });
-      const result = await runtime.bootstrap(refreshInput());
-      setSnapshot(result.snapshot);
-      if (initialWorkoutRecovery?.stage === "active") {
-        setMessage("Your paused workout is ready to resume.");
-      } else if (initialWorkoutRecovery?.stage === "preview") {
-        setMessage(`Your ${initialWorkoutRecovery.origin === "custom" ? "Custom Session" : "Today workout"} preview was restored. It has not recorded training.`);
-      } else if (initialWorkoutRecovery?.stage === "review") {
-        setMessage("Your workout is ready to save. Finish the short review.");
-      } else if (initialWorkoutRecovery?.stage === "prepared") {
-        setMessage("Your workout is ready to save again. Retrying will not create a duplicate.");
-      } else if (initialGuidedRecovery) {
-        setMessage("Your test result is ready to save again. Retrying will not create a duplicate.");
-      } else if (result.snapshot.assessmentDraft?.status === "in-progress") {
-        setMessage("");
-      } else if (result.createdDefaultIntent) {
-        const started = await runtime.startAssessment({ ...refreshInput(), mode: "new-placement" });
-        setSnapshot(started.snapshot);
-        setAssessment(started.assessment);
-        setMessage("A few questions will help choose your starting point. You can finish later.");
-      } else {
-        setMessage(preparation?.message ?? "");
-      }
-    });
-  }, [deployment, identity, initialGuidedRecovery, initialWorkoutRecovery, refreshInput, runCommand, runtime, store]);
+    openTraining();
+  }, [openTraining]);
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
@@ -537,20 +567,40 @@ const VNextAthleteApplication = ({
     };
   }, [athleteId, storageNamespace]);
 
+  const queueBackground: SerialOperation = useCallback(<T,>(operation: () => Promise<T>): Promise<T> => {
+    const queued = commandQueue.current.catch(() => undefined).then(operation);
+    commandQueue.current = queued.then(() => undefined, () => undefined);
+    return queued;
+  }, []);
+
   const syncTraining = useCallback(async () => {
+    if (updateLocked.current) return;
+    const generation = syncGeneration.current;
+    const current = () => generation === syncGeneration.current;
+    syncInFlight.current = true;
     setSyncStatus({ phase: "syncing" });
     try {
       const { syncVNextShadowObservations } = await import("../../profileStore");
-      await syncVNextShadowObservations(store, athleteId);
-      const refreshed = await runtime.refresh(refreshInput());
-      const fingerprint = await confirmedSyncFingerprint({
-        fingerprint: refreshed.sources.sourceFingerprint,
-        readFingerprint: async () => (await store.readProjectionSources(athleteId)).sourceFingerprint,
-        hasPending: async () => (await store.readSyncUpload(athleteId, 1)).length > 0,
+      const syncStore = serialSyncStore(store, (operation) => queueBackground(async () => {
+        if (!current() || updateLocked.current) throw new Error("Sync was cancelled before applying its response.");
+        return operation();
+      }));
+      await syncVNextShadowObservations(syncStore, athleteId);
+      await queueBackground(async () => {
+        if (!current() || updateLocked.current) return;
+        const refreshed = await runtime.refresh(refreshInput());
+        const fingerprint = await confirmedSyncFingerprint({
+          fingerprint: refreshed.sources.sourceFingerprint,
+          readFingerprint: async () => (await store.readProjectionSources(athleteId)).sourceFingerprint,
+          hasPending: async () => (await store.readSyncUpload(athleteId, 1)).length > 0,
+        });
+        if (current() && !updateLocked.current) {
+          setSnapshot(refreshed);
+          setSyncStatus(fingerprint ? { phase: "synced", fingerprint, confirmedAt: new Date().toISOString() } : { phase: "waiting" });
+        }
       });
-      setSnapshot(refreshed);
-      setSyncStatus(fingerprint ? { phase: "synced", fingerprint, confirmedAt: new Date().toISOString() } : { phase: "waiting" });
     } catch (reason) {
+      if (!current()) return;
       if (reason instanceof Error && reason.message === "shadow-sync-update-required") {
         setSyncStatus({ phase: "update-required" });
         void updateController.current?.check();
@@ -562,9 +612,26 @@ const VNextAthleteApplication = ({
         return;
       }
       setSyncStatus({ phase: "error" });
-      throw new Error("Your training is saved on this device, but sync could not finish. Check your account or try Sync now again.");
+    } finally {
+      if (current()) syncInFlight.current = false;
     }
-  }, [athleteId, refreshInput, runtime, store]);
+  }, [athleteId, queueBackground, refreshInput, runtime, store]);
+
+  useEffect(() => {
+    syncGeneration.current += 1;
+    const controller = createBackgroundSync(syncTraining);
+    syncController.current = controller;
+    return () => {
+      controller.dispose();
+      syncGeneration.current += 1;
+      syncInFlight.current = false;
+      if (syncController.current === controller) syncController.current = undefined;
+    };
+  }, [syncTraining]);
+
+  const requestTrainingSync = useCallback((): void => {
+    if (!updateLocked.current) void syncController.current?.request().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
@@ -579,7 +646,7 @@ const VNextAthleteApplication = ({
       const fingerprint = snapshot.sources.sourceFingerprint;
       if (!force && lastAutomaticSyncFingerprint.current === fingerprint) return;
       lastAutomaticSyncFingerprint.current = fingerprint;
-      runCommand(syncTraining);
+      requestTrainingSync();
     };
     sync();
     const refreshRemote = (): void => { sync(true); };
@@ -598,7 +665,7 @@ const VNextAthleteApplication = ({
       window.removeEventListener("focus", refreshRemote);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [deployment.kind, identity.mode, runCommand, snapshot, syncTraining]);
+  }, [deployment.kind, identity.mode, requestTrainingSync, snapshot]);
 
   useEffect(() => {
     if (deployment.kind !== "production" || identity.mode !== "local" || !snapshot
@@ -685,6 +752,17 @@ const VNextAthleteApplication = ({
 
   const startAssessment = (action?: AssessmentEntryAction, restart = false): void => runCommand(async () => {
     const current = await runtime.refresh(refreshInput());
+    const direct = !restart && action?.kind !== "reassessment" && action?.protocolIds.find((id) =>
+      current.presentations.assessment.skillActions?.some((candidate) => candidate.graphId === action.graphId
+        && candidate.protocolIds.includes(id)));
+    if (direct) {
+      const selected = await runtime.startProgressionCheck({ ...refreshInput(), protocolId: direct });
+      setSnapshot(selected.snapshot);
+      setProgressionCatalogueVersion(selected.check.catalogueVersion);
+      setGuidedOffer(selected.check.offer);
+      setMessage("");
+      return;
+    }
     if (!restart && current.assessmentDraft?.status === "in-progress") {
       const draft = current.assessmentDraft;
       if (!action) {
@@ -1039,16 +1117,21 @@ const VNextAthleteApplication = ({
   };
 
   const exportObservations = (): void => runCommand(async () => {
-    const definitionFingerprint = await sha256(vNextDefinitionBundles);
-    const bundle = await store.exportBundle(athleteId, {
-      exportedAt: now(),
-      catalogueVersions: vNextDefinitionBundles.map((bundle) => bundle.catalogueVersion),
-      projectionVersions: [vNextProjectionPolicy.version],
-      definitionFingerprints: [definitionFingerprint],
-      policyVersions: [{ id: vNextProjectionPolicy.id, version: vNextProjectionPolicy.version }],
-    });
-    downloadJson(`parallette25-vnext-${athleteId}.json`, bundle);
-    setMessage("Your training backup is ready.");
+    try {
+      const definitionFingerprint = await sha256(vNextDefinitionBundles);
+      const bundle = await store.exportBundle(athleteId, {
+        exportedAt: now(),
+        catalogueVersions: vNextDefinitionBundles.map((bundle) => bundle.catalogueVersion),
+        projectionVersions: [vNextProjectionPolicy.version],
+        definitionFingerprints: [definitionFingerprint],
+        policyVersions: [{ id: vNextProjectionPolicy.id, version: vNextProjectionPolicy.version }],
+      });
+      downloadJson(`parallette25-vnext-${athleteId}.json`, bundle);
+      setMessage("Your training backup is ready.");
+    } catch (reason) {
+      setMessage("Backup export could not finish. Keep this app and its storage, then try again.");
+      throw reason;
+    }
   });
 
   const importObservations = (file: File): void => runCommand(async () => {
@@ -1060,7 +1143,7 @@ const VNextAthleteApplication = ({
     setMessage(`Backup imported: ${result.inserted} new entries; ${result.duplicates} already saved.`);
   });
 
-  const syncObservations = (): void => runCommand(syncTraining);
+  const syncObservations = requestTrainingSync;
 
   const resetProgress = async (): Promise<void> => {
     setSavedWorkoutId(undefined);
@@ -1133,7 +1216,7 @@ const VNextAthleteApplication = ({
       customRequest: request, equipmentAtPreview: refreshed.intent.equipment });
     setCustomOpen(false);
     setWorkoutOpen(false);
-    setMessage(`${request.minutes}-minute workout ready. Review the exercises, then start when you’re ready.`);
+    setMessage("Custom workout ready. Review the exercises, then start when you’re ready.");
   });
 
   const startOrResumeWorkout = (): void => {
@@ -1377,7 +1460,29 @@ const VNextAthleteApplication = ({
   if (!snapshot) {
     return (
       <main className="vnext-experience vnext-rc-loading" aria-live="polite">
-        <div><p className="vnext-kicker">{deployment.productKicker}</p><h1>Building your evidence view…</h1><p>{error ?? message}</p></div>
+        <div inert={appUpdate.phase === "applying"}>
+          <p className="vnext-kicker">{deployment.productKicker}</p>
+          <h1>{startupFailure?.title ?? "Opening your training…"}</h1>
+          <p>{startupFailure?.message ?? "Your saved training is being opened on this device."}</p>
+          {startupFailure && <>
+            <div className="vnext-actions">
+              <button type="button" className="vnext-action" disabled={busy} onClick={openTraining}>Try again</button>
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={busy || appUpdate.phase === "checking"}
+                onClick={() => { void updateController.current?.check(); }}>Check for updates</button>
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => setAccountOpen(true)}>Account options</button>
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={exportObservations}>Export saved training</button>
+            </div>
+            {appUpdate.message && <p role="status">{appUpdate.message}</p>}
+            {appUpdate.availableBuild && <aside className="vnext-update-notice" aria-label="App update">
+              <p>Update ready. Your saved progress stays on this device.</p>
+              {(!startupUpdateSafe || workoutRecovery || guidedRecovery) && <p>Unfinished work is protected. Try opening your saved training again before updating.</p>}
+              <button type="button" className="vnext-action" disabled={busy || !startupUpdateSafe || Boolean(workoutRecovery || guidedRecovery)}
+                onClick={() => { void updateController.current?.apply(); }}>Update now</button>
+            </aside>}
+            {(message === "Your training backup is ready." || message.startsWith("Backup export could not finish.")) && <p role="status">{message}</p>}
+          </>}
+        </div>
+        {appUpdate.phase === "applying" && <div className="vnext-update-overlay" role="status"><p>Opening the update… Your saved progress is kept.</p></div>}
       </main>
     );
   }
@@ -1500,8 +1605,9 @@ const VNextAthleteApplication = ({
         <p><strong>Update ready</strong> · Your saved progress stays on this device.
           {workflowLocked ? " Finish saving your workout or check before updating." : ""}
           {goalEditing ? " Save or cancel your goal changes before updating." : ""}</p>
+        {syncInFlight.current && <p>Sync is finishing. The update will be available when it finishes.</p>}
         {appUpdate.message && <p role="status">{appUpdate.message}</p>}
-        <button type="button" className="vnext-action" disabled={busy || workflowLocked || goalEditing || Boolean(reviewCheckpointError)}
+        <button type="button" className="vnext-action" disabled={busy || syncInFlight.current || workflowLocked || goalEditing || Boolean(reviewCheckpointError)}
           onClick={() => { void updateController.current?.apply(); }}>Update now</button>
       </aside>}
       {(message || error) && <p className={`vnext-rc-message${error ? " is-error" : ""}`} role={error ? "alert" : "status"}>{error ?? message}{pendingPrepared && error ? " Your workout is kept on this device so you can retry." : ""}</p>}
@@ -1574,7 +1680,7 @@ const VNextAthleteApplication = ({
           return next;
         }) : undefined}
         onCustomSessionRequested={!workflowLocked && !busy ? () => { setError(undefined); setCustomOpen(true); } : undefined}
-        onDemandChange={!workflowLocked && !busy ? (demand) => runCommand(async () => { const updated = await runtime.selectDailyDemand({ ...refreshInput(), sessionDemand: demand }); setWorkoutSelections({}); setSnapshot(updated); setMessage(`${demand === "technique" ? "Easier / Technique" : demand === "challenge" ? "Challenge" : "Standard"} selected for today’s workout.`); }) : undefined}
+        onDemandChange={!workflowLocked && !busy ? (demand) => runCommand(async () => { const updated = await runtime.selectDailyDemand({ ...refreshInput(), sessionDemand: demand }); dailyDemand.current = { day: updated.asOf.slice(0, 10), demand }; setWorkoutSelections({}); setSnapshot(updated); setMessage(`${demand === "technique" ? "Easier / Technique" : demand === "challenge" ? "Challenge" : "Standard"} selected for today’s workout.`); }) : undefined}
         onGoalSelectionChange={!workflowLocked && !busy ? (selection) => new Promise<void>((resolve, reject) => {
           runCommand(async () => {
             try {

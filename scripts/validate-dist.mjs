@@ -293,8 +293,8 @@ const appVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
 const expectedProductCopy = applicationVariant === "v1"
   ? [appVersion, "Set my starting level", "Reassess my starting point"]
   : applicationVariant === "vnext-rc"
-    ? [releaseCandidateId, "Progress & Goals opened", "Building your evidence view"]
-    : [productionReleaseId, "Progress & Goals opened", "Building your evidence view"];
+    ? [releaseCandidateId, "Progress & Goals opened", "Opening your training…", "Try again"]
+    : [productionReleaseId, "Progress & Goals opened", "Opening your training…", "Try again"];
 if (expectedProductCopy.some((copy) => !textBundle.includes(copy))) {
   throw new Error(`Production bundle is missing canonical ${applicationVariant} identity or product copy`);
 }

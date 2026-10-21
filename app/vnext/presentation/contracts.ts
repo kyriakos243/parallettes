@@ -268,6 +268,8 @@ export type AssessmentEntryPresentation = Readonly<{
   title: "Check or update my starting point";
   intro: string;
   actions: readonly AssessmentEntryAction[];
+  /** Exact family-detail actions; not an additional global checklist. */
+  skillActions?: readonly AssessmentEntryAction[];
   canManuallyClaimSkills: false;
   authorityNotice: string;
 }>;
@@ -278,6 +280,7 @@ export type AssessmentEntryInput = Readonly<{
   state: DerivedAthleteState;
   intent: AthleteIntent;
   guidedTestOffers?: readonly GuidedTestOffer[];
+  directGuidedTestOffers?: readonly GuidedTestOffer[];
   /**
    * Navigation context only. Existing immutable observations may be too weak
    * to create a projected finding, but still mean an imported athlete must be

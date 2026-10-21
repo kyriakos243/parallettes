@@ -189,7 +189,7 @@ const transport = createAuthenticatedShadowTransport(async () => new Response("{
 await assert.rejects(transport({ schemaVersion: 1, cursor: 0, limit: 1, upload: [] }), /shadow-sync-update-required/);
 pass("future reader requirement stops sync before local writes, cursor movement or acknowledgements");
 let dbCalls = 0;
-for (const readerVersion of [undefined, 1, 2, "3"]) {
+for (const readerVersion of [undefined, 1, 2, 3, "4"]) {
   const response = await handleVNextShadowSync({}, { DB: new Proxy({}, { get() { dbCalls++; throw new Error("DB must not be touched"); } }) },
     "https://qa.invalid", { profile_id: athleteId }, {
       readJson: async () => ({ schemaVersion: 1, readerVersion, cursor: 0, limit: 1, upload: [] }),

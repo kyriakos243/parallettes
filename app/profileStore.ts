@@ -9,6 +9,7 @@ import {
   ACCOUNT_SESSION_STORAGE_KEY,
   announceAccountSessionChange,
 } from "./accountSessionSignals";
+import { fetchAccountResponse } from "./accountRequest";
 
 export type SaveMode = "normal" | "practice" | "guest";
 
@@ -551,7 +552,7 @@ const apiResponse = async (path: string, init: RequestInit = {}, profileId?: str
   }
   let response: Response;
   try {
-    response = await fetch(`${REMOTE_API}${path}`, { ...init, headers });
+    response = await fetchAccountResponse(`${REMOTE_API}${path}`, { ...init, headers });
   } catch {
     throw new Error("Network unavailable. Your changes remain saved on this device.");
   }
@@ -761,6 +762,7 @@ export type VNextLegacyMigrationRead = Readonly<{
 export async function readLegacyProfileForVNextMigration(
   profileId: string,
   mode: "local" | "account",
+  options: { localOnly?: boolean } = {},
 ): Promise<VNextLegacyMigrationRead | undefined> {
   const local = await getProfile(profileId);
   if (mode === "account" && local?.pendingSync === true
@@ -770,7 +772,7 @@ export async function readLegacyProfileForVNextMigration(
       provenance: "device-local-pending-vnext-handoff",
     };
   }
-  if (mode === "account" && REMOTE_API && sessionFor(profileId)) {
+  if (mode === "account" && !options.localOnly && REMOTE_API && sessionFor(profileId)) {
     try {
       const remote = normalizeProfile(await api("/auth/session", { method: "GET" }, profileId) as ProfileRecord);
       if (remote.profileId !== profileId) {
