@@ -1,4 +1,4 @@
-import type { AthleteEvidenceEvent, AthleteIntent, BenchmarkProtocol, BenchmarkSubject, DefinitionBundle, DerivedAthleteState, PrerequisiteRef } from "../contracts";
+import type { AthleteEvidenceEvent, AthleteIntent, BenchmarkProtocol, BenchmarkSubject, DefinitionBundle, DerivedAthleteState, MilestoneRef, PrerequisiteRef } from "../contracts";
 import type { GeneratedSession } from "../planning/contracts";
 import { evaluateTrainability, projectionReasonCodes, type ProjectionPolicy } from "../projection";
 import type { AssessmentDraft, GuidedTestOffer } from "./contracts";
@@ -103,31 +103,18 @@ export const describeProgressionCheck = (
     confirmation: `This standard needs ${protocol.confirmation.qualifyingObservations} qualifying result${protocol.confirmation.qualifyingObservations === 1 ? "" : "s"} across at least ${protocol.confirmation.minimumDistinctSessions} separate training occasion${protocol.confirmation.minimumDistinctSessions === 1 ? "" : "s"}. Earlier achievements are kept.` };
 };
 
-/** One actionable next check; ordinary feedback never becomes an exact measurement. */
-export const recommendProgressionCheck = (input: CheckContext & Readonly<{
-  generated: GeneratedSession;
-  hasPracticeHistory: boolean;
-  evidenceEvents?: readonly AthleteEvidenceEvent[];
-}>): ProgressionCheckRecommendation | undefined => {
-  if (!input.hasPracticeHistory || !input.generated.emphasis) return undefined;
+const protocolForSubject = (bundle: DefinitionBundle, subject: BenchmarkSubject): BenchmarkProtocol | undefined =>
+  bundle.benchmarkProtocols.find((protocol) => subjectKey(protocol.subject) === subjectKey(subject));
+
+const protocolForRef = (bundle: DefinitionBundle, ref: PrerequisiteRef): BenchmarkProtocol | undefined => ref.kind === "benchmark"
+  ? bundle.benchmarkProtocols.find((protocol) => protocol.id === ref.benchmarkProtocolId)
+  : protocolForSubject(bundle, ref.kind === "milestone" ? { kind: "milestone", milestone: ref.milestone }
+    : { kind: "capacity-facet", capacity: ref.capacity });
+
+/** One honest dependency route, shared by Today and family prerequisite checks. */
+const unconfirmedCheckDependencies = (input: CheckContext, roots: readonly BenchmarkProtocol[]): BenchmarkProtocol[] => {
   const { bundle, state } = input;
-  const bySubject = (subject: BenchmarkSubject) => bundle.benchmarkProtocols.find((protocol) => subjectKey(protocol.subject) === subjectKey(subject));
-  const forRef = (ref: PrerequisiteRef) => ref.kind === "benchmark"
-    ? bundle.benchmarkProtocols.find((protocol) => protocol.id === ref.benchmarkProtocolId)
-    : bySubject(ref.kind === "milestone" ? { kind: "milestone", milestone: ref.milestone } : { kind: "capacity-facet", capacity: ref.capacity });
-  const roots: BenchmarkProtocol[] = [];
-  const add = (protocol: BenchmarkProtocol | undefined) => { if (protocol && !roots.some((item) => item.id === protocol.id)) roots.push(protocol); };
-  const focuses = [input.generated.emphasis.primary, input.generated.emphasis.secondary].filter((focus) => focus !== undefined);
-  for (const focus of focuses) {
-    if (focus.targetMilestone) add(bySubject({ kind: "milestone", milestone: focus.targetMilestone }));
-    focus.missingPrerequisites.forEach((ref) => add(forRef(ref)));
-  }
-  for (const item of input.generated.plan?.items ?? []) {
-    if (item.purpose === "preparation" || item.purpose === "recovery" || item.purpose === "maintenance") continue;
-    if (item.targetMilestone) add(bySubject({ kind: "milestone", milestone: item.targetMilestone }));
-    for (const protocol of bundle.benchmarkProtocols) if (protocol.exerciseId === item.exerciseId
-      && protocol.prescriptionVariantId === item.prescriptionVariantId) add(protocol);
-  }
+  const forRef = (ref: PrerequisiteRef) => protocolForRef(bundle, ref);
   const candidates: BenchmarkProtocol[] = [];
   const visited = new Set<string>();
   const visit = (protocol: BenchmarkProtocol): void => {
@@ -154,6 +141,45 @@ export const recommendProgressionCheck = (input: CheckContext & Readonly<{
     candidates.push(protocol);
   };
   roots.forEach(visit);
+  return candidates;
+};
+
+/** A skill's unmet prerequisite, without restarting placement or changing goals. */
+export const recommendPrerequisiteCheck = (
+  input: CheckContext,
+  target: MilestoneRef,
+): ProgressionCheckRecommendation | undefined => {
+  const root = protocolForSubject(input.bundle, { kind: "milestone", milestone: target });
+  if (!root) return undefined;
+  const protocol = unconfirmedCheckDependencies(input, [root]).find((candidate) => candidate.id !== root.id);
+  if (!protocol) return undefined;
+  const goal = input.bundle.graphs.find((graph) => graph.id === target.graphId)?.label ?? "this skill";
+  return describeProgressionCheck(input, protocol,
+    `This earlier check is needed for ${goal}. Confirm ${protocol.label} using the displayed movement standard.`);
+};
+
+/** One actionable next check; ordinary feedback never becomes an exact measurement. */
+export const recommendProgressionCheck = (input: CheckContext & Readonly<{
+  generated: GeneratedSession;
+  hasPracticeHistory: boolean;
+  evidenceEvents?: readonly AthleteEvidenceEvent[];
+}>): ProgressionCheckRecommendation | undefined => {
+  if (!input.hasPracticeHistory || !input.generated.emphasis) return undefined;
+  const { bundle, state } = input;
+  const roots: BenchmarkProtocol[] = [];
+  const add = (protocol: BenchmarkProtocol | undefined) => { if (protocol && !roots.some((item) => item.id === protocol.id)) roots.push(protocol); };
+  const focuses = [input.generated.emphasis.primary, input.generated.emphasis.secondary].filter((focus) => focus !== undefined);
+  for (const focus of focuses) {
+    if (focus.targetMilestone) add(protocolForSubject(bundle, { kind: "milestone", milestone: focus.targetMilestone }));
+    focus.missingPrerequisites.forEach((ref) => add(protocolForRef(bundle, ref)));
+  }
+  for (const item of input.generated.plan?.items ?? []) {
+    if (item.purpose === "preparation" || item.purpose === "recovery" || item.purpose === "maintenance") continue;
+    if (item.targetMilestone) add(protocolForSubject(bundle, { kind: "milestone", milestone: item.targetMilestone }));
+    for (const protocol of bundle.benchmarkProtocols) if (protocol.exerciseId === item.exerciseId
+      && protocol.prescriptionVariantId === item.prescriptionVariantId) add(protocol);
+  }
+  const candidates = unconfirmedCheckDependencies(input, roots);
   // Retain the earliest dependency if it merely needs recovery/another occasion;
   // do not turn one check prompt into an invitation to test every other skill.
   const protocol = candidates[0];

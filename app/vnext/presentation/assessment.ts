@@ -68,8 +68,9 @@ const restrictionBlockers = (
 const actionForOffer = (
   offer: GuidedTestOffer,
   input: AssessmentEntryInput,
+  forGraphId?: GraphId,
 ): AssessmentEntryAction => {
-  const graphId = graphIdForProtocol(input.bundle, offer.protocolId);
+  const graphId = forGraphId ?? graphIdForProtocol(input.bundle, offer.protocolId);
   const subject = offer.subject;
   const confirmationBuilding = subject.kind === "milestone"
     && input.state.nodeStates.some((finding) => finding.milestone.graphId === subject.milestone.graphId
@@ -77,7 +78,7 @@ const actionForOffer = (
       && finding.lifecycle === "demonstrated" && finding.confidence === "current");
   const reconfirming = offer.reason === "reconfirm-existing" && !confirmationBuilding;
   return {
-    id: `${offer.reason}:${offer.protocolId}`,
+    id: `${offer.reason}:${offer.protocolId}${forGraphId ? `:${forGraphId}` : ""}`,
     kind: reconfirming ? "reconfirmation" : "guided-test",
     label: confirmationBuilding ? `Complete confirmation for ${offer.label}` : reconfirming
       ? `Reconfirm ${offer.label}`
@@ -182,7 +183,7 @@ export const buildAssessmentEntryPoints = (
       ? "Check a skill again after time away, uncertainty or a change in restrictions."
       : "Find a starting point, then build confidence through practice and guided checks.",
     actions: [baseAction, ...offers, ...reconfirmations, ...(postRestriction ? [postRestriction] : [])],
-    ...(input.directGuidedTestOffers ? { skillActions: input.directGuidedTestOffers.map((offer) => actionForOffer(offer, input)) } : {}),
+    ...(input.directGuidedTestOffers ? { skillActions: input.directGuidedTestOffers.map((offer) => actionForOffer(offer, input, offer.forGraphId)) } : {}),
     canManuallyClaimSkills: false,
     authorityNotice: "Your answers help choose suitable practice. Guided checks and qualifying training confirm skills.",
   };

@@ -207,7 +207,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   },
   phase11ReleaseArtifact: {
     status: "frozen",
-    sourceFingerprint: "7095e4b4fd9d82d764d5416e3cc0ac9a2dbc4e47f4fa36ea47df5f6c330915b8",
+    sourceFingerprint: "cfbaf1536533e18b4b5489c8625549ef27facc1132fdefba0ebc1b8f4c2359d5",
   },
   preflight: [
     {
@@ -218,17 +218,17 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
     {
       id: "phase11-release-artifact-frozen",
       status: "passed",
-      evidence: "dist-set:7095e4b4fd9d82d764d5416e3cc0ac9a2dbc4e47f4fa36ea47df5f6c330915b8",
+      evidence: "dist-set:cfbaf1536533e18b4b5489c8625549ef27facc1132fdefba0ebc1b8f4c2359d5",
     },
     {
       id: "recoverable-production-snapshots-verified",
       status: "passed",
-      evidence: "current-backup:2026-10-21T08:02:55.405667+00:00;isolated-full-and-accounts-restore:ok;14-invariants-zero;owner-retained;filevault-on",
+      evidence: "current-backup:2026-10-21T09:19:13.653256+00:00;isolated-full-and-accounts-restore:ok;14-invariants-zero;owner-retained;filevault-on",
     },
     {
       id: "compatible-schema-api-app-worker-order-ready",
       status: "passed",
-      evidence: "worker-capability-4:exact-candidate-dry-run-passed;publish-before-client;schema:2e5ff8e06af41b2e0aad00671d13c995c938ba5fc0db2db1023f9f5549dddc9d",
+      evidence: "client-only-correction;deployed-worker-capability-4-unchanged;schema:2e5ff8e06af41b2e0aad00671d13c995c938ba5fc0db2db1023f9f5549dddc9d",
     },
     {
       id: "live-migration-idempotency-and-reconciliation-ready",
@@ -253,7 +253,7 @@ export const vNextPhase11ProductionReleaseContract = deepFreeze({
   ],
   productionGrant: {
     status: "granted",
-    releaseArtifactFingerprint: "7095e4b4fd9d82d764d5416e3cc0ac9a2dbc4e47f4fa36ea47df5f6c330915b8",
+    releaseArtifactFingerprint: "cfbaf1536533e18b4b5489c8625549ef27facc1132fdefba0ebc1b8f4c2359d5",
     authorizations: {
       deployCompatibleRelease: true,
       runIdempotentLiveMigration: true,

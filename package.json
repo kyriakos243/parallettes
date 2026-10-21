@@ -61,11 +61,12 @@
     "validate:vnext-placement": "node scripts/validate-vnext-placement.mjs && node scripts/validate-vnext-placement-compatibility.mjs && node scripts/validate-vnext-quick-setup.mjs && node scripts/validate-vnext-quick-guided-ui.mjs && node scripts/validate-vnext-paused-setup-context.mjs",
     "validate:vnext-restriction-safety": "node scripts/validate-vnext-submitted-safety.mjs && node scripts/validate-vnext-restriction-exposure.mjs && node scripts/validate-vnext-workout-start-safety.mjs && node scripts/validate-vnext-restriction-report.mjs && node scripts/validate-vnext-mixed-runner.mjs",
     "validate:vnext-product-review": "pnpm validate:vnext-restriction-safety && node scripts/validate-vnext-signout-safety.mjs && node scripts/validate-vnext-workout-review-recovery.mjs && node scripts/validate-vnext-guided-recovery.mjs && node scripts/validate-vnext-progress-feedback.mjs && node scripts/validate-vnext-check-safety.mjs && node scripts/validate-vnext-quick-guided-ui.mjs",
-    "validate:vnext-training-corrections": "node scripts/validate-vnext-current-safety-prerequisites.mjs && node scripts/validate-vnext-symptom-recovery.mjs && node scripts/validate-vnext-symptom-recovery-ui.mjs && node scripts/validate-vnext-long-term-allocation.mjs && node scripts/validate-vnext-persistent-difficulty.mjs && node scripts/validate-vnext-progression-recovery.mjs && node scripts/validate-vnext-app-update.mjs && pnpm validate:vnext-live-account-polish && pnpm validate:vnext-practice-dose && pnpm validate:vnext-startup-sync-confirmation && pnpm validate:vnext-useful-dose",
+    "validate:vnext-training-corrections": "node scripts/validate-vnext-current-safety-prerequisites.mjs && node scripts/validate-vnext-symptom-recovery.mjs && node scripts/validate-vnext-symptom-recovery-ui.mjs && node scripts/validate-vnext-long-term-allocation.mjs && node scripts/validate-vnext-persistent-difficulty.mjs && node scripts/validate-vnext-progression-recovery.mjs && node scripts/validate-vnext-app-update.mjs && pnpm validate:vnext-live-account-polish && pnpm validate:vnext-practice-dose && pnpm validate:vnext-startup-sync-confirmation && pnpm validate:vnext-useful-dose && pnpm validate:vnext-prerequisite-review",
     "validate:vnext-practice-dose": "node scripts/validate-vnext-practice-dose.mjs",
     "validate:vnext-live-account-polish": "node scripts/validate-vnext-account-return.mjs && node scripts/validate-vnext-live-account-polish.mjs",
     "validate:vnext-useful-dose": "node scripts/validate-vnext-useful-dose.mjs",
-    "validate:vnext-startup-sync-confirmation": "node scripts/validate-vnext-startup-sync-confirmation.mjs"
+    "validate:vnext-startup-sync-confirmation": "node scripts/validate-vnext-startup-sync-confirmation.mjs",
+    "validate:vnext-prerequisite-review": "node scripts/validate-vnext-prerequisite-shortcuts.mjs && node scripts/validate-vnext-emphasis-completion.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.28.0",

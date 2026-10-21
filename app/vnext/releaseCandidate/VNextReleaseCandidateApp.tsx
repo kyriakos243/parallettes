@@ -48,6 +48,7 @@ import { createAppUpdateController, hasUnfinishedUpdateWork, type AppUpdateState
 import { createAccountAccessController, type AccountAccess } from "./accountAccess";
 import { createBackgroundSync, serialSyncStore, type SerialOperation } from "./backgroundSync";
 import { startupRecoveryMessage } from "./startupRecovery";
+import { hasMeaningfulEmphasisTraining } from "./emphasisCompletion";
 import "./appUpdate.css";
 import { isMixedWorkoutPlan } from "../mixedWorkout";
 import { ReliableWorkoutRunner } from "./ReliableWorkoutRunner";
@@ -173,13 +174,10 @@ const rememberCompletedEmphasis = (
   generated: GeneratedSession,
   prepared: PreparedVNextWorkoutCompletion,
   namespace: string,
+  bundle: DefinitionBundle,
 ): void => {
   const emphasis = generated.emphasis;
-  const eligible = prepared.record.status !== "abandoned"
-    && prepared.plan.items.some((item) => item.purpose !== "preparation"
-      && item.purpose !== "recovery"
-      && (prepared.record.itemOutcomes.find((outcome) => outcome.planItemId === item.id)
-        ?.participationSeconds ?? 0) > 0);
+  const eligible = hasMeaningfulEmphasisTraining(prepared.plan, prepared.record, bundle);
   if (!emphasis || !eligible) return;
   const previous = readPreviousEmphasis(athleteId, namespace);
   if (previous?.lastCountedRecordId === prepared.record.id) return;
@@ -1081,7 +1079,7 @@ const VNextAthleteApplication = ({
         });
         persistWorkoutRecovery({ ...exactRecovery, stage: "prepared", prepared });
         await runtime.commitWorkoutCompletion({ ...refreshInput(), prepared });
-        rememberCompletedEmphasis(athleteId, exactRecovery.generated, prepared, storageNamespace);
+        rememberCompletedEmphasis(athleteId, exactRecovery.generated, prepared, storageNamespace, bundleFor(prepared.plan.catalogueVersion));
         const refreshed = await runtime.refresh(refreshInput());
         setSnapshot(refreshed);
         clearWorkoutRecovery();
@@ -1102,7 +1100,7 @@ const VNextAthleteApplication = ({
       try {
         workoutRecoveryStorage.assertCurrent();
         const committed = await runtime.commitWorkoutCompletion({ ...refreshInput(), prepared: pendingPrepared });
-        rememberCompletedEmphasis(athleteId, workoutRecovery.generated, pendingPrepared, storageNamespace);
+        rememberCompletedEmphasis(athleteId, workoutRecovery.generated, pendingPrepared, storageNamespace, bundleFor(pendingPrepared.plan.catalogueVersion));
         const refreshed = await runtime.refresh(refreshInput());
         setSnapshot(refreshed);
         clearWorkoutRecovery();

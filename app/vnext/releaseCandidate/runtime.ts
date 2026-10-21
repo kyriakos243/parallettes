@@ -33,6 +33,7 @@ import {
   persistGuidedTestEvidence,
   persistSubmittedAssessmentRestriction,
   recommendProgressionCheck,
+  recommendPrerequisiteCheck,
   describeProgressionCheck,
   progressionCheckOffer,
   guidedObservationOccasionId,
@@ -613,19 +614,24 @@ export const createVNextReleaseCandidateRuntime = (
       evidenceEvents: sources.evidenceEvents,
       hasPracticeHistory: sources.sessionRecords.some((record) => record.itemOutcomes.some((item) => (item.participationSeconds ?? 0) > 0))
         || sources.evidenceEvents.some((event) => event.type === "performance_observed" && event.source === "guided-test") });
-    const skillDetails = presentationFamilyOrder.map((graphId) => buildSkillDetail(progressInput, graphId));
-    const directProtocolIds = new Set(skillDetails.flatMap((detail) => detail.assessmentAction.kind === "reassess"
-      ? [] : detail.assessmentAction.protocolIds));
-    const directGuidedTestOffers = vNextDefinitionBundle.benchmarkProtocols.filter((protocol) => directProtocolIds.has(protocol.id))
-      .map((protocol) => progressionCheckOffer({ bundle: vNextDefinitionBundle, state, intent,
-        projectionPolicy: vNextProjectionPolicy, assessmentDraft }, protocol));
-    const presentations: VNextRuntimePresentations = {
-      provenance,
-      progress: buildProgressAndGoals(progressInput),
-      skillDetails,
-      today: buildTodayWorkoutPresentation({ bundle: vNextDefinitionBundle, generated }),
-      goals: buildGoalControls(vNextDefinitionBundle, intent),
-      assessment: buildAssessmentEntryPoints({
+    const checkContext = { bundle: vNextDefinitionBundle, state, intent, projectionPolicy: vNextProjectionPolicy, assessmentDraft };
+    const skillDetails = presentationFamilyOrder.map((graphId) => {
+      const detail = buildSkillDetail(progressInput, graphId);
+      if (detail.assessmentAction.kind !== "reassess" || detail.nextTarget?.state !== "needs-prerequisites") return detail;
+      const check = recommendPrerequisiteCheck(checkContext, detail.nextTarget.milestone);
+      return check ? { ...detail, assessmentAction: {
+        kind: "start-guided-test" as const,
+        label: `Check ${check.offer.label} · ${check.target}`,
+        graphId,
+        protocolIds: [check.offer.protocolId],
+      } } : detail;
+    });
+    const directGuidedTestOffers = skillDetails.flatMap((detail) => detail.assessmentAction.kind === "reassess" ? []
+      : detail.assessmentAction.protocolIds.flatMap((id) => {
+        const protocol = vNextDefinitionBundle.benchmarkProtocols.find((candidate) => candidate.id === id);
+        return protocol ? [{ ...progressionCheckOffer(checkContext, protocol), forGraphId: detail.graphId }] : [];
+      }));
+    const assessment = buildAssessmentEntryPoints({
         ...(catalogue.placementVersion ? { placementVersion: catalogue.placementVersion } : {}),
         bundle: vNextDefinitionBundle,
         state,
@@ -634,7 +640,21 @@ export const createVNextReleaseCandidateRuntime = (
           || sources.sessionRecords.length > 0,
         ...(assessmentReview ? { guidedTestOffers: assessmentReview.guidedTests } : {}),
         directGuidedTestOffers,
+      });
+    const presentations: VNextRuntimePresentations = {
+      provenance,
+      progress: buildProgressAndGoals(progressInput),
+      skillDetails: skillDetails.map((detail) => {
+        // The offered action owns confirmation-building versus reconfirmation,
+        // including checks for milestones in a different prerequisite family.
+        const action = assessment.skillActions?.find((candidate) => candidate.graphId === detail.graphId
+          && candidate.protocolIds.some((id) => detail.assessmentAction.protocolIds.includes(id)));
+        return !action ? detail : { ...detail, assessmentAction: { ...detail.assessmentAction,
+          kind: action.kind === "reconfirmation" ? "start-reconfirmation" : "start-guided-test" } };
       }),
+      today: buildTodayWorkoutPresentation({ bundle: vNextDefinitionBundle, generated }),
+      goals: buildGoalControls(vNextDefinitionBundle, intent),
+      assessment,
       restrictions: buildRestrictionPresentation({ bundle: vNextDefinitionBundle, state,
         evidenceEvents: sources.evidenceEvents, includeRecoveryActions: vNextProjectionPolicy.scopedSymptomRecovery }),
       completion: buildWorkoutCompletionPresentation({

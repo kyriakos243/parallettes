@@ -13,6 +13,7 @@ const { createVNextReleaseCandidateRuntime } = load("app/vnext/releaseCandidate/
 const { createVNextShadowStore, canonicalJson } = load("app/vnext/persistence/index.ts");
 const { structureWorkoutPlan } = load("app/vnext/workoutUx.ts");
 const { isMixedWorkoutPlan } = load("app/vnext/mixedWorkout.ts");
+const { hasMeaningfulEmphasisTraining } = load("app/vnext/releaseCandidate/emphasisCompletion.ts");
 const { createGuidedProtocolEvidence, guidedObservationOccasionId, createRestrictionReport } = load("app/vnext/assessment/index.ts");
 const { vNextReleaseCandidateManifest } = load("app/vnext/releaseCandidate/manifest.ts");
 const { isStableId } = load("app/vnext/contracts.ts");
@@ -43,7 +44,7 @@ const memory = new Map();
 const bindings = {
   localStorage: { getItem: (key) => memory.get(key) ?? null, setItem: (key, value) => memory.set(key, value) },
   storageKeyPrefix: (namespace, key) => `${namespace}:${key}:`,
-  vNextReleaseCandidateManifest, isStableId, isMixedWorkoutPlan,
+  vNextReleaseCandidateManifest, isStableId, isMixedWorkoutPlan, hasMeaningfulEmphasisTraining,
 };
 const helpers = ts.transpileModule(`${statement("readPreviousEmphasis")}\n${statement("rememberCompletedEmphasis")}
   return { readPreviousEmphasis, rememberCompletedEmphasis };`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -112,7 +113,8 @@ const fixture = async (name, goals, nodes = [], selectedCatalogue = catalogue) =
     const prepared = runtime.prepareWorkoutCompletion({ generated, timerItemOutcomes, reviewAnswers, startedAt,
       completedAt: time.value, recordedAt: time.value, status: "complete" });
     const saved = await runtime.commitWorkoutCompletion({ athleteId, prepared });
-    rememberCompletedEmphasis(athleteId, generated, prepared, "allocation");
+    rememberCompletedEmphasis(athleteId, generated, prepared, "allocation",
+      selectedCatalogue.history.find((native) => native.catalogueVersion === prepared.plan.catalogueVersion));
     return saved;
   };
   return { athleteId, store, runtime, time, intent, refresh, complete };
