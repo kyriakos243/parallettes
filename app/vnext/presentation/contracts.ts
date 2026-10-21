@@ -280,7 +280,7 @@ export type AssessmentEntryInput = Readonly<{
   state: DerivedAthleteState;
   intent: AthleteIntent;
   guidedTestOffers?: readonly GuidedTestOffer[];
-  directGuidedTestOffers?: readonly GuidedTestOffer[];
+  directGuidedTestOffers?: readonly (GuidedTestOffer & Readonly<{ forGraphId: GraphId }>)[];
   /**
    * Navigation context only. Existing immutable observations may be too weak
    * to create a projected finding, but still mean an imported athlete must be
