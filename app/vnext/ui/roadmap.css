@@ -27,10 +27,10 @@
 .vnext-roadmap-node[data-current="true"] { border: 2px solid #11796f; }
 .vnext-roadmap-node[data-path="true"] { border-color: #11796f; }
 .vnext-roadmap-node[aria-expanded="true"] { outline: 3px solid #a0cfc2; outline-offset: 3px; }
-.vnext-roadmap-node-meta { color: #546c60; font-size: 11px; line-height: 1.4; }
+.vnext-roadmap-node-meta { color: #546c60; font-size: 12px; line-height: 1.4; }
 .vnext-roadmap-node-status { display: flex; align-items: center; gap: 6px; color: #4a6256; font-size: 12px; line-height: 1.4; margin-top: auto; }
 .vnext-roadmap-node-status i { font-size: 17px; font-style: normal; }
-.vnext-roadmap-marker { padding: 4px 8px; border-radius: 6px; color: white; background: #11796f; font-size: 11px; font-weight: 800; }
+.vnext-roadmap-marker { padding: 4px 8px; border-radius: 6px; color: white; background: #11796f; font-size: 12px; font-weight: 800; }
 .vnext-roadmap-recheck { color: #854e19; font-size: 12px; line-height: 1.5; }
 .vnext-roadmap-detail { position: relative; margin-top: 18px; padding: 20px; border: 1px solid #9dc6b7; border-radius: 16px; background: #fffefb; box-shadow: 0 8px 25px #10231f0d; }
 .vnext-roadmap-detail-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }

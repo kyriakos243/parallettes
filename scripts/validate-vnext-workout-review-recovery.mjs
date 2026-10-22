@@ -36,6 +36,7 @@ new Function("module", "exports", "require", compiled)(module, module.exports, (
   if (name === "../workoutGuidance") return load("app/vnext/workoutGuidance.ts");
   if (name === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment: "Fragment" };
   if (name === "../media/VNextMotionGuide") return { VNextMotionGuide: "OwnedMotionGuide" };
+  if (name === "../media/deferredMotion") return { DeferredMotionGuide: "OwnedMotionGuide" };
   if (name === "./SkillRoadmap") return { SkillRoadmap: "SkillRoadmap" };
   if (name === "./HistoryPanels") return { HistoryView: "HistoryView", WorkoutSavedSummary: "WorkoutSavedSummary" };
   if (name === "./sectionNavigation") return { useSectionNavigation: () => ({ section: "today", changeSection() {}, hasVisited: () => true }) };

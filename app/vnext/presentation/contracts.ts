@@ -219,6 +219,8 @@ export type TodayWorkoutPresentation = Readonly<{
   }>[];
   durationLabel?: string;
   durationMessage?: string;
+  /** Plain explanation when the declared main goal cannot lead today's workout. */
+  goalNotice?: string;
   authorityNotice: string;
   exposesRawAlgorithmDecisions: false;
 }>;

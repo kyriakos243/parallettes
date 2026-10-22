@@ -600,7 +600,8 @@ export const createVNextReleaseCandidateRuntime = (
       && isAssessmentAtReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion))
       ? { ...buildAssessmentReview(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state, vNextProjectionPolicy,
           assessmentDraft.status === "committed" ? intent.equipment : undefined),
-        ...placementCheckSummary(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state, sources.evidenceEvents) }
+        ...placementCheckSummary(assessmentDraft, bundleFor(assessmentDraft.catalogueVersion), state, sources.evidenceEvents,
+          catalogue.projectionPolicy.measuredPlacementEntries) }
       : undefined;
     const progressInput = {
       bundle: vNextDefinitionBundle,

@@ -40,7 +40,7 @@ export const buildWorkoutCompletionPresentation = (
     title: "How did today's workout go?",
     intro: "There is no completed vNext plan to review.",
     prompts: [],
-    authorityNotice: "Only an immutable Session Record can become the authority for what happened in a workout.",
+    authorityNotice: "Your saved workout is the only record of what you did. Nothing is changed after it is saved.",
     createsSessionRecord: false,
   };
   const prompts = workoutReviewPrompts(plan).flatMap((prompt) => {
@@ -76,7 +76,7 @@ export const buildWorkoutCompletionPresentation = (
     title: "How did today's workout go?",
     intro: "A quick review helps adjust future work without asking you to claim a skill.",
     prompts,
-    authorityNotice: "These answers become item outcomes only when the coherent vNext path creates one immutable Session Record. They never create a second workout fact or directly award an achievement.",
+    authorityNotice: "Your answers are saved once, with this workout. They never create a second workout or award a skill on their own.",
     createsSessionRecord: false,
   };
 };
@@ -160,6 +160,6 @@ export const mapWorkoutCompletionAnswers = (input: Readonly<{
   return {
     itemOutcomes,
     restrictionFollowUp: input.answers.some((answer) => answer.symptomOrInstability === true),
-    authorityNotice: "This is a partial item-outcome mapping, not a Session Record. Create one immutable Session Record only after combining it with timer-derived preparation and recovery facts.",
+    authorityNotice: "These answers are not saved yet. They are saved once, together with the timed work from this workout.",
   };
 };

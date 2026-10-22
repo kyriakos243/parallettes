@@ -112,6 +112,8 @@ export type AccountGateProps = Readonly<{
   onClose?: () => void;
   onSignedOut?: () => void;
   onResetProgress?: () => Promise<void>;
+  /** Downloads a backup of the current athlete's saved training, when available. */
+  onExportBackup?: () => Promise<void>;
   localChoices?: readonly VNextLocalIdentityChoice[];
   presentation?: VNextAccountGatePresentation;
   storageNamespace?: string;
@@ -132,6 +134,7 @@ export const VNextAccountGate = ({
   onClose,
   onSignedOut,
   onResetProgress,
+  onExportBackup,
   localChoices = [],
   presentation = DEFAULT_PRESENTATION,
   storageNamespace = VNEXT_RC_STORAGE_NAMESPACE,
@@ -199,7 +202,20 @@ export const VNextAccountGate = ({
     }
   };
 
-  const signOut = async (discardPendingWorkFingerprint?: string): Promise<void> => {
+  const exportBackup = async (): Promise<void> => {
+    if (!onExportBackup || busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await onExportBackup();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Backup export could not finish.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const signOut = async (discard?: VNextPendingSignOutWork): Promise<void> => {
     if (!current || busy || signOutInFlight.current) return;
     signOutInFlight.current = true;
     setBusy(true);
@@ -208,7 +224,10 @@ export const VNextAccountGate = ({
     try {
       const boundary = await accountBoundary();
       try {
-        await boundary.signOutVNextAccount(current.athleteId, shadowDatabaseName, { discardPendingWorkFingerprint });
+        await boundary.signOutVNextAccount(current.athleteId, shadowDatabaseName, {
+          ...(discard?.fingerprint ? { discardPendingWorkFingerprint: discard.fingerprint } : {}),
+          ...(discard?.unsyncedFingerprint ? { discardUnsyncedFingerprint: discard.unsyncedFingerprint } : {}),
+        });
       } catch (reason) {
         if (reason instanceof boundary.VNextPendingWorkError) {
           setPendingSignOut(reason.pendingWork);
@@ -228,7 +247,7 @@ export const VNextAccountGate = ({
 
   const deleteAccount = async (): Promise<void> => {
     if (!current?.username || !deletePassword || busy
-      || !window.confirm("Permanently delete this cloud account and its synced observations? This cannot be undone.")) return;
+      || !window.confirm("Permanently delete this cloud account and the training synced to it? This cannot be undone.")) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -250,7 +269,7 @@ export const VNextAccountGate = ({
           <div>
             <p className="vnext-kicker">Cloud account created</p>
             <h1 id="vnext-account-title">Save your recovery code</h1>
-            <p>This is the only way to recover the account if the password is lost. It is not included in observation exports.</p>
+            <p>This is the only way to recover the account if the password is lost. It is not included in training backups.</p>
           </div>
           <output className="vnext-recovery-code" aria-label="Account recovery code">{pendingRecovery.recoveryCode}</output>
           <button type="button" className="vnext-submit" onClick={() => onSelected(pendingRecovery.identity)}>I saved it — open vNext</button>
@@ -267,16 +286,24 @@ export const VNextAccountGate = ({
           <div>
             <p className="vnext-kicker">Cloud sync</p>
             <h1 id="vnext-account-title">Signed in as {current.username}</h1>
-            <p>Your account supplies identity and secure sync only. vNext observations remain separate from the v1.2 training profile.</p>
+            <p>Your account is used for sign-in and secure sync only. Your training is kept separately from the older app’s profile.</p>
           </div>
           <div className="vnext-account-actions">
             {onClose && <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onClose}>{pendingSignOut ? "Return to training" : "Done"}</button>}
             {!pendingSignOut && <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => void signOut()}>Sign out on this device</button>}
           </div>
-          {pendingSignOut && <div className="vnext-account-separation" role="alert">
+          {pendingSignOut && (pendingSignOut.unsyncedFingerprint ? <div className="vnext-account-separation" role="alert">
+            <p>Not yet in your account:</p>
+            <ul>{pendingSignOut.descriptions.map((line) => <li key={line}>{line}</li>)}</ul>
+            <p>Connect and try again to sync it, or save a backup first. Signing out now removes it from this device; it cannot be restored from sync.</p>
+            <div className="vnext-account-actions">
+              {onExportBackup && <button type="button" className="vnext-action" disabled={busy} onClick={() => void exportBackup()}>Save a backup</button>}
+              <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => void signOut(pendingSignOut)}>Discard unsynced training &amp; sign out</button>
+            </div>
+          </div> : <div className="vnext-account-separation" role="alert">
             <p>You have {pendingSignOut.descriptions.join(", ")}. Return to finish and save it. Signing out now will discard this unfinished work from this device; it cannot be restored from sync.</p>
-            <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => void signOut(pendingSignOut.fingerprint)}>Discard unfinished work &amp; sign out</button>
-          </div>}
+            <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => void signOut(pendingSignOut)}>Discard unfinished work &amp; sign out</button>
+          </div>)}
           {onResetProgress && <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => {
             if (!window.confirm("Reset training progress on every synced device? Account access and historical recovery safeguards remain.")) return;
             setBusy(true);
@@ -328,7 +355,14 @@ export const VNextAccountGate = ({
         )}
 
         {current?.mode === "local" && (
-          <p className="vnext-account-separation">Set up sync to keep this same athlete ID and its observations. Signing in to a different account still opens that account separately.</p>
+          <p className="vnext-account-separation">Set up sync to keep this same athlete and all of its training. Signing in to a different account opens that account separately.</p>
+        )}
+
+        {current?.mode === "local" && mode !== "create" && (
+          <div className="vnext-account-separation">
+            <p>Your device-only training stays on this device and is listed here again when you sign out of the other account.</p>
+            {onExportBackup && <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => void exportBackup()}>Save a backup</button>}
+          </div>
         )}
 
         {vNextCloudAccountAvailable ? (

@@ -48,6 +48,7 @@ const compile = (path, extra = "") => {
     if (name === "../contracts") return contracts;
     if (name === "./RestrictionReportForm") return compile("app/vnext/releaseCandidate/RestrictionReportForm.tsx");
     if (name === "../media/VNextMotionGuide") return { VNextMotionGuide: "OwnedMotionGuide" };
+    if (name === "../media/deferredMotion") return { DeferredMotionGuide: "OwnedMotionGuide" };
     if (name === "./SkillRoadmap") return { SkillRoadmap: "SkillRoadmap" };
     if (name === "./HistoryPanels") return { HistoryView: "HistoryView", WorkoutSavedSummary: "WorkoutSavedSummary" };
     if (name === "./sectionNavigation") return { useSectionNavigation: () => ({ section: "today", changeSection() {}, hasVisited: () => true }) };

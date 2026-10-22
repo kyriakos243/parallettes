@@ -10,7 +10,7 @@ import {
   type PrerequisiteRef,
   type ReasonCode,
 } from "../contracts";
-import { evaluateTrainability, milestoneKey as projectionMilestoneKey } from "../projection";
+import { evaluateTrainability, milestoneKey as projectionMilestoneKey, projectionReasonCodes } from "../projection";
 import type {
   EmphasisFocus,
   EmphasisPlan,
@@ -37,6 +37,10 @@ type FocusResolution = Readonly<{
   demand: DemandProfile;
   trainable: boolean;
   recentlyExposed: boolean;
+  /** Goal-trust planning only: the family has stale or contradicted findings. */
+  hasStaleCandidate?: boolean;
+  /** Goal-trust planning only: unusable today solely because of recent high load. */
+  blockedByRecentLoad?: boolean;
 }>;
 
 type EmphasisResult = Readonly<{
@@ -99,16 +103,17 @@ const exactProtocolFor = (
 const protocolDemand = (
   protocol: BenchmarkProtocol,
   input: GenerateSessionInput,
-): Readonly<{ demand: DemandProfile; trainable: boolean }> | undefined => {
+  development = false,
+): Readonly<{ demand: DemandProfile; trainable: boolean; blockedByRecentLoad?: boolean }> | undefined => {
   const exercise = input.bundle.exercises.find((candidate) => candidate.id === protocol.exerciseId);
   const variant = exercise?.prescriptionVariants.find((candidate) => candidate.id === protocol.prescriptionVariantId)
     ?? exercise?.prescriptionVariants[0];
   if (!exercise || !variant) return undefined;
-  const evaluation = evaluateTrainability({
+  const evaluate = (variantId: string) => evaluateTrainability({
     request: {
       exerciseId: exercise.id,
       exerciseDefinitionVersion: exercise.definitionVersion,
-      prescriptionVariantId: variant.id,
+      prescriptionVariantId: variantId as typeof variant.id,
     },
     state: input.state,
     bundle: input.bundle,
@@ -116,7 +121,27 @@ const protocolDemand = (
     policy: input.projectionPolicy,
     intent: input.intent,
   });
-  return { demand: variant.demand, trainable: evaluation.decision !== "block" };
+  const evaluation = evaluate(variant.id);
+  if (!input.goalContinuity || !development) return { demand: variant.demand, trainable: evaluation.decision !== "block" };
+  // Goal-trust planning applies the composer's own usability gate (recent high
+  // load, post-clearance, restriction regressions), so a family is never chosen
+  // for work the composer must refuse and replace with an unscoped drill.
+  const demand = input.sessionDemand ?? input.intent.defaultSessionDemand;
+  const variants = exercise.prescriptionVariants.filter((candidate) => candidate.id === variant.id
+    || (demand !== "challenge" && candidate.id.endsWith("-regressed")));
+  const evaluations = variants.map((candidate) => ({ candidate,
+    evaluation: candidate.id === variant.id ? evaluation : evaluate(candidate.id) }));
+  const trainable = evaluations.some((entry) => usableDevelopmentVariant(entry.candidate, entry.evaluation, demand));
+  // Distinguish "rest after recent demanding work" from restrictions or prerequisites.
+  const withoutRecentLoad = (entry: (typeof evaluations)[number]) => ({ ...entry.evaluation,
+    reasonCodes: entry.evaluation.reasonCodes.filter((code) => code !== projectionReasonCodes.recentHighLoad) });
+  return {
+    demand: variant.demand,
+    trainable,
+    blockedByRecentLoad: !trainable && evaluations.some((entry) =>
+      entry.evaluation.reasonCodes.includes(projectionReasonCodes.recentHighLoad)
+      && usableDevelopmentVariant(entry.candidate, withoutRecentLoad(entry), demand)),
+  };
 };
 
 const capacityProtocolFor = (
@@ -134,8 +159,28 @@ const capacityProtocolFor = (
     .find((candidate): candidate is BenchmarkProtocol => candidate !== undefined);
 };
 
-const recentHighOverlap = (demand: DemandProfile, input: GenerateSessionInput, policy: GeneratorPolicy): boolean =>
+const nativeRecentHighOverlap = (demand: DemandProfile, input: GenerateSessionInput, policy: GeneratorPolicy): boolean =>
   demandsOverlapAtHigh(demand, input.state.recentLoad.demand, policy.highUpperLimbDomains);
+
+/**
+ * Goal-trust planning defers a declared goal only after consecutive-day
+ * training. 36 hours separates daily sessions (about 12–36 h apart) from
+ * every-other-day sessions (about 36–60 h) regardless of time of day. This is
+ * a product scheduling rule, not a recovery threshold: the existing 48-hour
+ * high-load rule still reduces a matching prescription's dose. The seven-day
+ * merged profile remains for native replay only.
+ */
+const GOAL_TRUST_DEFERRAL_HOURS = 36;
+const recentHighOverlap = (demand: DemandProfile, input: GenerateSessionInput, policy: GeneratorPolicy): boolean => {
+  if (!input.goalContinuity) return nativeRecentHighOverlap(demand, input, policy);
+  const asOf = Date.parse(input.state.asOf);
+  const windowMs = GOAL_TRUST_DEFERRAL_HOURS * 3_600_000;
+  return input.state.recentLoad.exposures.some((exposure) => {
+    const occurred = Date.parse(exposure.occurredAt);
+    return occurred > asOf - windowMs && occurred <= asOf
+      && demandsOverlapAtHigh(demand, exposure.demand, policy.highUpperLimbDomains);
+  });
+};
 
 const focusUserMessage = (
   graph: DevelopmentGraph,
@@ -193,7 +238,11 @@ const resolveGraphFocus = (
     ...input.state.workingNodes.map((item) => ({ item, sourceRank: 0 })),
     ...input.state.eligibleTargets.map((item) => ({ item, sourceRank: 1 })),
     ...input.state.nodeStates
-      .filter((state) => state.lifecycle === "established" && state.confidence === "current")
+      // Goal-trust planning also considers every stale/contradicted established
+      // node, so the earliest reconfirmable step is reachable when a deeper
+      // stale step is blocked by its own out-of-date safety prerequisite.
+      .filter((state) => state.lifecycle === "established" && (state.confidence === "current"
+        || (input.goalContinuity && (state.confidence === "stale" || state.confidence === "contradicted"))))
       .map((state) => ({
         item: { milestone: state.milestone, reasonCodes: state.reasonCodes },
         sourceRank: 2,
@@ -230,21 +279,18 @@ const resolveGraphFocus = (
         || projectionMilestoneKey(left.item.milestone).localeCompare(projectionMilestoneKey(right.item.milestone));
     });
 
-  const selected = candidates[0]?.item.milestone;
-  const selectedNode = selected
-    ? graph.nodes.find((candidate) => candidate.id === selected.nodeId)
-    : undefined;
-  const selectedState = selected
-    ? input.state.nodeStates.find((candidate) =>
-      projectionMilestoneKey(candidate.milestone) === projectionMilestoneKey(selected))
-    : undefined;
-  if (selected && selectedNode) {
+  const resolveCandidate = (entry: (typeof candidates)[number]): FocusResolution | undefined => {
+    const selected = entry.item.milestone;
+    const selectedNode = graph.nodes.find((candidate) => candidate.id === selected.nodeId);
+    if (!selectedNode) return undefined;
+    const selectedState = input.state.nodeStates.find((candidate) =>
+      projectionMilestoneKey(candidate.milestone) === projectionMilestoneKey(selected));
     const kind: EmphasisFocus["kind"] = selectedState?.confidence === "stale"
       || selectedState?.confidence === "contradicted"
       ? "reconfirmation"
       : "development";
     const protocol = exactProtocolFor(input.bundle, selected);
-    const resolved = protocol ? protocolDemand(protocol, input) : undefined;
+    const resolved = protocol ? protocolDemand(protocol, input, true) : undefined;
     const demand = resolved?.demand ?? {};
     return {
       focus: {
@@ -254,14 +300,35 @@ const resolveGraphFocus = (
         missingPrerequisites: [],
         reasonCodes: uniqueReasons([
           kind === "reconfirmation" ? planningReasonCodes.reconfirmation : planningReasonCodes.eligibleTarget,
-          ...(candidates[0]?.sourceRank === 2 ? [planningReasonCodes.workingTarget] : []),
+          ...(entry.sourceRank === 2 ? [planningReasonCodes.workingTarget] : []),
         ]),
         userMessage: focusUserMessage(graph, selectedNode, kind),
       },
       demand,
       trainable: resolved?.trainable ?? false,
       recentlyExposed: recentHighOverlap(demand, input, policy),
+      ...(input.goalContinuity ? { blockedByRecentLoad: resolved?.blockedByRecentLoad ?? false } : {}),
     };
+  };
+  const hasStaleCandidate = input.goalContinuity
+    ? candidates.some(({ item }) => {
+      const state = input.state.nodeStates.find((candidate) =>
+        projectionMilestoneKey(candidate.milestone) === projectionMilestoneKey(item.milestone));
+      return state?.confidence === "stale" || state?.confidence === "contradicted";
+    })
+    : undefined;
+  let candidateRestingAfterLoad = false;
+  if (input.goalContinuity) {
+    // A blocked stale node must not hide the whole family: try the next
+    // candidate in the same priority order, ending at the earliest node.
+    for (const entry of candidates) {
+      const resolution = resolveCandidate(entry);
+      if (resolution?.trainable) return { ...resolution, hasStaleCandidate };
+      if (resolution?.blockedByRecentLoad) candidateRestingAfterLoad = true;
+    }
+  } else if (candidates[0]) {
+    const resolution = resolveCandidate(candidates[0]);
+    if (resolution) return resolution;
   }
 
   const desiredNode = explicitTarget
@@ -276,7 +343,7 @@ const resolveGraphFocus = (
     .map((milestone) => exactProtocolFor(input.bundle, milestone))
     .filter((protocol): protocol is BenchmarkProtocol => protocol !== undefined);
   const resolved = [...milestoneProtocols, ...capacityProtocols]
-    .map((protocol) => protocolDemand(protocol, input))
+    .map((protocol) => protocolDemand(protocol, input, true))
     .filter((item): item is NonNullable<typeof item> => item !== undefined);
   const demand = mergeDemandProfiles(resolved.map((item) => item.demand));
   const reasons: ReasonCode[] = [planningReasonCodes.prerequisiteDevelopment];
@@ -297,6 +364,11 @@ const resolveGraphFocus = (
     demand,
     trainable: resolved.some((item) => item.trainable),
     recentlyExposed: recentHighOverlap(demand, input, policy),
+    ...(input.goalContinuity ? {
+      hasStaleCandidate,
+      blockedByRecentLoad: !resolved.some((item) => item.trainable)
+        && (candidateRestingAfterLoad || resolved.some((item) => item.blockedByRecentLoad)),
+    } : {}),
   };
 };
 
@@ -389,31 +461,78 @@ export const planEmphasis = (
   }
 
   const previous = input.previousEmphasis;
-  const retainPreviousBase = previous !== undefined
+  const samePrevious = previous !== undefined
     && previous.generatorPolicyId === policy.id
     && previous.generatorPolicyVersion === policy.version
-    && previous.goalSignature === signature
+    && previous.goalSignature === signature;
+  const retainPreviousBase = samePrevious
     && previous.completedEligibleSessions < policy.emphasisReviewMinimumSessions;
-  const previousCandidate = retainPreviousBase
-    ? resolutions.find((item) => item.focus.graphId === previous.primaryGraphId && item.trainable)
-    : undefined;
-  const previousResolution = previousCandidate?.recentlyExposed
-    && resolutions.some((item) => item !== previousCandidate && item.trainable && !item.recentlyExposed)
-    ? undefined
-    : previousCandidate;
+  const priorityOf = (resolution: FocusResolution): number =>
+    graphGoalPriority(resolution.focus.graphId, input, goals);
+  const seededTieBreak = (left: FocusResolution, right: FocusResolution): number =>
+    seededOrder(input.seed ?? input.createdAt, left.focus.graphId)
+      .localeCompare(seededOrder(input.seed ?? input.createdAt, right.focus.graphId))
+    || left.focus.graphId.localeCompare(right.focus.graphId);
 
-  const sorted = [...resolutions].sort((left, right) => {
-    const leftPriority = graphGoalPriority(left.focus.graphId, input, goals);
-    const rightPriority = graphGoalPriority(right.focus.graphId, input, goals);
-    return Number(right.trainable) - Number(left.trainable)
-      || Number(rightPriority === 0) - Number(leftPriority === 0)
+  let sorted: FocusResolution[];
+  let primary: FocusResolution | undefined;
+  let previousResolution: FocusResolution | undefined;
+  let reviewDue = false;
+  let declaredDeferred = false;
+  if (input.goalContinuity) {
+    // Declared priority leads; recent exposure only breaks ties between equals.
+    sorted = [...resolutions].sort((left, right) =>
+      Number(right.trainable) - Number(left.trainable)
+      || priorityOf(left) - priorityOf(right)
       || Number(left.recentlyExposed) - Number(right.recentlyExposed)
-      || leftPriority - rightPriority
-      || seededOrder(input.seed ?? input.createdAt, left.focus.graphId)
-        .localeCompare(seededOrder(input.seed ?? input.createdAt, right.focus.graphId))
-      || left.focus.graphId.localeCompare(right.focus.graphId);
-  });
-  const primary = previousResolution ?? sorted[0];
+      || seededTieBreak(left, right));
+    reviewDue = samePrevious && previous.completedEligibleSessions >= policy.emphasisReviewMinimumSessions;
+    const top = sorted[0];
+    const alternative = top?.trainable && top.recentlyExposed
+      ? sorted.find((candidate) => candidate !== top && candidate.trainable && !candidate.recentlyExposed)
+      : undefined;
+    // Defer a goal trained within the 36-hour deferral window at most once in a row:
+    // if the last counted sample already led with another family, lead with it now.
+    const previousAlreadyDeferred = samePrevious && top !== undefined && previous.primaryGraphId !== top.focus.graphId;
+    declaredDeferred = alternative !== undefined && !previousAlreadyDeferred;
+    const chosen = declaredDeferred ? alternative : top;
+    const retainable = retainPreviousBase
+      ? resolutions.find((item) => item.focus.graphId === previous.primaryGraphId && item.trainable && !item.recentlyExposed)
+      : undefined;
+    // Stability between equally prioritised families during the sample only.
+    previousResolution = retainable && chosen && !declaredDeferred
+      && (retainable === chosen || priorityOf(retainable) === priorityOf(chosen))
+      ? retainable
+      : undefined;
+    primary = previousResolution ?? chosen;
+  } else {
+    const previousCandidate = retainPreviousBase
+      ? resolutions.find((item) => item.focus.graphId === previous.primaryGraphId && item.trainable)
+      : undefined;
+    previousResolution = previousCandidate?.recentlyExposed
+      && resolutions.some((item) => item !== previousCandidate && item.trainable && !item.recentlyExposed)
+      ? undefined
+      : previousCandidate;
+
+    sorted = [...resolutions].sort((left, right) => {
+      const leftPriority = priorityOf(left);
+      const rightPriority = priorityOf(right);
+      return Number(right.trainable) - Number(left.trainable)
+        || Number(rightPriority === 0) - Number(leftPriority === 0)
+        || Number(left.recentlyExposed) - Number(right.recentlyExposed)
+        || leftPriority - rightPriority
+        || seededTieBreak(left, right);
+    });
+    primary = previousResolution ?? sorted[0];
+  }
+  if (!primary) {
+    issues.push({
+      severity: "error",
+      code: planningReasonCodes.invalidInput,
+      message: "Athlete Intent does not reference a graph in the selected definition bundle.",
+    });
+    return { issues };
+  }
   if (!primary?.trainable) {
     issues.push({
       severity: "warning",
@@ -445,7 +564,7 @@ export const planEmphasis = (
       const graph = input.bundle.graphs.find((candidate) => candidate.id === item.milestone.graphId);
       const node = graph?.nodes.find((candidate) => candidate.id === item.milestone.nodeId);
       const protocol = exactProtocolFor(input.bundle, item.milestone);
-      const resolved = protocol ? protocolDemand(protocol, input) : undefined;
+      const resolved = protocol ? protocolDemand(protocol, input, true) : undefined;
       if (!graph || !node || !resolved?.trainable || node.implementationStatus !== "available") return undefined;
       return {
         focus: {
@@ -471,6 +590,7 @@ export const planEmphasis = (
     .slice(0, 1)
     .map((item) => item.focus);
 
+  let mainGoalNotice: EmphasisPlan["mainGoalNotice"];
   const reasons: ReasonCode[] = [
     previousResolution
       ? planningReasonCodes.previousEmphasisRetained
@@ -478,16 +598,34 @@ export const planEmphasis = (
         ? planningReasonCodes.userOverride
         : planningReasonCodes.goalPrimary,
   ];
-  if (previous && previous.completedEligibleSessions >= policy.emphasisReviewMinimumSessions) {
+  if (input.goalContinuity
+    ? reviewDue
+    : previous && previous.completedEligibleSessions >= policy.emphasisReviewMinimumSessions) {
     reasons.push(planningReasonCodes.emphasisReviewDue);
   }
   if (secondary) reasons.push(planningReasonCodes.compatibleSecondary);
-  if (resolutions.some((candidate) => candidate !== primary
+  if (input.goalContinuity ? declaredDeferred : resolutions.some((candidate) => candidate !== primary
     && candidate.trainable
     && candidate.recentlyExposed
     && graphGoalPriority(candidate.focus.graphId, input, goals)
       < graphGoalPriority(primary.focus.graphId, input, goals))) {
     reasons.push(planningReasonCodes.deferredRecentLoad);
+  }
+  if (input.goalContinuity) {
+    const declaredGraphId = input.intent.emphasisOverride?.primaryGraphId
+      ?? input.intent.goals.find((goal) => goal.priority === "primary")?.graphId;
+    const declared = declaredGraphId
+      ? resolutions.find((candidate) => candidate.focus.graphId === declaredGraphId)
+      : undefined;
+    if (declared && declared !== primary && !declared.trainable && declared.blockedByRecentLoad) {
+      // Resting the main goal after recent demanding work is a normal deferral.
+      reasons.push(planningReasonCodes.deferredRecentLoad);
+    } else if (declared && declared !== primary && !declared.trainable) {
+      mainGoalNotice = { graphId: declared.focus.graphId, kind: declared.hasStaleCandidate ? "recheck" : "unavailable" };
+      reasons.push(declared.hasStaleCandidate
+        ? planningReasonCodes.mainGoalRecheckNeeded
+        : planningReasonCodes.mainGoalUnavailable);
+    }
   }
   if (resolutions.some((candidate) => !candidate.trainable)) {
     reasons.push(planningReasonCodes.deferredRestriction);
@@ -507,6 +645,11 @@ export const planEmphasis = (
       goalSignature: signature,
       retainedFromPrevious: previousResolution !== undefined,
       reasonCodes: uniqueReasons(reasons),
+      ...(input.goalContinuity ? {
+        reviewDecision: !reviewDue ? "none" as const
+          : previous?.primaryGraphId === primary.focus.graphId ? "confirmed" as const : "changed" as const,
+        ...(mainGoalNotice ? { mainGoalNotice } : {}),
+      } : {}),
     },
     issues,
   };

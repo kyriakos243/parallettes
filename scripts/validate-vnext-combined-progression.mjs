@@ -146,13 +146,19 @@ assert(mediaSource.includes('import "./batchAMedia"') && mediaSource.includes('i
 assert(sourceHash(source("app/vnext/media/candidateMotionFrame.css"))
   === "b8fd8ae322eb8a5aa437d72c33bb4cb270a534305492ce82c1b6a9dedbb171d8",
 "Combined media sizing differs from the owner-accepted F player");
+// Accepted literal data is delivered as one lazily fetched chunk per batch and
+// registered unchanged; a static JSON import would put all of it in the shell.
 for (const letter of "BCDEF") assert(mediaSource.includes(`registerMotionGuides(batch${letter}MotionGuides)`)
-  && mediaSource.includes(`from "./acceptedBatch${letter}Motion.json"`)
-  && !mediaSource.includes(`from "../progression/batch${letter}Motion"`),
-  `Combined media entry omits exact literal registration or retains a generator fallback ${letter}`);
+  && mediaSource.includes(`await import("./acceptedBatch${letter}Motion.json")`)
+  && !mediaSource.includes(`from "./acceptedBatch${letter}Motion.json"`)
+  && !mediaSource.includes(`from "../progression/batch${letter}Motion"`)
+  && !mediaSource.includes(`import("../progression/batch${letter}Motion")`),
+  `Combined media entry omits exact lazy literal registration or retains a generator fallback ${letter}`);
 const productionSource = source("app/vnext/production/VNextProductionApp.tsx");
 assert(productionSource.includes('import "./combinedProgressionMedia"')
-  && productionSource.includes("catalogue: trainingQualityCatalogue")
+  // Goal-trust catalogue (projection 12) spreads trainingQualityCatalogue: same definitions, history and media.
+  && productionSource.includes("catalogue: goalTrustCatalogue")
+  && source("app/vnext/production/goalTrust.ts").includes("...trainingQualityCatalogue,")
   && productionSource.includes("evaluatePlanMedia: evaluateCombinedProgressionPlanMedia"),
 "Production does not select one coherent combined release");
 const uiSource = source("app/vnext/releaseCandidate/VNextReleaseCandidateApp.tsx");

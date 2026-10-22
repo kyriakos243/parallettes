@@ -9,7 +9,7 @@ import {
   ACCOUNT_SESSION_STORAGE_KEY,
   announceAccountSessionChange,
 } from "./accountSessionSignals";
-import { fetchAccountResponse } from "./accountRequest";
+import { fetchAccountResponse, syncRequestTimeoutMs } from "./accountRequest";
 
 export type SaveMode = "normal" | "practice" | "guest";
 
@@ -541,7 +541,12 @@ class ApiError extends Error {
   }
 }
 
-const apiResponse = async (path: string, init: RequestInit = {}, profileId?: string): Promise<Response> => {
+const apiResponse = async (
+  path: string,
+  init: RequestInit = {},
+  profileId?: string,
+  timeoutMs?: number,
+): Promise<Response> => {
   if (!REMOTE_API) throw new Error("Cloud sync is not configured for this deployment.");
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json");
@@ -552,7 +557,7 @@ const apiResponse = async (path: string, init: RequestInit = {}, profileId?: str
   }
   let response: Response;
   try {
-    response = await fetchAccountResponse(`${REMOTE_API}${path}`, { ...init, headers });
+    response = await fetchAccountResponse(`${REMOTE_API}${path}`, { ...init, headers }, timeoutMs ? { timeoutMs } : {});
   } catch {
     throw new Error("Network unavailable. Your changes remain saved on this device.");
   }
@@ -594,7 +599,8 @@ export const syncVNextShadowObservations = async (
   const fixedEndpointFetch: typeof fetch = async (input, init) => {
     const requestedUrl = input instanceof Request ? input.url : String(input);
     if (requestedUrl !== endpoint) throw new Error("vNext shadow sync refused an unexpected endpoint.");
-    return apiResponse("/vnext/shadow/sync", init, profileId);
+    const bodyBytes = typeof init?.body === "string" ? new TextEncoder().encode(init.body).byteLength : 0;
+    return apiResponse("/vnext/shadow/sync", init, profileId, syncRequestTimeoutMs(bodyBytes));
   };
   const transport = createAuthenticatedShadowTransport(fixedEndpointFetch, endpoint);
   return syncObservationDeltas(store, athleteId, transport, options);
@@ -796,15 +802,26 @@ export async function readLegacyProfileForVNextMigration(
 
 export type VNextPendingSignOutWork = Readonly<{
   descriptions: readonly string[];
+  /** Consent identity for unfinished local drafts ("" when none are pending). */
   fingerprint: string;
+  /** Consent identity for the exact training not yet accepted by the account. */
+  unsyncedFingerprint?: string;
 }>;
 
 export class VNextPendingWorkError extends Error {
-  constructor(readonly pendingWork: VNextPendingSignOutWork) {
-    super("Finish and save your pending training before signing out, or explicitly discard it from this device.");
+  constructor(
+    readonly pendingWork: VNextPendingSignOutWork,
+    message = "Finish and save your pending training before signing out, or explicitly discard it from this device.",
+  ) {
+    super(message);
     this.name = "VNextPendingWorkError";
   }
 }
+
+const hexDigest = async (text: string): Promise<string> => {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
 
 const pendingVNextSignOutWork = async (
   profileId: string,
@@ -851,10 +868,9 @@ const pendingVNextSignOutWork = async (
   if (descriptions.size === 0) return checked;
   // Consent applies only to these exact local drafts, including future fields.
   // A newly changed draft needs a fresh decision; no content is put in the UI.
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(stableValue(snapshot))));
   return { ...checked, pendingWork: {
     descriptions: [...descriptions],
-    fingerprint: Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join(""),
+    fingerprint: await hexDigest(JSON.stringify(stableValue(snapshot))),
   } };
 };
 
@@ -866,19 +882,21 @@ const pendingVNextSignOutWork = async (
 export async function signOutVNextAccount(
   profileId: string,
   databaseName?: string,
-  options: Readonly<{ discardPendingWorkFingerprint?: string }> = {},
+  options: Readonly<{ discardPendingWorkFingerprint?: string; discardUnsyncedFingerprint?: string }> = {},
 ): Promise<void> {
   const namespace = databaseName === VNEXT_PRODUCTION_SHADOW_DATABASE ? VNEXT_PRODUCTION_STORAGE_NAMESPACE : "vnext-rc";
   let checked: Awaited<ReturnType<typeof pendingVNextSignOutWork>> | undefined;
+  let outboxFingerprint: string | undefined;
   const requirePendingWorkDecision = async (store?: Parameters<typeof pendingVNextSignOutWork>[2]) => {
     checked = await pendingVNextSignOutWork(profileId, namespace, store);
     const pending = checked.pendingWork;
     if (pending && pending.fingerprint !== options.discardPendingWorkFingerprint) throw new VNextPendingWorkError(pending);
   };
   if (typeof indexedDB !== "undefined") {
-    const [{ createVNextShadowStore }, { parseStableId }] = await Promise.all([
+    const [{ createVNextShadowStore, unsyncedItemsFingerprint }, { parseStableId }, { describeUnsyncedItems }] = await Promise.all([
       import("./vnext/persistence/indexedDb"),
       import("./vnext/contracts"),
+      import("./vnext/ui/syncStatus"),
     ]);
     const store = createVNextShadowStore(databaseName ? { databaseName } : {});
     const athleteId = parseStableId("athlete", profileId);
@@ -889,14 +907,26 @@ export async function signOutVNextAccount(
         try {
           await syncVNextShadowObservations(store, profileId);
         } catch {
-          // The outbox check below decides whether local removal is safe. A
+          // The unsynced check below decides whether local removal is safe. A
           // transient pull failure is not data loss when every local change was
           // previously acknowledged.
         }
       }
-      const pending = await store.readSyncUpload(athleteId, 1);
-      if (pending.length > 0) {
-        throw new Error("Connect and sync this athlete before signing out so unsynced progress is not removed from this device.");
+      // Name everything the account has not accepted (including set-aside
+      // items). Removal needs an explicit choice bound to exactly these rows.
+      const unsynced = await store.readUnsyncedItems(athleteId);
+      if (unsynced.length > 0) {
+        const exact = unsyncedItemsFingerprint(unsynced);
+        const unsyncedFingerprint = await hexDigest(exact);
+        if (unsyncedFingerprint !== options.discardUnsyncedFingerprint) {
+          const drafts = await pendingVNextSignOutWork(profileId, namespace, store);
+          throw new VNextPendingWorkError({
+            descriptions: [...describeUnsyncedItems(unsynced), ...(drafts.pendingWork?.descriptions ?? [])],
+            fingerprint: drafts.pendingWork?.fingerprint ?? "",
+            unsyncedFingerprint,
+          }, "Connect and sync this athlete before signing out so unsynced progress is not removed from this device. Save a backup first if you may need it, or explicitly discard the unsynced training listed below.");
+        }
+        outboxFingerprint = exact;
       }
       // Sync may take time. Do not discard work that changed after the choice.
       await requirePendingWorkDecision(store);
@@ -922,7 +952,9 @@ export async function signOutVNextAccount(
     ? api("/auth/logout", { method: "POST" }, profileId).catch(() => undefined)
     : Promise.resolve();
   clearSession(profileId);
-  await clearVNextShadowAthlete(profileId, databaseName, checked!.signOutGuard);
+  await clearVNextShadowAthlete(profileId, databaseName, outboxFingerprint === undefined
+    ? checked!.signOutGuard
+    : { ...checked!.signOutGuard, outboxFingerprint });
   for (const [key, value] of Object.entries(checked!.localValues)) {
     if (localStorage.getItem(key) !== value) {
       throw new Error("New unfinished training arrived while signing out. Account access is locked, and that local work has been kept. Sign in again to review it.");

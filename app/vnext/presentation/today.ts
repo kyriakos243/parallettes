@@ -95,6 +95,22 @@ const blockLabel = (block: ItemExplanation["block"]): string => block === "prepa
               ? "Reset"
               : "Supporting work";
 
+/**
+ * Presentation only: the stored plan rationale is immutable and keeps its exact
+ * wording. When a shorter plan has at most one development movement there is
+ * no "other useful work", so Today does not claim there is.
+ */
+const OTHER_USEFUL_WORK = /\s*Other useful work keeps its planned dose; (?:extra sets are not|no extra sets are) added to fill time\./u;
+export const honestDurationMessage = (
+  message: string,
+  plan: Readonly<{ items: readonly Readonly<{ purpose: string }>[] }>,
+): string => {
+  const developmentItems = plan.items.filter((item) => item.purpose !== "preparation" && item.purpose !== "recovery").length;
+  return developmentItems <= 1 && OTHER_USEFUL_WORK.test(message)
+    ? message.replace(OTHER_USEFUL_WORK, " Extra sets are not added to fill time.")
+    : message;
+};
+
 const simpleExerciseReason = (explanation: ItemExplanation): string => explanation.block === "preparation"
   ? "Prepares the joints and movement pattern used later in the session."
   : explanation.block === "technical"
@@ -191,6 +207,13 @@ export const buildTodayWorkoutPresentation = (
     };
   });
   const minutes = generated.plan.intendedDurationSeconds / 60;
+  const mainGoal = generated.emphasis.mainGoalNotice;
+  const mainGoalLabel = mainGoal ? bundle.graphs.find((graph) => graph.id === mainGoal.graphId)?.label ?? "Your main goal" : undefined;
+  const goalNotice = mainGoal && mainGoalLabel
+    ? mainGoal.kind === "recheck"
+      ? `Your main goal, ${mainGoalLabel}, needs a quick re-check before it can lead your workouts again. Open Progress to check it; today trains your other goals.`
+      : `Your main goal, ${mainGoalLabel}, can’t lead today’s workout with current restrictions or prerequisites. Progress shows what it needs; today trains your other goals.`
+    : undefined;
   return {
     title: "Today's Workout",
     status: "ready",
@@ -203,7 +226,8 @@ export const buildTodayWorkoutPresentation = (
     blocks,
     durationLabel: Number.isInteger(minutes) ? `${minutes} minutes` : `${minutes.toFixed(1)} minutes`,
     ...(hasPracticeDosePolicy(generated.plan) && generated.durationException
-      ? { durationMessage: generated.durationException.message } : {}),
+      ? { durationMessage: honestDurationMessage(generated.durationException.message, generated.plan) } : {}),
+    ...(goalNotice ? { goalNotice } : {}),
     authorityNotice: "Your goals guide the focus. The system still decides the safe progression, exercise and dose from current evidence and restrictions.",
     exposesRawAlgorithmDecisions: false,
   };

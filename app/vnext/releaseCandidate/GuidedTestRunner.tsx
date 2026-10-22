@@ -5,7 +5,7 @@ import type {
   ObservationMeasurement,
 } from "../index";
 import { guidedTestPresentation } from "../assessment/presentation";
-import { VNextMotionGuide } from "../media/VNextMotionGuide";
+import { DeferredMotionGuide as VNextMotionGuide } from "../media/deferredMotion";
 import { useWorkoutClock } from "./useWorkoutClock";
 import { createGuidedTimerAudio } from "./guidedTimerAudio";
 import "./quickGuided.css";

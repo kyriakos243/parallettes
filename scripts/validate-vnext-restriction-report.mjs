@@ -47,6 +47,7 @@ const compileComponent = (path, extra = "") => {
     if (name === "../assessment/evidence") return evidence;
     if (name === "../contracts") return contracts;
     if (name === "../media/VNextMotionGuide") return { VNextMotionGuide: "OwnedMotionGuide" };
+    if (name === "../media/deferredMotion") return { DeferredMotionGuide: "OwnedMotionGuide" };
     if (name === "./SkillRoadmap") return { SkillRoadmap: "SkillRoadmap" };
     if (name === "./HistoryPanels") return { HistoryView: "HistoryView", WorkoutSavedSummary: "WorkoutSavedSummary" };
     if (name === "./sectionNavigation") return { useSectionNavigation: () => ({ section: "today", changeSection() {}, hasVisited: (section) => section === "today" }) };

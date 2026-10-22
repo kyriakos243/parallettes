@@ -71,7 +71,8 @@ const componentModule = (path) => {
     if (name === "../workoutGuidance") return load("app/vnext/workoutGuidance.ts");
     if (name === "../practiceDose") return load("app/vnext/practiceDose.ts");
     if (name === "../mixedWorkout") return mixed;
-    if (name === "./useWorkoutClock" || name === "./workoutClock" || name === "./useWorkoutRunAuthorization" || name === "./recoveryStorage") {
+    if (name === "./useWorkoutClock" || name === "./workoutClock" || name === "./useWorkoutRunAuthorization" || name === "./recoveryStorage"
+      || name === "./workoutCueAudio" || name === "./guidedTimerAudio") {
       return componentModule(resolve(dirname(sourcePath), `${name}.ts`));
     }
     if (name.endsWith(".css")) return {};
@@ -163,6 +164,7 @@ const createHost = (saved = storage(), options = {}) => {
     onStart: () => { owner.starts++; }, onFinish: (facts) => { owner.facts.push(facts); }, onClose: (started) => owner.closes.push(started) };
   if (options.onBeforeRun) owner.props.onBeforeRun = options.onBeforeRun;
   if (options.safetyVersion !== undefined) owner.props.safetyVersion = options.safetyVersion;
+  if (options.autoStart) owner.props.autoStart = true;
   Object.assign(owner.window, { scrollTo() {}, setInterval(callback, delay) {
     const id = ++owner.serial; owner.timers.set(id, { callback, delay }); return id;
   }, clearInterval: (id) => owner.timers.delete(id) });
@@ -319,8 +321,9 @@ await check("active rounds lock untouched partner while future groups accept swa
 
 await check("reaching the final set does not complete work skipped in an earlier round", () => {
   const app = createHost();
+  // Skip inside a running workout keeps the timer running; no Resume is needed.
   app.click("Start workout"); app.tick(5); app.click("Skip interval");
-  app.click("Resume"); app.tick(135);
+  app.tick(135);
   assert.equal(app.draft().intervalIndex, 6);
   assert.equal(app.draft().participationSeconds["item-a"], 50);
   assert(!app.draft().completedPlanItemIds.includes("item-a"));
@@ -354,8 +357,12 @@ await check("previous and skip preserve measured facts; skipped work never becom
   const app = createHost();
   app.click("Start workout"); app.tick(5); app.click("Skip interval");
   assert.equal(app.draft().intervalIndex, 1);
-  assert.equal(app.timers.size, 0);
+  assert(app.timers.size > 0, "Skip while running must keep the timer running");
+  assert(app.buttons().some((button) => text(button) === "Pause"), "Skip while running must not require Resume");
+  app.tick(2);
+  assert.equal(app.draft().participationSeconds["item-a"], 5, "A skipped rest earns no work participation");
   app.click("Previous interval");
+  assert.equal(app.timers.size, 0, "Previous still pauses so earlier items are re-checked");
   assert.equal(app.draft().intervalIndex, 0);
   assert.equal(app.draft().participationSeconds["item-a"], 5);
   app.click("Skip interval"); app.click("Resume"); app.tick(15);
@@ -976,5 +983,65 @@ await check("generator 6 Pike practice preserves three sets, target, rest, pause
   assert.equal(reopened.saved.getItem(activeKey), null);
   reopened.unmount();
 });
+
+for (const native of [false, true]) {
+  const name = native ? "native" : "mixed";
+  await check(`${name}: one tap from Today auto-starts once through the normal safety check`, async () => {
+    const gate = pendingAuthorization();
+    const app = createHost(storage(), { native, onBeforeRun: gate.authorize, autoStart: true });
+    app.flush(); app.flush();
+    assert.equal(gate.requests.length, 1, "Auto-start must request exactly one safety decision");
+    assert.deepEqual(new Set(gate.requests[0].request.planItemIds), new Set(plan.items.map((item) => item.id)));
+    assert.equal(app.starts, 0, "Nothing starts before the safety check passes");
+    assert(text(app.tree).includes("Checking safety…"));
+    gate.requests[0].resolve(true); await app.drain();
+    assert.equal(app.starts, 1); app.tick(3);
+    assert.equal(app.draft().elapsedSeconds, 3);
+    app.click("Pause"); app.flush();
+    assert.equal(gate.requests.length, 1, "Pausing must not trigger another automatic start");
+    app.unmount();
+  });
+  await check(`${name}: a rejected auto-start safety check leaves Start available and saves nothing`, async () => {
+    const gate = pendingAuthorization();
+    const app = createHost(storage(), { native, onBeforeRun: gate.authorize, autoStart: true });
+    gate.requests[0].reject(new Error("This workout is no longer suitable.")); await app.drain();
+    assert.equal(app.starts, 0); assert.equal(app.draft(), null); assert.equal(app.timers.size, 0);
+    assert(app.buttons().some((button) => text(button) === "Start workout" && !button.props.disabled));
+    app.unmount();
+  });
+  await check(`${name}: a restored draft never auto-starts and waits for an explicit Resume`, () => {
+    const first = createHost(storage(), { native });
+    first.click("Start workout"); first.tick(7); first.click("Pause");
+    const before = first.draft(); first.unmount();
+    const reopened = createHost(first.saved, { native, autoStart: true });
+    reopened.flush();
+    assert.deepEqual(reopened.draft(), before);
+    assert.equal(reopened.timers.size, 0, "A restored workout must stay paused");
+    assert.equal(reopened.starts, 0);
+    assert(reopened.buttons().some((button) => text(button) === "Resume"));
+    reopened.unmount();
+  });
+  await check(`${name}: skipping a running rest starts the next work interval without a new safety check`, async () => {
+    const gate = pendingAuthorization();
+    const app = createHost(storage(), { native, onBeforeRun: gate.authorize });
+    app.click("Start workout"); gate.requests[0].resolve(true); await app.drain();
+    const timeline = native
+      ? workout.structureWorkoutPlan(nativePlan, bundle).flatMap((item) => item.intervals)
+      : mixed.workoutExecutionTimeline(plan, bundle);
+    const firstRest = timeline.findIndex((interval) => interval.kind === "rest");
+    app.tick(timeline.slice(0, firstRest).reduce((sum, interval) => sum + interval.durationSeconds, 0) + 1);
+    assert.equal(app.draft().intervalIndex, firstRest); assert.equal(app.title(), "Rest");
+    const workBefore = { ...app.draft().participationSeconds };
+    app.click("Skip interval");
+    assert.equal(gate.requests.length, 1, "Skip inside an authorised running workout needs no new check");
+    assert.equal(app.draft().intervalIndex, firstRest + 1);
+    assert.notEqual(app.title(), "Rest");
+    app.tick(4);
+    const next = timeline[firstRest + 1];
+    assert.equal(app.draft().participationSeconds[next.planItemId] - (workBefore[next.planItemId] ?? 0), 4,
+      "The next work interval is measured from the skip onwards");
+    app.unmount();
+  });
+}
 
 console.log(`Workout reliability: ${checks} actual player/hook/controller lifecycle scenarios passed.`);

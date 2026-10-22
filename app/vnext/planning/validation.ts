@@ -34,7 +34,15 @@ const targetAllowed = (
     ...input.state.maintenanceNeeds,
   ].some((item) => milestoneKey(item.milestone) === key)) return true;
   const nodeState = input.state.nodeStates.find((state) => milestoneKey(state.milestone) === key);
-  return nodeState?.lifecycle === "established" && nodeState.confidence === "current";
+  if (nodeState?.lifecycle === "established" && nodeState.confidence === "current") return true;
+  // An earlier stale/contradicted established step may be reconfirmed when the
+  // emphasis explicitly chose it for reconfirmation (goal-trust stale fallback).
+  // Its own trainability decision is still validated separately below.
+  return nodeState?.lifecycle === "established"
+    && (nodeState.confidence === "stale" || nodeState.confidence === "contradicted")
+    && [input.generated.emphasis?.primary, input.generated.emphasis?.secondary, ...input.generated.emphasis?.maintenance ?? []]
+      .some((focus) => focus?.kind === "reconfirmation" && focus.targetMilestone !== undefined
+        && milestoneKey(focus.targetMilestone) === key);
 };
 
 const highUpperDomains = (

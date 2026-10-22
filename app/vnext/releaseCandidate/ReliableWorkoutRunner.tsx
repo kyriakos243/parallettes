@@ -4,6 +4,7 @@ import { useWorkoutRunAuthorization, type WorkoutRunRequest } from "./useWorkout
 import { createRecoveryStorageGuard, RecoveryStorageConflict } from "./recoveryStorage";
 import "./restrictionSafety.css";
 import { useWorkoutClock, type WorkoutPauseReason } from "./useWorkoutClock";
+import { WORKOUT_SOUND_PREFERENCE_KEY, workoutCueAudio, workoutSoundEnabled } from "./workoutCueAudio";
 import type {
   DefinitionBundle,
   IsoTimestamp,
@@ -16,7 +17,7 @@ import { structureWorkoutPlan } from "../index";
 import { workoutSwapChoices, workoutVariantLabel } from "../workoutGuidance";
 
 const VNextMotionGuide = lazy(async () => ({
-  default: (await import("../media/VNextMotionGuide")).VNextMotionGuide,
+  default: (await import("../media/deferredMotion")).DeferredMotionGuide,
 }));
 
 export type WorkoutExecutionFacts = Readonly<{
@@ -206,6 +207,7 @@ export const ReliableWorkoutRunner = ({
   safetyVersion,
   onFinish,
   onClose,
+  autoStart = false,
 }: Readonly<{
   plan: SessionPlan;
   bundle: DefinitionBundle;
@@ -217,6 +219,8 @@ export const ReliableWorkoutRunner = ({
   safetyVersion?: string;
   onFinish: (facts: WorkoutExecutionFacts) => boolean | void;
   onClose: (started: boolean) => void;
+  /** The athlete already tapped Start on Today: run the normal Start once, never for a restored draft. */
+  autoStart?: boolean;
 }>) => {
   const checkpointStorage = useMemo(() => typeof localStorage === "undefined" ? undefined
     : createRecoveryStorageGuard(activeKey(plan.athleteId)), [plan.athleteId, plan.id]);
@@ -236,10 +240,7 @@ export const ReliableWorkoutRunner = ({
   const priorSafetyVersion = useRef(safetyVersion);
   const [safetyChanged, setSafetyChanged] = useState(false);
   const [pauseReason, setPauseReason] = useState<WorkoutPauseReason | undefined>(restored?.pauseReason);
-  const [soundOn, setSoundOn] = useState(() => {
-    try { return typeof localStorage === "undefined" || localStorage.getItem("parallette25-vnext-timer-sound-v1") !== "off"; }
-    catch { return false; }
-  });
+  const [soundOn, setSoundOn] = useState(workoutSoundEnabled);
   const [swapPlanItemId, setSwapPlanItemId] = useState<PlanItemId>();
   const [swapDirection, setSwapDirection] = useState<SafeWorkoutSwap["direction"]>("similar");
   const structured = useMemo(() => structureWorkoutPlan(plan, bundle, selections), [bundle, plan, selections]);
@@ -332,6 +333,7 @@ export const ReliableWorkoutRunner = ({
   const pauseWorkout = (): boolean => {
     clock.stop();
     setRunning(false);
+    workoutCueAudio.cancel();
     return persistDraft();
   };
 
@@ -361,27 +363,10 @@ export const ReliableWorkoutRunner = ({
     }
   }, [safetyVersion]);
 
+  // Timer audio is an optional convenience; the visible timer remains authoritative.
+  // Cues reuse the page-wide context unlocked by the Start/Resume tap.
   const playCue = useCallback((frequency = 760, duration = .07): void => {
-    if (!soundOn || document.visibilityState !== "visible") return;
-    try {
-      const AudioContextConstructor = window.AudioContext
-        ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioContextConstructor) return;
-      const context = new AudioContextConstructor();
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.frequency.value = frequency;
-      gain.gain.setValueAtTime(.0001, context.currentTime);
-      gain.gain.exponentialRampToValueAtTime(.1, context.currentTime + .01);
-      gain.gain.exponentialRampToValueAtTime(.0001, context.currentTime + duration);
-      oscillator.connect(gain);
-      gain.connect(context.destination);
-      oscillator.start();
-      oscillator.stop(context.currentTime + duration + .01);
-      oscillator.addEventListener("ended", () => void context.close(), { once: true });
-    } catch {
-      // Timer audio is an optional convenience; the visible timer remains authoritative.
-    }
+    if (soundOn) workoutCueAudio.tone(frequency, duration);
   }, [soundOn]);
 
   const finish = useCallback((completeCurrent = false): void => {
@@ -440,7 +425,18 @@ export const ReliableWorkoutRunner = ({
   useEffect(() => { persistDraft(); }, [completedPlanItemIds, elapsedSeconds, intervalElapsedSeconds, intervalIndex, participation, plan.athleteId, plan.id, selections, startedAt, pauseReason]);
 
   const move = (offset: -1 | 1): void => {
-    if (pendingFinish.current || !pauseWorkout()) return;
+    if (pendingFinish.current) return;
+    // A forward skip inside a running, already-authorised workout continues like
+    // a natural interval change: every remaining item was checked when the timer
+    // started or resumed, and the per-interval clock credits only measured time.
+    // Previous still pauses, so earlier items are re-checked before they run.
+    if (offset === 1 && running && clock.isActive()) {
+      if (!persistDraft()) return;
+      setIntervalIndex((value) => Math.min(timeline.length - 1, value + 1));
+      setIntervalElapsedSeconds(0);
+      return;
+    }
+    if (!pauseWorkout()) return;
     setIntervalIndex((value) => Math.max(0, Math.min(timeline.length - 1, value + offset)));
     setIntervalElapsedSeconds(0);
   };
@@ -469,6 +465,8 @@ export const ReliableWorkoutRunner = ({
   const toggleWorkout = (): void => {
     if (running) { pauseWorkout(); return; }
     if (pendingFinish.current || checkpointFailed.current || (startedAt && !persistDraft())) return;
+    // Unlock audio inside this tap; the safety check below finishes asynchronously.
+    if (soundOn) workoutCueAudio.prepare();
     authorization.run({ selections, planItemIds: [...new Set(timeline.slice(intervalIndex).map((item) => item.planItemId))] }, () => {
       if (!persistDraft()) return false;
       setPauseReason(undefined);
@@ -482,6 +480,15 @@ export const ReliableWorkoutRunner = ({
       return true;
     });
   };
+
+  // One tap on Today already chose to start: run the ordinary Start (including
+  // its safety check) once. Restored drafts and resumes always wait for a tap.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!autoStart || autoStarted.current || startedAt || restored) return;
+    autoStarted.current = true;
+    toggleWorkout();
+  }, [autoStart]);
 
   return (
     <main className="vnext-experience vnext-rc-player" aria-labelledby="vnext-player-title">
@@ -501,10 +508,12 @@ export const ReliableWorkoutRunner = ({
                 className="vnext-rc-sound-button"
                 aria-pressed={soundOn}
                 aria-label={soundOn ? "Turn timer sound off" : "Turn timer sound on"}
-                onClick={() => setSoundOn((value) => {
-                  try { localStorage.setItem("parallette25-vnext-timer-sound-v1", value ? "off" : "on"); } catch { /* Optional preference only. */ }
-                  return !value;
-                })}
+                onClick={() => {
+                  // Turning sound on is a gesture, so it can unlock audio directly.
+                  if (!soundOn) workoutCueAudio.prepare(); else workoutCueAudio.cancel();
+                  try { localStorage.setItem(WORKOUT_SOUND_PREFERENCE_KEY, soundOn ? "off" : "on"); } catch { /* Optional preference only. */ }
+                  setSoundOn(!soundOn);
+                }}
               >{soundOn ? <Volume2 aria-hidden="true" /> : <VolumeX aria-hidden="true" />}
                 <span>{soundOn ? "Sound on" : "Sound off"}</span></button>
               <button type="button" className="vnext-action" data-kind="secondary" aria-label={closeLabel} onClick={() => { if (!pendingFinish.current && pauseWorkout()) onClose(Boolean(startedAt)); }}><X className="vnext-rc-close-icon" aria-hidden="true" /><span>{closeLabel}</span></button>
@@ -516,9 +525,9 @@ export const ReliableWorkoutRunner = ({
           </div>
 
           <section className="vnext-rc-player-grid">
-            <div className={`vnext-rc-motion${currentInterval.kind === "rest" ? " is-resting" : ""}`} role="img" aria-label={`${previewExercise.name} owned technique guide`}>
+            <div className={`vnext-rc-motion${currentInterval.kind === "rest" ? " is-resting" : ""}`} role="img" aria-label={`${previewExercise.name} exercise demonstration`}>
               {motionPreset ? (
-                <Suspense fallback={<div className="motion-loading" aria-label="Loading owned movement guide" />}>
+                <Suspense fallback={<div className="motion-loading" aria-label="Loading exercise demonstration" />}>
                   <VNextMotionGuide preset={motionPreset} />
                 </Suspense>
               ) : <p role="alert">This movement has no technically approved guide. The session cannot continue.</p>}

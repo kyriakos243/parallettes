@@ -1,8 +1,9 @@
-import { trainingQualityCatalogue } from "./trainingQuality";
+import { goalTrustCatalogue } from "./goalTrust";
 import { useEffect, useMemo, useState } from "react";
 import "./combinedProgressionMedia";
+import { prepareCombinedProgressionPlanMedia } from "./combinedProgressionMedia";
 import { evaluateCombinedProgressionPlanMedia } from "./combinedProgressionRelease";
-import { generateUsefulDoseSessionPlan, generateUsefulDoseCustomPlan } from "../planning/feedbackDose";
+import { generateGoalTrustSessionPlan, generateGoalTrustCustomPlan } from "../planning/feedbackDose";
 import { isStableId, parseStableId, type VNextShadowStore } from "../index";
 import {
   VNextAccountGate,
@@ -66,15 +67,32 @@ const VNextProductionAccountGate = (props: AccountGateProps) => {
             : "Your on-device v1.2 profile will be snapshotted and converted once before vNext opens.",
         }];
       });
+      // Device-only training saved earlier on this device stays reachable after
+      // an account was used here (it has no v1.2 profile to list it).
+      let deviceOnly: readonly VNextLocalIdentityChoice[] = [];
+      try {
+        const [{ createVNextShadowStore }, { deviceOnlyAthleteChoices }] = await Promise.all([
+          import("../persistence/indexedDb"),
+          import("./deviceOnlyAthletes"),
+        ]);
+        const shadow = createVNextShadowStore({ databaseName: props.shadowDatabaseName ?? PRODUCTION_SHADOW_DATABASE });
+        try {
+          deviceOnly = deviceOnlyAthleteChoices(await shadow.listAthletes(), new Set(available.map(({ identity }) => identity.athleteId)));
+        } finally {
+          shadow.close();
+        }
+      } catch {
+        // Listing is a convenience; the existing choices remain available.
+      }
       if (active) {
-        setChoices(available);
+        setChoices([...available, ...deviceOnly]);
         setLoaded(true);
       }
     }).catch(() => {
       if (active) setLoaded(true);
     });
     return () => { active = false; };
-  }, [props.current]);
+  }, [props.current, props.shadowDatabaseName]);
 
   if (!loaded) {
     return (
@@ -175,13 +193,14 @@ const prepareProductionAthlete = async ({
 
 const PRODUCTION_DEPLOYMENT: VNextApplicationDeployment = {
   kind: "production",
-  catalogue: trainingQualityCatalogue,
-  workoutGenerators: { generateSession: generateUsefulDoseSessionPlan, generateCustomSession: generateUsefulDoseCustomPlan },
+  catalogue: goalTrustCatalogue,
+  workoutGenerators: { generateSession: generateGoalTrustSessionPlan, generateCustomSession: generateGoalTrustCustomPlan },
   evaluatePlanMedia: evaluateCombinedProgressionPlanMedia,
+  preparePlanMedia: prepareCombinedProgressionPlanMedia,
   productKicker: "Parallette25",
-  openingMessage: "Opening your evidence-led training…",
+  openingMessage: "Opening your training…",
   bannerTitle: "Parallette25",
-  bannerDetail: "evidence-led training · offline ready",
+  bannerDetail: "works offline",
   accountPresentation: PRODUCTION_PRESENTATION,
   AccountGate: VNextProductionAccountGate,
   prepareAthlete: prepareProductionAthlete,

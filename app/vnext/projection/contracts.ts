@@ -115,6 +115,13 @@ export type ProjectionPolicy = Readonly<{
   persistentDifficulty?: boolean;
   /** Current scoped symptom interpretation; historical policy replay is unchanged. */
   scopedSymptomRecovery?: boolean;
+  /**
+   * Goal-trust placement: an earlier guided check delays only a repeat of the
+   * same exercise; workout exposures keep the shared high-domain rule.
+   */
+  guidedCheckRecoveryByExercise?: boolean;
+  /** Goal-trust placement: show the main goal's available checks before supporting goals. */
+  mainGoalFirstPlacementReview?: boolean;
 }>;
 
 export type AdditionalEquipmentRule = Readonly<{
