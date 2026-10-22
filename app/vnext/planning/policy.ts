@@ -54,7 +54,17 @@ export const planningReasonCodes = {
   incompatibleHighLoad: reason("planning-incompatible-high-load"),
   technicalOrdering: reason("planning-technical-ordering"),
   durationInvalid: reason("planning-duration-invalid"),
+  mainGoalRecheckNeeded: reason("planning-main-goal-recheck-needed"),
+  mainGoalUnavailable: reason("planning-main-goal-unavailable"),
 } as const;
+
+/**
+ * Additional planning-policy reference carried by new plans. Execution and
+ * dose stay mixed generator 6, so capability-4 readers replay these plans
+ * unchanged; this reference records the goal-continuity selection rules.
+ */
+export const GOAL_TRUST_PLANNING_POLICY_ID = parseStableId("policy", "vnext-goal-trust-planning");
+export const GOAL_TRUST_PLANNING_POLICY_VERSION = parseDefinitionVersion(1);
 
 export const highUpperLimbDomains = [
   "forward-straight-arm-upper-limb",

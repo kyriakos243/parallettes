@@ -34,11 +34,17 @@ import {
   type ObservationExportBundle,
   type ProjectionCacheEntry,
   type ProjectionCacheLookup,
+  type LocalAthleteSummary,
   type ProjectionSources,
   type SyncDeltaResponse,
   type SyncEntityKind,
+  type SyncHold,
+  type SyncHoldRequest,
+  type SyncHoldResolution,
+  type SyncItemRef,
   type SyncUploadItem,
   type TrainingResetTombstone,
+  type UnsyncedItem,
   type VNextShadowStore,
   type VNextSignOutClearGuard,
 } from "./contracts";
@@ -78,7 +84,7 @@ type StoredMutable<T> = {
   migrationRunId?: string;
 };
 
-type StoredOutbox = SyncUploadItem & { athleteId: AthleteId };
+type StoredOutbox = SyncUploadItem & { athleteId: AthleteId; hold?: SyncHold };
 type StoredSyncState = { athleteId: AthleteId; cursor: number };
 
 export class VNextEntityConflictError extends Error {
@@ -397,9 +403,22 @@ const putOutbox = async (
   athleteId: AthleteId,
   item: SyncUploadItem,
 ): Promise<void> => {
-  const stored: StoredOutbox = { athleteId, ...item };
-  await requestResult(transaction.objectStore(STORES.outbox).put(stored));
+  const store = transaction.objectStore(STORES.outbox);
+  // Re-queuing the exact same version (converter promotion, repeated import)
+  // keeps an existing hold; a new version replaces the row and its hold.
+  const existing = await requestResult(store.get(outboxKey(athleteId, item.kind, item.id))) as StoredOutbox | undefined;
+  const stored: StoredOutbox = existing?.hold && existing.hash === item.hash
+    ? { athleteId, ...item, hold: existing.hold }
+    : { athleteId, ...item };
+  await requestResult(store.put(stored));
 };
+
+/** One deterministic text identity of the exact unsynced rows, for discard consent. */
+export const unsyncedItemsFingerprint = (
+  items: readonly Pick<UnsyncedItem, "kind" | "id" | "hash" | "state">[],
+): string => canonicalJson([...items]
+  .map(({ kind, id, hash, state }) => ({ kind, id, hash, state }))
+  .sort((left, right) => compareCodeUnits(`${left.kind}:${left.id}`, `${right.kind}:${right.id}`)));
 
 const invalidateCache = async (transaction: IDBTransaction, athleteId: AthleteId): Promise<void> => {
   await requestResult(transaction.objectStore(STORES.cache).delete(athleteId));
@@ -667,9 +686,12 @@ const compareOutboxRows = (left: StoredOutbox, right: StoredOutbox): number =>
   || compareCodeUnits(left.id, right.id);
 
 const pendingDependencyKeys = (
-  item: StoredOutbox,
+  item: SyncUploadItem,
   pending: ReadonlySet<string>,
-): readonly string[] => {
+): readonly string[] => [...new Set(itemDependencyKeys(item).filter((key) => pending.has(key)))];
+
+/** Every entity this item refers to and cannot be meaningful without. */
+const itemDependencyKeys = (item: SyncUploadItem): readonly string[] => {
   const candidates: string[] = [];
   if (item.kind === "migration-run") {
     candidates.push(`legacy-snapshot:${(item.payload as MigrationRun).snapshotId}`);
@@ -690,8 +712,36 @@ const pendingDependencyKeys = (
     candidates.push(`session-plan:${record.planId}`);
     if (record.supersedesRecordId) candidates.push(`session-record:${record.supersedesRecordId}`);
   }
-  return [...new Set(candidates.filter((key) => pending.has(key)))];
+  return candidates;
 };
+
+/** Held rows plus every row that transitively depends on one of them. */
+const blockedOutboxKeys = (rows: readonly StoredOutbox[]): ReadonlySet<string> => {
+  const keys = new Set(rows.map(outboxRowKey));
+  const blocked = new Set(rows.filter((row) => row.hold).map(outboxRowKey));
+  let changed = blocked.size > 0;
+  while (changed) {
+    changed = false;
+    for (const row of rows) {
+      const key = outboxRowKey(row);
+      if (blocked.has(key)) continue;
+      if (pendingDependencyKeys(row, keys).some((dependency) => blocked.has(dependency))) {
+        blocked.add(key);
+        changed = true;
+      }
+    }
+  }
+  return blocked;
+};
+
+const unsyncedView = (row: StoredOutbox, blocked: ReadonlySet<string>): UnsyncedItem => ({
+  kind: row.kind,
+  id: row.id,
+  hash: row.hash,
+  state: row.hold ? "held" : blocked.has(outboxRowKey(row)) ? "blocked" : "pending",
+  payload: row.payload,
+  ...(row.hold ? { hold: row.hold } : {}),
+});
 
 /**
  * Stable Kahn ordering keeps every pending dependency in an earlier upload
@@ -1803,9 +1853,176 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
     const transaction = database.transaction(STORES.outbox, "readonly");
     const rows = await allForAthlete<StoredOutbox>(transaction, STORES.outbox, athleteId);
     await transactionDone(transaction);
+    const blocked = blockedOutboxKeys(rows);
     return orderOutboxRows(rows)
+      .filter((row) => !blocked.has(outboxRowKey(row)))
       .slice(0, limit)
-      .map(({ athleteId: _athleteId, ...item }) => item);
+      .map(({ athleteId: _athleteId, hold: _hold, ...item }) => item);
+  }
+
+  async holdSyncItems(athleteId: AthleteId, holds: readonly SyncHoldRequest[]): Promise<number> {
+    const database = await this.#database();
+    const transaction = database.transaction(STORES.outbox, "readwrite");
+    try {
+      let held = 0;
+      for (const request of holds) {
+        if (!isIsoTimestamp(request.heldAt)) throw new TypeError("Invalid sync hold timestamp");
+        const key = outboxKey(athleteId, request.kind, request.id);
+        const current = await requestResult(transaction.objectStore(STORES.outbox).get(key)) as StoredOutbox | undefined;
+        // Hash-specific: a newer local version (another tab, a later edit) or a
+        // row already removed by a reset is never set aside by an older answer.
+        if (!current || current.hash !== request.hash || current.hold) continue;
+        const hold: SyncHold = {
+          reason: request.reason,
+          detail: request.detail,
+          localHash: current.hash,
+          ...(request.remoteHash ? { remoteHash: request.remoteHash } : {}),
+          stashed: [],
+          heldAt: request.heldAt,
+          ...(request.heldBuild ? { heldBuild: request.heldBuild } : {}),
+        };
+        await requestResult(transaction.objectStore(STORES.outbox).put({ ...current, hold } satisfies StoredOutbox));
+        held += 1;
+      }
+      await transactionDone(transaction);
+      return held;
+    } catch (error) {
+      return abortWith(transaction, error);
+    }
+  }
+
+  async releaseBuildHolds(athleteId: AthleteId, currentBuild: string): Promise<number> {
+    const database = await this.#database();
+    const transaction = database.transaction(STORES.outbox, "readwrite");
+    try {
+      let released = 0;
+      for (const row of await allForAthlete<StoredOutbox>(transaction, STORES.outbox, athleteId)) {
+        if (!row.hold || row.hold.reason === "conflict" || row.hold.heldBuild === currentBuild) continue;
+        const { hold: _hold, ...unheld } = row;
+        await requestResult(transaction.objectStore(STORES.outbox).put(unheld));
+        released += 1;
+      }
+      await transactionDone(transaction);
+      return released;
+    } catch (error) {
+      return abortWith(transaction, error);
+    }
+  }
+
+  async readSyncHolds(athleteId: AthleteId): Promise<readonly UnsyncedItem[]> {
+    return (await this.readUnsyncedItems(athleteId)).filter((item) => item.state === "held");
+  }
+
+  async readUnsyncedItems(athleteId: AthleteId): Promise<readonly UnsyncedItem[]> {
+    const database = await this.#database();
+    const transaction = database.transaction(STORES.outbox, "readonly");
+    const rows = await allForAthlete<StoredOutbox>(transaction, STORES.outbox, athleteId);
+    await transactionDone(transaction);
+    const blocked = blockedOutboxKeys(rows);
+    return orderOutboxRows(rows).map((row) => unsyncedView(row, blocked));
+  }
+
+  async resolveSyncHold(
+    athleteId: AthleteId,
+    ref: SyncItemRef,
+    resolution: SyncHoldResolution,
+    now: IsoTimestamp,
+  ): Promise<void> {
+    if (!isIsoTimestamp(now)) throw new TypeError("Invalid resolution timestamp");
+    const database = await this.#database();
+    const key = outboxKey(athleteId, ref.kind, ref.id);
+    // Read and hash outside the write transaction (IndexedDB closes a
+    // transaction across non-database awaits), then re-verify before writing.
+    const reading = database.transaction([STORES.outbox, STORES.intent], "readonly");
+    const row = await requestResult(reading.objectStore(STORES.outbox).get(key)) as StoredOutbox | undefined;
+    const local = await requestResult(reading.objectStore(STORES.intent).get(athleteId)) as StoredMutable<AthleteIntent> | undefined;
+    await transactionDone(reading);
+    if (!row?.hold) throw new Error("sync-hold-not-found");
+    let next: StoredMutable<AthleteIntent> | undefined;
+    let requeue = false;
+    if (resolution === "retry") {
+      // Conflicts would only conflict again; their account versions stay stashed.
+      if (row.hold.reason === "conflict") throw new Error("sync-hold-not-retryable");
+    } else {
+      // Saved workouts and checks are never replaced in-app; only the mutable
+      // goal/equipment intent can be resolved here.
+      if (ref.kind !== "athlete-intent" || row.hold.detail !== "intent-timestamp-conflict") {
+        throw new Error("sync-hold-not-resolvable-here");
+      }
+      if (!local || local.hash !== row.hash) throw new Error("sync-hold-stale");
+      const remote = row.hold.stashed.find((item) => item.kind === "athlete-intent");
+      if (resolution === "use-account-intent") {
+        if (!remote) throw new Error("sync-hold-account-version-unavailable");
+        assertValid("Athlete Intent", validateAthleteIntent(remote.payload));
+        const payload = remote.payload as AthleteIntent;
+        sameAthlete(athleteId, payload.athleteId, remote.id);
+        if (await sha256(payload) !== remote.hash) throw new TypeError("Stashed intent hash mismatch");
+        next = { athleteId, hash: remote.hash, payload };
+      } else {
+        // Keep this device's goals: a strictly later timestamp wins the
+        // documented last-write rule everywhere.
+        const floor = Math.max(
+          Date.parse(local.payload.updatedAt) + 1,
+          remote ? Date.parse((remote.payload as AthleteIntent).updatedAt) + 1 : 0,
+        );
+        const updatedAt = new Date(Math.max(Date.parse(now), floor)).toISOString() as IsoTimestamp;
+        const payload: AthleteIntent = { ...local.payload, updatedAt };
+        assertValid("Athlete Intent", validateAthleteIntent(payload));
+        next = { athleteId, hash: await sha256(payload), payload };
+        requeue = true;
+      }
+    }
+    const transaction = database.transaction([STORES.outbox, STORES.intent, STORES.cache], "readwrite");
+    try {
+      const current = await requestResult(transaction.objectStore(STORES.outbox).get(key)) as StoredOutbox | undefined;
+      const currentIntent = next
+        ? await requestResult(transaction.objectStore(STORES.intent).get(athleteId)) as StoredMutable<AthleteIntent> | undefined
+        : undefined;
+      if (!current?.hold || current.hash !== row.hash || (next && currentIntent?.hash !== local?.hash)) {
+        throw new Error("sync-hold-stale");
+      }
+      if (!next) {
+        const { hold: _hold, ...unheld } = current;
+        await requestResult(transaction.objectStore(STORES.outbox).put(unheld));
+      } else {
+        await requestResult(transaction.objectStore(STORES.intent).put(next));
+        if (requeue) {
+          await requestResult(transaction.objectStore(STORES.outbox).put({
+            athleteId, kind: "athlete-intent", id: athleteId, hash: next.hash, payload: next.payload,
+          } satisfies StoredOutbox));
+        } else {
+          await requestResult(transaction.objectStore(STORES.outbox).delete(key));
+        }
+        await invalidateCache(transaction, athleteId);
+      }
+      await transactionDone(transaction);
+    } catch (error) {
+      return abortWith(transaction, error);
+    }
+  }
+
+  async listAthletes(): Promise<readonly LocalAthleteSummary[]> {
+    const database = await this.#database();
+    const transaction = database.transaction([STORES.intent, STORES.reset, STORES.events, STORES.records], "readonly");
+    const ids = new Set<string>();
+    for (const key of await requestResult(transaction.objectStore(STORES.intent).getAllKeys())) ids.add(String(key));
+    for (const key of await requestResult(transaction.objectStore(STORES.reset).getAllKeys())) ids.add(String(key));
+    const events = await requestResult(transaction.objectStore(STORES.events).getAll()) as StoredEntity<AthleteEvidenceEvent>[];
+    const records = await requestResult(transaction.objectStore(STORES.records).getAll()) as StoredEntity<SessionRecord>[];
+    await transactionDone(transaction);
+    for (const row of events) ids.add(row.athleteId);
+    for (const row of records) ids.add(row.athleteId);
+    return [...ids].filter((id) => isStableId(id)).sort(compareCodeUnits).map((id) => {
+      const own = records.filter((row) => row.athleteId === id);
+      const latest = [...own.map((row) => row.payload.completedAt), ...events
+        .filter((row) => row.athleteId === id).map((row) => row.payload.occurredAt)]
+        .sort(compareTime).at(-1);
+      return {
+        athleteId: id as AthleteId,
+        sessionCount: own.filter((row) => row.payload.supersedesRecordId === undefined).length,
+        ...(latest ? { lastActivityAt: latest } : {}),
+      };
+    });
   }
 
   async #prepareSyncItem(athleteId: AthleteId, item: SyncUploadItem): Promise<void> {
@@ -1856,6 +2073,107 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
     }
   }
 
+  /**
+   * Returns the incoming change keys that are set aside, and stashes them on
+   * the held local row. Only changes that collide with an unsynced local row
+   * (same ID/different hash, an equal-time goal tie or a forked correction
+   * chain) and changes depending on a set-aside version are diverted. Any
+   * other collision still fails closed in the caller.
+   */
+  async #divertConflictingChanges(
+    transaction: IDBTransaction,
+    athleteId: AthleteId,
+    changes: readonly SyncUploadItem[],
+    resetAt: IsoTimestamp | undefined,
+  ): Promise<ReadonlySet<string>> {
+    const outboxRows = await allForAthlete<StoredOutbox>(transaction, STORES.outbox, athleteId);
+    if (!outboxRows.length) return new Set();
+    const outboxByKey = new Map(outboxRows.map((row) => [outboxRowKey(row), row] as const));
+    const stashedRoot = new Map<string, string>();
+    for (const row of outboxRows) {
+      for (const item of row.hold?.stashed ?? []) stashedRoot.set(outboxRowKey(item), outboxRowKey(row));
+    }
+    const divertedRoot = new Map<string, string>();
+    const additions = new Map<string, { items: SyncUploadItem[]; detail?: string; remoteHash?: string }>();
+    const divert = (change: SyncUploadItem, root: string, detail?: string, remoteHash?: string): void => {
+      divertedRoot.set(outboxRowKey(change), root);
+      const entry = additions.get(root) ?? { items: [] };
+      entry.items.push(change);
+      if (detail && !entry.detail) {
+        entry.detail = detail;
+        entry.remoteHash = remoteHash;
+      }
+      additions.set(root, entry);
+    };
+    const suppressed = (change: SyncUploadItem): boolean => change.kind === "evidence-event"
+      ? isSuppressedEvent(change.payload as AthleteEvidenceEvent, resetAt)
+      : change.kind === "session-record" && isSuppressedRecord(change.payload as SessionRecord, resetAt);
+    const storeFor = { "evidence-event": STORES.events, "session-plan": STORES.plans, "session-record": STORES.records } as const;
+
+    for (const change of changes) {
+      if (suppressed(change)) continue;
+      const key = outboxRowKey(change);
+      const local = outboxByKey.get(key);
+      if (change.kind === "athlete-intent") {
+        if (!local) continue;
+        const stored = await requestResult(transaction.objectStore(STORES.intent).get(athleteId)) as StoredMutable<AthleteIntent> | undefined;
+        if (stored && stored.hash === local.hash && stored.hash !== change.hash
+          && compareTime((change.payload as AthleteIntent).updatedAt, stored.payload.updatedAt) === 0) {
+          divert(change, key, "intent-timestamp-conflict", change.hash);
+        }
+        continue;
+      }
+      if (change.kind !== "evidence-event" && change.kind !== "session-plan" && change.kind !== "session-record") continue;
+      if (local && local.hash !== change.hash) {
+        const stored = await requestResult(transaction.objectStore(storeFor[change.kind]).get(
+          entityKey(athleteId, change.id),
+        )) as StoredEntity<unknown> | undefined;
+        if (stored?.hash === local.hash) divert(change, key, "immutable-id-conflict", change.hash);
+        continue;
+      }
+      if (change.kind === "session-record") {
+        const parentId = (change.payload as SessionRecord).supersedesRecordId;
+        const fork = parentId ? outboxRows.find((row) => row.kind === "session-record" && row.id !== change.id
+          && (row.payload as SessionRecord).supersedesRecordId === parentId) : undefined;
+        if (fork) divert(change, outboxRowKey(fork), "record-chain-fork", change.hash);
+      }
+    }
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const change of changes) {
+        const key = outboxRowKey(change);
+        if (divertedRoot.has(key) || change.kind === "reset-tombstone") continue;
+        for (const dependency of itemDependencyKeys(change)) {
+          const root = divertedRoot.get(dependency) ?? stashedRoot.get(dependency);
+          if (!root) continue;
+          divert(change, root);
+          changed = true;
+          break;
+        }
+      }
+    }
+    const heldAt = new Date().toISOString() as IsoTimestamp;
+    for (const [root, entry] of additions) {
+      const row = outboxByKey.get(root)!;
+      const existing = row.hold;
+      const known = new Set((existing?.stashed ?? []).map((item) => `${outboxRowKey(item)}:${item.hash}`));
+      const stashed = [...(existing?.stashed ?? []), ...entry.items.filter((item) => !known.has(`${outboxRowKey(item)}:${item.hash}`))];
+      const directConflict = entry.detail !== undefined;
+      const hold: SyncHold = {
+        reason: directConflict ? "conflict" : existing?.reason ?? "conflict",
+        detail: directConflict ? entry.detail! : existing?.detail ?? "depends-on-set-aside",
+        localHash: existing?.localHash ?? row.hash,
+        ...(entry.remoteHash ?? existing?.remoteHash ? { remoteHash: entry.remoteHash ?? existing?.remoteHash } : {}),
+        stashed,
+        heldAt: existing?.heldAt ?? heldAt,
+        ...(existing?.heldBuild && !directConflict ? { heldBuild: existing.heldBuild } : {}),
+      };
+      await requestResult(transaction.objectStore(STORES.outbox).put({ ...row, hold } satisfies StoredOutbox));
+    }
+    return new Set(divertedRoot.keys());
+  }
+
   async applySyncDelta(athleteId: AthleteId, delta: SyncDeltaResponse): Promise<void> {
     if (delta.schemaVersion !== VNEXT_PERSISTENCE_SCHEMA_VERSION
       || !Number.isSafeInteger(delta.cursor)
@@ -1877,20 +2195,35 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
     const transaction = database.transaction(Object.values(STORES), "readwrite");
     try {
       if (delta.resetTombstone && resetHash) await this.#putReset(transaction, delta.resetTombstone, resetHash, false);
+      for (const change of delta.changes.filter(({ kind }) => kind === "reset-tombstone")) {
+        await this.#putReset(transaction, change.payload as TrainingResetTombstone, change.hash, false, change.migrationRunId);
+      }
+      // Reset first, then set aside only the account versions that cannot sit
+      // beside an unsynced local version (and anything built on them). Every
+      // other change applies and the cursor advances.
+      const diverted = await this.#divertConflictingChanges(
+        transaction, athleteId, delta.changes, (await this.#currentReset(transaction, athleteId))?.payload.resetAt,
+      );
       const changesByKind = new Map<SyncEntityKind, SyncUploadItem[]>();
       for (const change of delta.changes) {
+        if (change.kind === "reset-tombstone" || diverted.has(outboxRowKey(change))) continue;
         const list = changesByKind.get(change.kind) ?? [];
         list.push(change);
         changesByKind.set(change.kind, list);
-      }
-      for (const change of changesByKind.get("reset-tombstone") ?? []) {
-        await this.#putReset(transaction, change.payload as TrainingResetTombstone, change.hash, false, change.migrationRunId);
       }
       for (const change of changesByKind.get("legacy-snapshot") ?? []) {
         await this.#putSnapshot(transaction, change.payload as LegacyMigrationSnapshot, change.hash, false);
       }
       for (const change of changesByKind.get("athlete-intent") ?? []) {
         await this.#putIntent(transaction, change.payload as AthleteIntent, change.hash, false, change.migrationRunId);
+        // Newer goals from the account supersede a set-aside older local version.
+        const applied = await requestResult(transaction.objectStore(STORES.intent).get(athleteId)) as StoredMutable<AthleteIntent> | undefined;
+        const queued = await requestResult(transaction.objectStore(STORES.outbox).get(
+          outboxKey(athleteId, "athlete-intent", athleteId),
+        )) as StoredOutbox | undefined;
+        if (applied?.hash === change.hash && queued?.hold && queued.hash !== change.hash) {
+          await requestResult(transaction.objectStore(STORES.outbox).delete(outboxKey(athleteId, "athlete-intent", athleteId)));
+        }
       }
       const reset = await this.#currentReset(transaction, athleteId);
       const incomingEvents = new Map((changesByKind.get("evidence-event") ?? [])
@@ -1945,6 +2278,8 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
       )).map((row) => [row.id, row] as const));
       for (const change of changesByKind.get("session-record") ?? []) {
         const record = change.payload as SessionRecord;
+        // A reset-suppressed incoming record is never applied, so it cannot conflict.
+        if (isSuppressedRecord(record, reset?.payload.resetAt)) continue;
         const incoming: StoredEntity<SessionRecord> = {
           athleteId,
           id: record.id,
@@ -2049,7 +2384,12 @@ class IndexedDbVNextShadowStore implements VNextShadowStore {
       if (signOutGuard) {
         const pending = await allForAthlete<StoredOutbox>(transaction, STORES.outbox, athleteId);
         const draft = await requestResult(transaction.objectStore(STORES.assessmentDrafts).get(athleteId)) as AssessmentDraft | undefined;
-        if (pending.length > 0 || canonicalJson(draft ?? null) !== canonicalJson(signOutGuard.assessmentDraft)) {
+        // Unsynced rows may be cleared only when they are exactly the rows the
+        // athlete explicitly chose to discard; anything newer keeps everything.
+        const blocked = blockedOutboxKeys(pending);
+        const outboxAccepted = pending.length === 0 || (signOutGuard.outboxFingerprint !== undefined
+          && unsyncedItemsFingerprint(pending.map((row) => unsyncedView(row, blocked))) === signOutGuard.outboxFingerprint);
+        if (!outboxAccepted || canonicalJson(draft ?? null) !== canonicalJson(signOutGuard.assessmentDraft)) {
           throw new Error("New training arrived while signing out. Account access is locked, and your local progress has been kept. Sign in again to review and sync it before signing out.");
         }
       }

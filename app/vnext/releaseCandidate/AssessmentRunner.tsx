@@ -18,7 +18,7 @@ import {
   guidedTestPresentation,
   placementResponseOptions,
 } from "../assessment/presentation";
-import { VNextMotionGuide } from "../media/VNextMotionGuide";
+import { DeferredMotionGuide as VNextMotionGuide } from "../media/deferredMotion";
 import "./placementSetup.css";
 import { isQuickSetupContext } from "../assessment/quickSetup";
 import { selectedAssessmentGoals } from "../assessment/flow";

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { AssessmentDraft, AssessmentReview, BenchmarkMetric, DefinitionBundle, GuidedTestOffer } from "../index";
 import { guidedTestPresentation } from "../assessment/presentation";
-import { VNextMotionGuide } from "../media/VNextMotionGuide";
+import { DeferredMotionGuide as VNextMotionGuide } from "../media/deferredMotion";
 import "./quickPlacementReview.css";
 
 export type QuickPlacementReviewProps = Readonly<{
@@ -134,6 +134,8 @@ export const QuickPlacementReview = ({ draft, bundle, review, busy = false, onCo
 
     {!hasSavedChecks && recommended && <p className="vnext-help">Your answers suggest a starting point. We’ll use one check at a time to confirm useful practice.</p>}
     {recommended && <CheckPreview offer={recommended} bundle={bundle} busy={busy} onOpen={onGuidedTestRequested} optional={hasSavedChecks} />}
+    {/* Checks are optional: skipping them must be as visible as starting them. */}
+    {!hasSavedChecks && recommended && <button type="button" className="vnext-action vnext-quick-check-later" data-kind="secondary" disabled={busy} onClick={onCommit}>Check later — see my workout</button>}
 
     {!recommended && !review.checksComplete && <p className="vnext-quick-review-status" role="status">{firstBlocked?.blockers.length
       ? blockerLabel(firstBlocked.blockers[0]!)
@@ -149,7 +151,6 @@ export const QuickPlacementReview = ({ draft, bundle, review, busy = false, onCo
         {goals.length > 1 && <p><strong>Supporting goals:</strong> {goals.slice(1).map(goalLabel).join(", ")}</p>}
         <p className="vnext-help">Choosing a movement does not mark it as achieved. Advanced skills keep their full safety and confirmation checks.</p>
         {otherChecks.map((offer) => <OtherCheck key={offer.protocolId} offer={offer} bundle={bundle} busy={busy} onOpen={onGuidedTestRequested} />)}
-        {!hasSavedChecks && recommended && <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={onCommit}>Check later — see my workout</button>}
       </div>}
     </details>
   </div>;

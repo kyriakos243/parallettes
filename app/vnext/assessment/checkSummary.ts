@@ -1,10 +1,11 @@
 import type { AthleteEvidenceEvent, DefinitionBundle, DerivedAthleteState } from "../contracts";
 import type { AssessmentDraft, AssessmentReview } from "./contracts";
-import { placementEntryRuleFor, placementReadinessSatisfied, placementSubjectDemonstrated } from "../placementEntry";
+import { placementEntryRuleFor, placementEntryRules, placementReadinessSatisfied, placementSubjectDemonstrated, type PlacementEntryRule } from "../placementEntry";
 
 /** Read-only view of active guided facts. No workout record or invented activity time. */
 export const placementCheckSummary = (draft: AssessmentDraft, bundle: DefinitionBundle, state: DerivedAthleteState,
-  events: readonly AthleteEvidenceEvent[]): Pick<AssessmentReview, "checkedToday" | "nextPracticeLabels"> => {
+  events: readonly AthleteEvidenceEvent[], rules: readonly PlacementEntryRule[] = placementEntryRules,
+): Pick<AssessmentReview, "checkedToday" | "nextPracticeLabels"> => {
   if (draft.policyVersion !== 2) return {};
   const active = new Set(state.recentLoad.exposures.filter((load) => load.occurredAt.slice(0, 10) === state.asOf.slice(0, 10)
     && load.occurredAt >= draft.createdAt).flatMap((load) => load.source.kind === "evidence-event" ? [load.source.eventId] : []));
@@ -23,7 +24,7 @@ export const placementCheckSummary = (draft: AssessmentDraft, bundle: Definition
     const protocolId = answer.value.protocolId;
     const protocol = bundle.benchmarkProtocols.find((item) => item.id === protocolId);
     if (!protocol || !placementSubjectDemonstrated(protocol.subject, state)
-      || !placementReadinessSatisfied(placementEntryRuleFor(protocol.subject), bundle, state)) return [];
+      || !placementReadinessSatisfied(placementEntryRuleFor(protocol.subject, rules), bundle, state, rules)) return [];
     return [protocol.label];
   });
   return { checkedToday, nextPracticeLabels };

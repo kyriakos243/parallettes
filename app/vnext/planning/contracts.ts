@@ -56,6 +56,10 @@ export type EmphasisPlan = Readonly<{
   goalSignature: string;
   retainedFromPrevious: boolean;
   reasonCodes: readonly ReasonCode[];
+  /** Goal-trust planning only. A concluded review re-baselines the advisory sample. */
+  reviewDecision?: "none" | "confirmed" | "changed";
+  /** Goal-trust planning only: the declared main goal cannot lead today. */
+  mainGoalNotice?: Readonly<{ graphId: GraphId; kind: "recheck" | "unavailable" }>;
 }>;
 
 export type SessionBlockKind =
@@ -131,6 +135,13 @@ export type GenerateSessionInput = Readonly<{
   previousEmphasis?: PreviousEmphasis;
   /** Current generator only. Native saved-plan readers keep their original ordering. */
   preferUnfinishedTargets?: boolean;
+  /**
+   * Goal-trust planning only: the declared main goal leads unless it is
+   * untrainable or was trained within the 48-hour high-load window, a deferral
+   * never repeats on consecutive samples, emphasis reviews conclude, and a
+   * blocked stale node falls back to a trainable node in the same family.
+   */
+  goalContinuity?: boolean;
 }>;
 
 export type PlannedTrainability = Readonly<{

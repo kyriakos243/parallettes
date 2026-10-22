@@ -56,6 +56,7 @@ const componentModule = (path) => {
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment: "Fragment" };
     if (name === "../assessment/presentation") return { guidedTestPresentation };
     if (name === "../media/VNextMotionGuide") return { VNextMotionGuide: "OwnedMotionGuide" };
+    if (name === "../media/deferredMotion") return { DeferredMotionGuide: "OwnedMotionGuide" };
     if (name.endsWith(".css")) return {};
     if (name === "./useWorkoutClock" || name === "./workoutClock" || name === "./guidedTimerAudio") return componentModule(resolve(dirname(sourcePath), `${name}.ts`));
     throw new Error(`Unexpected guided-check import ${name}`);

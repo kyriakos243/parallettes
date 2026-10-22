@@ -1,0 +1,57 @@
+/* UX polish batch: small page-wide rules shared by every vNext screen.
+   phase8.css and phase9.css are byte-pinned as part of the owner-reviewed
+   player (progression/batch*ReviewManifest.ts), so readability fixes are
+   overrides here. Each selector is prefixed with `html` so it wins on
+   specificity whatever order the stylesheets load in. Only text size and
+   focus colour change; layout, motion guides and timing are untouched. */
+
+/* The browser's default 8px body margin framed every screen in white and left a
+   strip under the Home Screen status bar. vNext screens provide their own gutters. */
+body { margin: 0; }
+
+/* Rapid taps on Skip, Pause or swap controls must never trigger double-tap zoom.
+   Pinch zoom stays available. */
+.vnext-experience :is(button, summary, label, select, a, input[type="checkbox"], input[type="radio"]),
+.vnext-section-navigation button,
+.vnext-rc-banner :is(button, summary) {
+  touch-action: manipulation;
+}
+
+/* Skipping the placement check is as visible as starting it. */
+.vnext-quick-check-later { width: 100%; margin-top: 8px; }
+
+/* Keyboard focus: solid teal (about 5:1 on the page) instead of a 36% tint. */
+html .vnext-experience button:focus-visible,
+html .vnext-experience input:focus-visible,
+html .vnext-experience textarea:focus-visible,
+html .vnext-experience summary:focus-visible {
+  outline: 3px solid var(--vnext-teal);
+  outline-offset: 3px;
+}
+
+/* No shipped text below 12px (overrides phase8.css 10-11px labels). */
+html .vnext-today-meta span,
+html .vnext-session-timeline span,
+html .vnext-session-timeline strong,
+html .vnext-session-timeline small,
+html .vnext-plan-time small,
+html .vnext-swap-tabs button,
+html .vnext-swap-option small,
+html .vnext-badge,
+html .vnext-current-next span,
+html .vnext-chip,
+html .vnext-review-copy legend span,
+html .vnext-rc-test-facts strong,
+html .vnext-rc-sequence li span {
+  font-size: 12px;
+}
+@media (max-width: 520px) {
+  html .vnext-review-copy .vnext-radio-row label { font-size: 12px; }
+}
+
+/* Compact phone and short-landscape player (overrides phase9.css 9-10px labels). */
+@media (max-width: 760px), (max-width: 1100px) and (max-height: 500px) and (orientation: landscape) {
+  html .vnext-rc-player-header .vnext-kicker { font-size: 12px; letter-spacing: .04em; }
+  html .vnext-rc-timer span { font-size: 12px; }
+  html .vnext-rc-timer small { max-width: 160px; font-size: 12px; }
+}

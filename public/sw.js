@@ -39,7 +39,13 @@ const precache = async () => {
 
   const urls = [...new Set([...shell, ...manifest.assets.map(appUrl)])];
   const cache = await caches.open(CACHE);
-  await cache.addAll(urls.map((url) => new Request(url, { cache: "reload" })));
+  // Unhashed shell files must be fresh. Vite assets carry a content hash in
+  // their name, so an HTTP-cached copy is byte-identical: reuse it instead of
+  // downloading what the page has just fetched a second time.
+  const hashedAssets = new URL("assets/", base).pathname;
+  await cache.addAll(urls.map((url) => new Request(url, {
+    cache: new URL(url).pathname.startsWith(hashedAssets) ? "default" : "reload",
+  })));
   const cachedManifest = await (await cache.match(assetManifestUrl.href)).json();
   const cachedHtml = await (await cache.match(base.href)).text();
   if (cachedManifest.buildId !== BUILD_ID || cachedManifest.channel !== CACHE_CHANNEL

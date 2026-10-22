@@ -1,13 +1,43 @@
-import { parseDefinitionVersion, parseStableId } from "../contracts";
+import { parseDefinitionVersion, parseStableId, type ReasonCode } from "../contracts";
 import { structureWorkoutItem } from "../workoutUx";
 import type { GenerateSessionInput, GeneratedSession } from "./contracts";
 import { generateMixedVNextSession, generateMixedVNextCustomSession } from "./mixed";
 import type { VNextCustomContentFilter, VNextCustomSessionMinutes } from "./custom";
-import { planningReasonCodes } from "./policy";
+import { GOAL_TRUST_PLANNING_POLICY_ID, GOAL_TRUST_PLANNING_POLICY_VERSION, planningReasonCodes } from "./policy";
 import { stableHash } from "./utils";
 import { projectionReasonCodes } from "../projection/policy";
 import { limitUsefulDose } from "./usefulDose";
 import { capPracticeSession, PRACTICE_DOSE_LIMIT } from "./practiceDose";
+
+type ReductionCause = "restriction" | "recheck" | "recent-load" | "feedback" | "safety";
+
+/** Goal-trust plans name the actual cause of a smaller dose instead of always citing feedback. */
+const reductionCause = (codes: readonly ReasonCode[]): ReductionCause => {
+  const has = (code: ReasonCode) => codes.includes(code);
+  if (has(projectionReasonCodes.activeRestriction) || has(projectionReasonCodes.postClearance)) return "restriction";
+  if (has(projectionReasonCodes.staleEvidence) || has(projectionReasonCodes.stale)
+    || has(projectionReasonCodes.contradictedEvidence) || has(projectionReasonCodes.contradicted)) return "recheck";
+  if (has(projectionReasonCodes.repeatedDifficultPerformance) || has(projectionReasonCodes.recentDifficultPerformance)) return "feedback";
+  if (has(projectionReasonCodes.recentHighLoad)) return "recent-load";
+  return "safety";
+};
+
+const causePhrase: Readonly<Record<ReductionCause, string>> = {
+  restriction: "a current restriction",
+  recheck: "a skill that needs a re-check",
+  "recent-load": "recent demanding work",
+  feedback: "recent workout feedback",
+  safety: "current safety checks",
+};
+
+const capitalise = (value: string): string => `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+const joinCauses = (causes: readonly ReductionCause[]): string => {
+  const phrases = [...new Set(causes)].sort().map((cause) => causePhrase[cause]);
+  return phrases.length <= 1 ? phrases[0] ?? causePhrase.safety
+    : `${phrases.slice(0, -1).join(", ")} and ${phrases[phrases.length - 1]}`;
+};
+
+type DoseOptions = Readonly<{ goalTrust?: boolean }>;
 
 /**
  * Mixed generator v2 changes newly generated plans only. A modified development
@@ -17,11 +47,13 @@ import { capPracticeSession, PRACTICE_DOSE_LIMIT } from "./practiceDose";
  * guidance. Its separate immutable identity keeps native v2 replay unchanged.
  * Version 4 retains that dose and records the unfinished-first focus policy.
  */
-const applyDose = (input: GenerateSessionInput, generated: GeneratedSession, policyVersion: 2 | 3 | 4 | 5 | 6): GeneratedSession => {
+const applyDose = (input: GenerateSessionInput, generated: GeneratedSession, policyVersion: 2 | 3 | 4 | 5 | 6,
+  options: DoseOptions = {}): GeneratedSession => {
   if (!generated.ok || !generated.plan) return generated;
   const original = generated.plan;
   const version = parseDefinitionVersion(policyVersion);
   const explanations = new Map(generated.itemExplanations.map((item) => [item.planItemId, item]));
+  const reducedCauses: ReductionCause[] = [];
   const entries = original.items.map((item) => {
     const explanation = explanations.get(item.id)!;
     const evaluation = generated.trainabilityUsed.find((entry) => entry.exerciseId === item.exerciseId
@@ -45,23 +77,39 @@ const applyDose = (input: GenerateSessionInput, generated: GeneratedSession, pol
     const retained = new Set(sets.slice(0, retainedCount));
     const plannedSeconds = structured.intervals.filter((interval) => retained.has(interval.set))
       .reduce((total, interval) => total + interval.durationSeconds, 0);
+    const cause = reductionCause(evaluation.reasonCodes);
+    if (retainedCount < sets.length) reducedCauses.push(cause);
+    const lead = options.goalTrust ? capitalise(causePhrase[cause]) : "Current feedback";
     return { item: { ...item, plannedSeconds }, explanation: { ...explanation,
-      whyIntensity: `Current feedback calls for less work: ${retainedCount} instead of ${sets.length} planned sets, with the same target and rest per set.${recoveryAdvice}` } };
+      whyIntensity: `${lead} calls for less work: ${retainedCount} instead of ${sets.length} planned sets, with the same target and rest per set.${recoveryAdvice}` } };
   });
   const actualSeconds = entries.reduce((total, entry) => total + entry.item.plannedSeconds, 0);
   const reduced = actualSeconds < original.intendedDurationSeconds;
+  const causes = joinCauses(reducedCauses);
+  const plural = new Set(reducedCauses).size > 1;
   const durationException = reduced ? {
     targetSeconds: generated.durationException?.targetSeconds ?? original.intendedDurationSeconds,
     actualSeconds,
     reasonCode: planningReasonCodes.doseModified,
-    message: policyVersion === 6 && generated.durationException?.reasonCode === PRACTICE_DOSE_LIMIT
+    message: options.goalTrust
+      ? generated.durationException?.reasonCode === PRACTICE_DOSE_LIMIT
+        ? `${generated.durationException.message} ${capitalise(causes)} ${plural ? "reduce" : "reduces"} the sets further; removed work is not replaced.`
+        : `Today's workout is shorter because ${causes} ${plural ? "call" : "calls"} for fewer sets. The removed work is not replaced.`
+      : policyVersion === 6 && generated.durationException?.reasonCode === PRACTICE_DOSE_LIMIT
       ? `${generated.durationException.message} Current feedback reduces the sets further; removed work is not replaced.`
       : policyVersion === 5 && generated.durationException?.reasonCode === PRACTICE_DOSE_LIMIT
       ? "Today's workout is shorter because wall-line practice has a set limit and current feedback calls for fewer sets. Planned rest is retained; removed work is not replaced."
       : "Today's workout is shorter because current feedback calls for fewer sets. The removed work is not replaced.",
   } : generated.durationException;
-  const definitionReferences = original.definitionReferences.map((reference) => reference.kind === "policy" && reference.id === original.generatorPolicyId
+  const versionedReferences = original.definitionReferences.map((reference) => reference.kind === "policy" && reference.id === original.generatorPolicyId
     ? { ...reference, version } : reference);
+  // Goal-trust plans keep generator-6 execution identity and add one planning
+  // reference, so capability-4 readers replay them while IDs stay distinct.
+  const definitionReferences = options.goalTrust
+    ? [...versionedReferences.filter((reference) => !(reference.kind === "policy" && reference.id === GOAL_TRUST_PLANNING_POLICY_ID)),
+      { kind: "policy" as const, id: GOAL_TRUST_PLANNING_POLICY_ID, version: GOAL_TRUST_PLANNING_POLICY_VERSION }]
+      .sort((left, right) => left.kind.localeCompare(right.kind) || left.id.localeCompare(right.id))
+    : versionedReferences;
   const rationale = original.rationale.map((reason) => {
     if (reduced && ([planningReasonCodes.exactDuration, planningReasonCodes.shorterSafetyException].includes(reason.code as typeof planningReasonCodes.exactDuration)
       || (policyVersion === 5 || policyVersion === 6) && reason.code === PRACTICE_DOSE_LIMIT)) {
@@ -140,4 +188,23 @@ export const generateUsefulDoseCustomPlan = (input: GenerateSessionInput, minute
   const today = generateMixedVNextSession(current);
   return applyDose(current, limitUsefulDose(current,
     generateMixedVNextCustomSession(current, minutes, contentFilter), today), 6);
+};
+
+/**
+ * Goal-trust planning: generator-6 execution, dose caps and feedback order are
+ * unchanged; emphasis keeps the declared goal leading, reviews conclude, a
+ * blocked stale node falls back within its family and reduced doses name
+ * their real cause. Native generators 1–6 remain available unchanged.
+ */
+export const generateGoalTrustSessionPlan = (input: GenerateSessionInput): GeneratedSession => {
+  const current = { ...input, preferUnfinishedTargets: true, goalContinuity: true };
+  return applyDose(current, limitUsefulDose(current, generateMixedVNextSession(current)), 6, { goalTrust: true });
+};
+
+export const generateGoalTrustCustomPlan = (input: GenerateSessionInput, minutes: VNextCustomSessionMinutes,
+  contentFilter?: VNextCustomContentFilter): GeneratedSession => {
+  const current = { ...input, preferUnfinishedTargets: true, goalContinuity: true };
+  const today = generateMixedVNextSession(current);
+  return applyDose(current, limitUsefulDose(current,
+    generateMixedVNextCustomSession(current, minutes, contentFilter), today), 6, { goalTrust: true });
 };

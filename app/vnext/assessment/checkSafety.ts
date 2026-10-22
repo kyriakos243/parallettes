@@ -2,6 +2,8 @@ import type { BenchmarkProtocol, DefinitionBundle, DemandDomain, DerivedAthleteS
 import { restrictionExposureDomains, type ProjectionPolicy } from "../projection";
 import { missingCurrentSafetyPrerequisites } from "../projection/safetyPrerequisites";
 
+const GUIDED_CHECK_REPEAT_HOURS = 48;
+
 /** Current physical safety for an exact check, independent of placement entry rules. */
 export const currentCheckSafetyBlockers = (input: Readonly<{
   protocol: BenchmarkProtocol;
@@ -31,9 +33,18 @@ export const currentCheckSafetyBlockers = (input: Readonly<{
   if ([...restrictionExposureDomains(request, variant.demand, policy)].some((domain) => restricted.has(domain))) {
     blockers.push("active-restriction");
   }
+  const sharesHighDomain = (item: NonNullable<typeof state>["recentLoad"]["exposures"][number]): boolean =>
+    Object.entries(variant.demand).some(([domain, level]) => level === "high" && item.demand[domain as DemandDomain] === "high");
+  // Goal-trust placement: a guided check delays only a repeat of the same
+  // exercise for 48 h; a workout exposure keeps the shared high-domain rule.
+  const recentHighConflict = (item: NonNullable<typeof state>["recentLoad"]["exposures"][number]): boolean =>
+    policy.guidedCheckRecoveryByExercise && item.source.kind === "evidence-event"
+      ? Date.parse(item.occurredAt) >= Date.parse(state!.asOf) - GUIDED_CHECK_REPEAT_HOURS * 3_600_000
+        && item.exerciseId === exercise.id && sharesHighDomain(item)
+      : Date.parse(item.occurredAt) >= Date.parse(state!.asOf) - policy.highLoadModificationHours * 3_600_000
+        && sharesHighDomain(item);
   if (state?.recentLoad.exposures.some((item) =>
-    Date.parse(item.occurredAt) >= Date.parse(state.asOf) - policy.highLoadModificationHours * 3_600_000
-      && Object.entries(variant.demand).some(([domain, level]) => level === "high" && item.demand[domain as DemandDomain] === "high")
+    recentHighConflict(item)
     || Date.parse(item.occurredAt) >= Date.parse(state.asOf) - policy.difficultPerformanceModificationHours * 3_600_000
       && item.exerciseId === exercise.id && item.exerciseDefinitionVersion === exercise.definitionVersion
       && item.prescriptionVariantId === variant.id && (item.reviewDifficulty === "hard" || item.reviewOutcome === "not-today"))) {

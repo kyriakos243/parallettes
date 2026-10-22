@@ -199,8 +199,61 @@ export type SyncDeltaResponse = Readonly<{
   conflicts: readonly EntityConflict[];
 }>;
 
+export type SyncItemRef = Readonly<{ kind: SyncEntityKind; id: string }>;
+
+/**
+ * Transport state on one outbox row that the account would not accept. It is
+ * not an observation, is never exported and never changes a saved fact. Rows
+ * that depend on a held row are blocked with it (derived, never persisted).
+ */
+export type SyncHold = Readonly<{
+  reason: "conflict" | "rejected" | "too-large";
+  /** Conflict reason or account error code. */
+  detail: string;
+  /** Hash of the held local version when it was set aside. */
+  localHash: string;
+  remoteHash?: string;
+  /** Account versions that could not be applied beside the held local version. */
+  stashed: readonly SyncUploadItem[];
+  heldAt: IsoTimestamp;
+  /** Client build that set aside a rejected/too-large row; a new build retries it. */
+  heldBuild?: string;
+}>;
+
+export type SyncHoldRequest = SyncItemRef & Readonly<{
+  hash: string;
+  reason: SyncHold["reason"];
+  detail: string;
+  remoteHash?: string;
+  heldAt: IsoTimestamp;
+  heldBuild?: string;
+}>;
+
+export type UnsyncedItem = SyncItemRef & Readonly<{
+  hash: string;
+  /** pending uploads normally; held was set aside; blocked depends on a held row. */
+  state: "pending" | "held" | "blocked";
+  payload: SyncUploadItem["payload"];
+  hold?: SyncHold;
+}>;
+
+export type SyncHoldResolution = "keep-local" | "use-account-intent" | "retry";
+
+export type LocalAthleteSummary = Readonly<{
+  athleteId: AthleteId;
+  sessionCount: number;
+  lastActivityAt?: IsoTimestamp;
+}>;
+
 /** Optional atomic precondition for account sign-out, never reset/deletion. */
-export type VNextSignOutClearGuard = Readonly<{ assessmentDraft: AssessmentDraft | null }>;
+export type VNextSignOutClearGuard = Readonly<{
+  assessmentDraft: AssessmentDraft | null;
+  /**
+   * Exact unsynced rows the athlete explicitly chose to discard. Without it,
+   * any outbox row still refuses the clear.
+   */
+  outboxFingerprint?: string;
+}>;
 
 export type VNextShadowStore = Readonly<{
   saveAssessmentDraft(draft: AssessmentDraft): Promise<void>;
@@ -223,7 +276,18 @@ export type VNextShadowStore = Readonly<{
     metadata: Pick<ObservationExportBundle, "exportedAt" | "catalogueVersions" | "projectionVersions" | "definitionFingerprints" | "policyVersions">,
   ): Promise<ObservationExportBundle>;
   importBundle(bundle: ObservationExportBundle): Promise<Readonly<{ inserted: number; duplicates: number }>>;
+  /** Next uploadable rows; held rows and rows depending on them are excluded. */
   readSyncUpload(athleteId: AthleteId, limit: number): Promise<readonly SyncUploadItem[]>;
+  /** Sets aside rows at their exact current hash; returns how many were newly held. */
+  holdSyncItems(athleteId: AthleteId, holds: readonly SyncHoldRequest[]): Promise<number>;
+  /** Clears rejected/too-large holds made by a different client build. */
+  releaseBuildHolds(athleteId: AthleteId, currentBuild: string): Promise<number>;
+  readSyncHolds(athleteId: AthleteId): Promise<readonly UnsyncedItem[]>;
+  /** Every row not yet accepted by the account, in upload order. */
+  readUnsyncedItems(athleteId: AthleteId): Promise<readonly UnsyncedItem[]>;
+  resolveSyncHold(athleteId: AthleteId, ref: SyncItemRef, resolution: SyncHoldResolution, now: IsoTimestamp): Promise<void>;
+  /** Athletes with saved training in this database (read-only). */
+  listAthletes(): Promise<readonly LocalAthleteSummary[]>;
   applySyncDelta(athleteId: AthleteId, delta: SyncDeltaResponse): Promise<void>;
   acknowledgeSync(
     athleteId: AthleteId,

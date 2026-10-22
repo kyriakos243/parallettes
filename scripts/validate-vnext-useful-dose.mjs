@@ -58,7 +58,14 @@ const verify = (generated, input, maximum = 1500) => {
     }
   }
   if (generated.durationException) {
-    assert.equal(today.durationMessage, generated.durationException.message);
+    // The immutable plan keeps its exact stored wording; Today drops the
+    // "other useful work" claim when only one development movement exists.
+    const developmentItems = plan.items.filter((item) => item.purpose !== "preparation" && item.purpose !== "recovery").length;
+    assert.equal(today.durationMessage, developmentItems <= 1
+      ? generated.durationException.message.replace(/\s*Other useful work keeps its planned dose; extra sets are not added to fill time\./u, " Extra sets are not added to fill time.")
+      : generated.durationException.message);
+    assert(plan.rationale.some((reason) => reason.message === generated.durationException.message), "Stored plan wording is unchanged");
+    if (developmentItems <= 1) assert(!today.durationMessage.includes("Other useful work"), "Today must not claim other useful work");
     assert.equal(generated.durationException.targetSeconds, maximum);
     assert.equal(generated.durationException.actualSeconds, plan.intendedDurationSeconds);
   }

@@ -186,7 +186,10 @@ includesAll(sources.sw, [
   "const VNEXT_RC_PATH = \"/parallettes/vnext-rc/\"",
   'CACHE_CHANNEL === "v1" && requestUrl.pathname.startsWith(VNEXT_RC_PATH)',
   'event.request.mode === "navigate"',
-  'new Request(url, { cache: "reload" })',
+  // Unhashed shell files are always refetched; content-hashed assets may reuse
+  // the byte-identical HTTP-cached copy (validate-vnext-lazy-motion runs this).
+  'const hashedAssets = new URL("assets/", base).pathname;',
+  'cache: new URL(url).pathname.startsWith(hashedAssets) ? "default" : "reload"',
 ], "service worker");
 assert(sources.sw.includes('event.data.type === "P25_APPLY_UPDATE"') && sources.sw.includes("clients.length !== 1"),
   "Service-worker activation must require an explicit request from the sole app window");

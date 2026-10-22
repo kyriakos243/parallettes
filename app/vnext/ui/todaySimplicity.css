@@ -70,6 +70,15 @@
   .vnext-simple-app .vnext-rc-banner details { width: auto; }
   .vnext-simple-app .vnext-rc-banner details[open] > div { left: auto; right: 0; }
 }
+/* Tablet portrait keeps two cards per row; each card uses the phone stack
+   (number, full-width guide, text, time) so names never squeeze into ~50px. */
+@media (min-width: 761px) and (max-width: 1099px) {
+  .vnext-simple-shell .vnext-plan-item { grid-template-columns: auto minmax(0, 1fr); }
+  .vnext-simple-shell .vnext-plan-time { grid-column: 2; }
+  .vnext-simple-shell .vnext-plan-motion,
+  .vnext-simple-shell .vnext-plan-copy { grid-column: 1 / -1; }
+  .vnext-simple-shell .vnext-plan-motion { min-height: 190px; }
+}
 @media (max-width: 360px) {
   .vnext-simple-shell .vnext-today-hero { grid-template-columns: minmax(0, 1fr); }
   .vnext-duration-badge { text-align: left; }

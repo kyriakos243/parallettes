@@ -9,6 +9,10 @@ export const serialSyncStore = (store: VNextShadowStore, serial: SerialOperation
       serial(() => target.applySyncDelta(...args));
     if (key === "acknowledgeSync") return (...args: Parameters<VNextShadowStore["acknowledgeSync"]>) =>
       serial(() => target.acknowledgeSync(...args));
+    if (key === "holdSyncItems") return (...args: Parameters<VNextShadowStore["holdSyncItems"]>) =>
+      serial(() => target.holdSyncItems(...args));
+    if (key === "releaseBuildHolds") return (...args: Parameters<VNextShadowStore["releaseBuildHolds"]>) =>
+      serial(() => target.releaseBuildHolds(...args));
     const value = Reflect.get(target, key);
     return typeof value === "function" ? value.bind(target) : value;
   },

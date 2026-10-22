@@ -35,7 +35,18 @@ import type { WorkoutReviewDraft } from "../ui/VNextExperience";
 import { readWorkoutReviewDraft } from "./workoutReviewRecovery";
 import { createRecoveryStorageGuard, RecoveryStorageConflict } from "./recoveryStorage";
 import { buildSessionHistory } from "../ui/sessionHistory";
-import { confirmedSyncFingerprint, trainingSyncMessage, type TrainingSyncStatus } from "../ui/syncStatus";
+import {
+  confirmedSyncFingerprint,
+  describeHoldReason,
+  describeSyncItem,
+  suppressedWorkoutNotice,
+  trainingSyncAnnouncement,
+  trainingSyncMessage,
+  workoutSaveOutcomeMessage,
+  type TrainingSyncStatus,
+} from "../ui/syncStatus";
+import type { UnsyncedItem } from "../persistence/contracts";
+import type { ShadowSyncSummary } from "../persistence/sync";
 import { AssessmentRunner } from "./AssessmentRunner";
 import { GuidedTestRunner, type GuidedTestFormResult } from "./GuidedTestRunner";
 import { CustomSessionBuilder, type VNextCustomSessionRequest } from "./CustomSessionBuilder";
@@ -50,6 +61,10 @@ import { createBackgroundSync, serialSyncStore, type SerialOperation } from "./b
 import { startupRecoveryMessage } from "./startupRecovery";
 import { hasMeaningfulEmphasisTraining } from "./emphasisCompletion";
 import "./appUpdate.css";
+import "./syncAttention.css";
+import "./uxPolish.css";
+import { prepareWorkoutCues } from "./workoutCueAudio";
+import { demandChangeMessage } from "./demandChange";
 import { isMixedWorkoutPlan } from "../mixedWorkout";
 import { ReliableWorkoutRunner } from "./ReliableWorkoutRunner";
 import { MixedWorkoutRunner, recoverActiveWorkoutFacts as recoverMixedWorkoutFacts } from "./MixedWorkoutRunner";
@@ -97,6 +112,8 @@ export type VNextApplicationDeployment = Readonly<{
   catalogue?: VNextRuntimeCatalogue;
   workoutGenerators?: Pick<VNextRuntimeCatalogue, "generateSession" | "generateCustomSession">;
   evaluatePlanMedia?: (plan: Parameters<typeof evaluateVNextPlanMediaRelease>[0]) => ReturnType<typeof evaluateVNextPlanMediaRelease>;
+  /** Loads lazily delivered owned guides before a player opens; rejects to refuse the start. */
+  preparePlanMedia?: (references: readonly string[]) => Promise<void>;
   productKicker: string;
   openingMessage: string;
   bannerTitle: string;
@@ -121,6 +138,15 @@ const RELEASE_CANDIDATE_DEPLOYMENT: VNextApplicationDeployment = {
 };
 
 const now = (): IsoTimestamp => new Date().toISOString();
+
+/** Every guide a player may show: planned movements plus their offered safe swaps. */
+const planMediaReferences = (
+  plan: Readonly<{ items: readonly Readonly<{ id: PlanItemId; exerciseId: string }>[] }>,
+  swapOptions: Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>,
+): readonly string[] => [...new Set([
+  ...plan.items.map((item) => item.exerciseId),
+  ...plan.items.flatMap((item) => (swapOptions[item.id] ?? []).map((option) => option.exerciseId)),
+])];
 
 type StoredPreviousEmphasis = PreviousEmphasis & Readonly<{ lastCountedRecordId?: string }>;
 
@@ -188,9 +214,12 @@ const rememberCompletedEmphasis = (
     primaryGraphId: emphasis.primary.graphId,
     ...(emphasis.secondary ? { secondaryGraphId: emphasis.secondary.graphId } : {}),
     goalSignature: emphasis.goalSignature,
-    completedEligibleSessions: previous?.goalSignature === emphasis.goalSignature
-      ? previous.completedEligibleSessions + 1
-      : 1,
+    // A concluded goal-trust review starts the next sample with this session.
+    completedEligibleSessions: emphasis.reviewDecision && emphasis.reviewDecision !== "none"
+      ? 1
+      : previous?.goalSignature === emphasis.goalSignature
+        ? previous.completedEligibleSessions + 1
+        : 1,
     lastCountedRecordId: prepared.record.id,
   };
   localStorage.setItem(`${storageKeyPrefix(namespace, "emphasis")}${athleteId}`, JSON.stringify(value));
@@ -359,6 +388,8 @@ const VNextAthleteApplication = ({
     initialWorkoutRecovery?.stage === "active"
       || (initialWorkoutRecovery?.stage === "preview" && initialWorkoutRecovery.origin === "today"),
   );
+  // In memory only: set by the Start tap on Today, so a reload never auto-starts.
+  const [workoutAutoStart, setWorkoutAutoStart] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -371,6 +402,8 @@ const VNextAthleteApplication = ({
   const [savedWorkoutId, setSavedWorkoutId] = useState<string>();
   const [online, setOnline] = useState(navigator.onLine);
   const [syncStatus, setSyncStatus] = useState<TrainingSyncStatus>({ phase: "idle" });
+  /** Training the account would not accept, set aside for an explicit choice. */
+  const [syncHolds, setSyncHolds] = useState<readonly UnsyncedItem[]>([]);
   const [appUpdate, setAppUpdate] = useState<AppUpdateState>({ phase: "idle" });
   const [goalEditing, setGoalEditing] = useState(false);
   const updateController = useRef<ReturnType<typeof createAppUpdateController> | undefined>(undefined);
@@ -577,26 +610,46 @@ const VNextAthleteApplication = ({
     const current = () => generation === syncGeneration.current;
     syncInFlight.current = true;
     setSyncStatus({ phase: "syncing" });
-    try {
-      const { syncVNextShadowObservations } = await import("../../profileStore");
-      const syncStore = serialSyncStore(store, (operation) => queueBackground(async () => {
-        if (!current() || updateLocked.current) throw new Error("Sync was cancelled before applying its response.");
-        return operation();
-      }));
-      await syncVNextShadowObservations(syncStore, athleteId);
+    // Shared by a clean run and a run that set something aside: every
+    // independent change has been exchanged either way.
+    const settle = async (summary: ShadowSyncSummary): Promise<void> => {
       await queueBackground(async () => {
         if (!current() || updateLocked.current) return;
         const refreshed = await runtime.refresh(refreshInput());
-        const fingerprint = await confirmedSyncFingerprint({
+        const holds = await store.readSyncHolds(athleteId);
+        const fingerprint = holds.length ? undefined : await confirmedSyncFingerprint({
           fingerprint: refreshed.sources.sourceFingerprint,
           readFingerprint: async () => (await store.readProjectionSources(athleteId)).sourceFingerprint,
           hasPending: async () => (await store.readSyncUpload(athleteId, 1)).length > 0,
         });
         if (current() && !updateLocked.current) {
           setSnapshot(refreshed);
-          setSyncStatus(fingerprint ? { phase: "synced", fingerprint, confirmedAt: new Date().toISOString() } : { phase: "waiting" });
+          setSyncHolds(holds);
+          setSyncStatus(holds.length ? { phase: "attention", held: holds.length }
+            : fingerprint ? { phase: "synced", fingerprint, confirmedAt: new Date().toISOString() } : { phase: "waiting" });
+          const notice = suppressedWorkoutNotice(summary.suppressed);
+          if (notice) setMessage(notice);
         }
       });
+    };
+    try {
+      const [{ syncVNextShadowObservations }, { ShadowSyncHeldError }] = await Promise.all([
+        import("../../profileStore"),
+        import("../persistence/sync"),
+      ]);
+      const syncStore = serialSyncStore(store, (operation) => queueBackground(async () => {
+        if (!current() || updateLocked.current) throw new Error("Sync was cancelled before applying its response.");
+        return operation();
+      }));
+      const build = document.querySelector<HTMLMetaElement>('meta[name="p25-build-id"]')?.content;
+      let summary: ShadowSyncSummary;
+      try {
+        summary = await syncVNextShadowObservations(syncStore, athleteId, build ? { build } : {});
+      } catch (reason) {
+        if (!(reason instanceof ShadowSyncHeldError)) throw reason;
+        summary = reason.summary;
+      }
+      await settle(summary);
     } catch (reason) {
       if (!current()) return;
       if (reason instanceof Error && reason.message === "shadow-sync-update-required") {
@@ -605,8 +658,12 @@ const VNextAthleteApplication = ({
         return;
       }
       const { isTransientVNextSyncError } = await import("../../profileStore");
+      const holds = await store.readSyncHolds(athleteId).catch(() => []);
+      if (!current()) return;
+      setSyncHolds(holds);
       if (isTransientVNextSyncError(reason)) {
-        setSyncStatus({ phase: "waiting" });
+        // Offline/temporary: still never hide items that need a decision.
+        setSyncStatus(holds.length ? { phase: "attention", held: holds.length } : { phase: "waiting" });
         return;
       }
       setSyncStatus({ phase: "error" });
@@ -614,6 +671,28 @@ const VNextAthleteApplication = ({
       if (current()) syncInFlight.current = false;
     }
   }, [athleteId, queueBackground, refreshInput, runtime, store]);
+
+  // Set-aside items survive reloads; show them on open, before the first sync.
+  useEffect(() => {
+    if (identity.mode !== "account") return;
+    let active = true;
+    void store.readSyncHolds(athleteId).then((holds) => {
+      if (!active || !holds.length) return;
+      setSyncHolds(holds);
+      setSyncStatus((status) => status.phase === "idle" ? { phase: "attention", held: holds.length } : status);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [athleteId, identity.mode, store]);
+
+  const resolveSyncHold = (item: UnsyncedItem, resolution: "keep-local" | "use-account-intent" | "retry"): void => runCommand(async () => {
+    await store.resolveSyncHold(athleteId, { kind: item.kind, id: item.id }, resolution, now());
+    const holds = await store.readSyncHolds(athleteId);
+    setSyncHolds(holds);
+    setSnapshot(await runtime.refresh(refreshInput()));
+    setSyncStatus(holds.length ? { phase: "attention", held: holds.length } : { phase: "waiting" });
+    setMessage(resolution === "retry" ? "Trying that change again." : "Your goal choice is saved and will sync.");
+    requestTrainingSync();
+  });
 
   useEffect(() => {
     syncGeneration.current += 1;
@@ -694,6 +773,10 @@ const VNextAthleteApplication = ({
 
   const sessionHistory = useMemo(() => snapshot ? buildSessionHistory(snapshot.sources, vNextDefinitionBundles) : [], [snapshot, vNextDefinitionBundles]);
   const syncMessage = trainingSyncMessage({ account: identity.mode === "account", online, fingerprint: snapshot?.sources.sourceFingerprint, status: syncStatus });
+  // The visible line may tick every minute; only a change of sync state is announced.
+  const syncAnnouncementRef = useRef<string | undefined>(undefined);
+  const syncAnnouncement = trainingSyncAnnouncement({ account: identity.mode === "account", online, fingerprint: snapshot?.sources.sourceFingerprint, status: syncStatus, previous: syncAnnouncementRef.current });
+  syncAnnouncementRef.current = syncAnnouncement;
 
   const displayedGenerated = workoutRecovery?.generated ?? snapshot?.generated;
   const plan = displayedGenerated?.plan;
@@ -745,7 +828,7 @@ const VNextAthleteApplication = ({
   const workoutStartBlocker = workoutRecovery?.stage === "review" || workoutRecovery?.stage === "prepared"
     ? "Save the completed workout review before starting another session."
     : mediaBlocked && workoutRecovery?.stage !== "active"
-    ? "This workout cannot start because at least one movement guide has not completed owned technical and owner review. No substitute will be used."
+    ? "This workout cannot start because at least one exercise demonstration has not finished its review. No substitute will be used."
     : undefined;
 
   const startAssessment = (action?: AssessmentEntryAction, restart = false): void => runCommand(async () => {
@@ -785,7 +868,7 @@ const VNextAthleteApplication = ({
         action.protocolIds.includes(candidate.protocolId) && candidate.availability === "available");
       if (offer) {
         setGuidedOffer(offer);
-        setMessage("The exact guided confirmation protocol is ready.");
+        setMessage("Your check is ready.");
         return;
       }
     }
@@ -869,8 +952,8 @@ const VNextAthleteApplication = ({
       setProgressionCatalogueVersion(undefined);
       setGuidedOffer(currentOffer);
       setMessage(committed.clearedRestrictions > 0
-        ? "Placement was saved and current restriction feedback cleared. The exact guided confirmation protocol is ready."
-        : "Placement was saved first. The exact guided confirmation protocol is ready.");
+        ? "Your starting point is saved and today’s comfort update is recorded. Your check is ready."
+        : "Your starting point is saved. Your check is ready.");
     });
   };
 
@@ -894,7 +977,7 @@ const VNextAthleteApplication = ({
       setCorrectingGuidedEntry(false);
     } catch (reason) {
       guidedSubmissionLocked.current = false;
-      setError(reason instanceof Error ? reason.message : "The guided observation could not be retained for safe retry.");
+      setError(reason instanceof Error ? reason.message : "Your check result could not be kept for a safe retry. Nothing was saved twice.");
       return;
     }
     setGuidedOffer(pending.offer);
@@ -943,7 +1026,7 @@ const VNextAthleteApplication = ({
       setProgressionCatalogueVersion(undefined);
       setCorrectingGuidedEntry(false);
       setSnapshot(await runtime.refresh(refreshInput()));
-      setMessage("Pending check closed. Previously saved observations and restrictions are kept.");
+      setMessage("Pending check closed. Your saved results and restrictions are kept.");
     });
   };
 
@@ -1078,15 +1161,18 @@ const VNextAthleteApplication = ({
           status: completionStatus(currentPlan, executionFacts, feedback),
         });
         persistWorkoutRecovery({ ...exactRecovery, stage: "prepared", prepared });
-        await runtime.commitWorkoutCompletion({ ...refreshInput(), prepared });
-        rememberCompletedEmphasis(athleteId, exactRecovery.generated, prepared, storageNamespace, bundleFor(prepared.plan.catalogueVersion));
+        const committed = await runtime.commitWorkoutCompletion({ ...refreshInput(), prepared });
+        const recordStatus = committed.append.record.status;
+        if (recordStatus !== "ignored-older") {
+          rememberCompletedEmphasis(athleteId, exactRecovery.generated, prepared, storageNamespace, bundleFor(prepared.plan.catalogueVersion));
+        }
         const refreshed = await runtime.refresh(refreshInput());
         setSnapshot(refreshed);
+        // A reset-suppressed workout cannot be saved by retrying, so the
+        // recovery closes either way; only a real save shows the summary.
         clearWorkoutRecovery();
-        setSavedWorkoutId(prepared.record.id);
-        setMessage(prepared.restrictionFollowUp
-          ? "Workout saved. Your reported discomfort will be considered in future workouts; your achievements are kept."
-          : "");
+        if (recordStatus !== "ignored-older") setSavedWorkoutId(prepared.record.id);
+        setMessage(workoutSaveOutcomeMessage(recordStatus, { retry: false, restrictionFollowUp: Boolean(prepared.restrictionFollowUp) }));
       } finally {
         completionSubmissionLocked.current = false;
       }
@@ -1100,31 +1186,37 @@ const VNextAthleteApplication = ({
       try {
         workoutRecoveryStorage.assertCurrent();
         const committed = await runtime.commitWorkoutCompletion({ ...refreshInput(), prepared: pendingPrepared });
-        rememberCompletedEmphasis(athleteId, workoutRecovery.generated, pendingPrepared, storageNamespace, bundleFor(pendingPrepared.plan.catalogueVersion));
+        const recordStatus = committed.append.record.status;
+        if (recordStatus !== "ignored-older") {
+          rememberCompletedEmphasis(athleteId, workoutRecovery.generated, pendingPrepared, storageNamespace, bundleFor(pendingPrepared.plan.catalogueVersion));
+        }
         const refreshed = await runtime.refresh(refreshInput());
         setSnapshot(refreshed);
         clearWorkoutRecovery();
-        setSavedWorkoutId(pendingPrepared.record.id);
-        setMessage(committed.append.record.status === "duplicate"
-          ? "Workout already saved. No duplicate was added."
-          : "Workout saved.");
+        if (recordStatus !== "ignored-older") setSavedWorkoutId(pendingPrepared.record.id);
+        setMessage(workoutSaveOutcomeMessage(recordStatus, { retry: true }));
       } finally {
         completionSubmissionLocked.current = false;
       }
     });
   };
 
+  /** Downloads this athlete's saved training (set-aside items included; transport state never). */
+  const writeBackupFile = async (): Promise<void> => {
+    const definitionFingerprint = await sha256(vNextDefinitionBundles);
+    const bundle = await store.exportBundle(athleteId, {
+      exportedAt: now(),
+      catalogueVersions: vNextDefinitionBundles.map((bundle) => bundle.catalogueVersion),
+      projectionVersions: [vNextProjectionPolicy.version],
+      definitionFingerprints: [definitionFingerprint],
+      policyVersions: [{ id: vNextProjectionPolicy.id, version: vNextProjectionPolicy.version }],
+    });
+    downloadJson(`parallette25-vnext-${athleteId}.json`, bundle);
+  };
+
   const exportObservations = (): void => runCommand(async () => {
     try {
-      const definitionFingerprint = await sha256(vNextDefinitionBundles);
-      const bundle = await store.exportBundle(athleteId, {
-        exportedAt: now(),
-        catalogueVersions: vNextDefinitionBundles.map((bundle) => bundle.catalogueVersion),
-        projectionVersions: [vNextProjectionPolicy.version],
-        definitionFingerprints: [definitionFingerprint],
-        policyVersions: [{ id: vNextProjectionPolicy.id, version: vNextProjectionPolicy.version }],
-      });
-      downloadJson(`parallette25-vnext-${athleteId}.json`, bundle);
+      await writeBackupFile();
       setMessage("Your training backup is ready.");
     } catch (reason) {
       setMessage("Backup export could not finish. Keep this app and its storage, then try again.");
@@ -1134,7 +1226,7 @@ const VNextAthleteApplication = ({
 
   const importObservations = (file: File): void => runCommand(async () => {
     const parsed = JSON.parse(await file.text()) as ObservationExportBundle;
-    if (parsed.athleteId !== athleteId) throw new Error("This observation export belongs to a different athlete.");
+    if (parsed.athleteId !== athleteId) throw new Error("This backup belongs to a different athlete.");
     const result = await store.importBundle(parsed);
     const refreshed = await runtime.refresh(refreshInput());
     setSnapshot(refreshed);
@@ -1199,7 +1291,7 @@ const VNextAthleteApplication = ({
     const media = evaluatePlanMedia(generated.plan);
     const unresolved = unresolvedRenderablePlanItems(generated.plan, vNextDefinitionBundle);
     if (!media.releaseAllowed || unresolved.length > 0) {
-      throw new Error("This short session is blocked because an exact owned movement guide is unavailable.");
+      throw new Error("This short session cannot start because an exercise demonstration is unavailable.");
     }
     const swapOptions = Object.fromEntries(generated.plan.items.map((item) => [item.id, safeWorkoutSwaps({
       plan: generated.plan!,
@@ -1209,21 +1301,32 @@ const VNextAthleteApplication = ({
       intent,
       projectionPolicy: vNextProjectionPolicy,
     })])) as Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>;
+    await deployment.preparePlanMedia?.(planMediaReferences(generated.plan, swapOptions));
     setWorkoutSelections({});
     persistWorkoutRecovery({ version: 1, athleteId, stage: "preview", origin: "custom", generated, selections: {}, swapOptions,
       customRequest: request, equipmentAtPreview: refreshed.intent.equipment });
     setCustomOpen(false);
     setWorkoutOpen(false);
-    setMessage("Custom workout ready. Review the exercises, then start when you’re ready.");
+    setMessage("Custom workout ready. Check the exercises below, then tap Start Custom Session.");
   });
 
   const startOrResumeWorkout = (): void => {
     if (busy || workoutRecovery?.stage === "review" || workoutRecovery?.stage === "prepared") return;
-    if (workoutRecovery?.stage === "active" || workoutRecovery?.stage === "preview") {
+    // This tap is the user gesture iOS requires before timer cues can play.
+    prepareWorkoutCues();
+    if (workoutRecovery?.stage === "active") {
+      // An interrupted workout always waits for an explicit Resume in the player.
+      setWorkoutAutoStart(false);
       setWorkoutOpen(true);
-      setMessage(workoutRecovery.stage === "active"
-        ? "Your paused workout is ready."
-        : `Reviewing the ${workoutRecovery.origin === "custom" ? "Custom Session" : "Today workout"} before its timer starts.`);
+      setMessage("Your paused workout is ready.");
+      return;
+    }
+    if (workoutRecovery?.stage === "preview") {
+      // The athlete already reviewed this plan on Today: start it in one tap.
+      // The player still runs its normal safety check before the timer starts.
+      setWorkoutAutoStart(true);
+      setWorkoutOpen(true);
+      setMessage(`Starting your ${workoutRecovery.origin === "custom" ? "Custom Session" : "workout"}…`);
       return;
     }
     runCommand(async () => {
@@ -1237,7 +1340,7 @@ const VNextAthleteApplication = ({
       const media = evaluatePlanMedia(generated.plan);
       const unresolved = unresolvedRenderablePlanItems(generated.plan, vNextDefinitionBundle);
       if (!media.releaseAllowed || unresolved.length > 0) {
-        throw new Error("This workout is blocked because an exact owned movement guide is unavailable.");
+        throw new Error("This workout cannot start because an exercise demonstration is unavailable.");
       }
       const previewItems = plan?.items ?? [];
       const freshSwapOptions = Object.fromEntries(generated.plan.items.map((item) => [item.id, safeWorkoutSwaps({
@@ -1248,6 +1351,7 @@ const VNextAthleteApplication = ({
         intent: refreshed.intent,
         projectionPolicy: vNextProjectionPolicy,
       })])) as Readonly<Partial<Record<PlanItemId, readonly SafeWorkoutSwap[]>>>;
+      await deployment.preparePlanMedia?.(planMediaReferences(generated.plan, freshSwapOptions));
       const validSelections = Object.fromEntries(generated.plan.items.flatMap((item, index) => {
         const previewItem = previewItems[index];
         const selection = previewItem ? workoutSelections[previewItem.id] : undefined;
@@ -1260,16 +1364,21 @@ const VNextAthleteApplication = ({
           : [];
       }));
       persistWorkoutRecovery({ version: 1, athleteId, stage: "preview", origin: "today", generated, selections: validSelections, swapOptions: freshSwapOptions });
+      // Today already showed this plan with its guides and swaps; one tap starts it.
+      setWorkoutAutoStart(true);
       setWorkoutOpen(true);
     });
   };
 
   const beginWorkout = (): boolean => {
-    const preview = workoutRecovery;
+    // Read the persisted ref: a one-tap start can reach this before React has
+    // re-rendered with the preview that the Start tap just saved.
+    const preview = workoutRecoveryRef.current;
     if (!preview || preview.stage !== "preview") return preview?.stage === "active";
     try {
       persistWorkoutRecovery({ ...preview, stage: "active" });
-      setMessage(`${preview.origin === "custom" ? "Custom Session" : "Today’s workout"} started. Exact timer progress is recoverable on this device.`);
+      setWorkoutAutoStart(false);
+      setMessage(`${preview.origin === "custom" ? "Custom Session" : "Today’s workout"} started. Your progress is saved on this device if you pause or leave.`);
       return true;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The workout could not be made recoverable, so its timer was not started.");
@@ -1381,6 +1490,7 @@ const VNextAthleteApplication = ({
   };
 
   const closeWorkout = (started: boolean): void => {
+    setWorkoutAutoStart(false);
     if (started) {
       setWorkoutOpen(false);
       setMessage("Workout saved on this device. Resume whenever you’re ready.");
@@ -1419,13 +1529,13 @@ const VNextAthleteApplication = ({
   const finishWorkout = (facts: WorkoutExecutionFacts): boolean => {
     const active = workoutRecovery;
     if (!active || active.stage !== "active" || !active.generated.plan) {
-      setError("The exact active Session Plan is unavailable; timer facts were not discarded.");
+      setError("This workout’s plan is unavailable right now. Your recorded work was not discarded.");
       return false;
     }
     try {
       persistWorkoutRecovery({ ...active, stage: "review", facts });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Timer facts could not be durably retained; the active workout remains recoverable.");
+      setError(reason instanceof Error ? reason.message : "Your recorded work could not be saved yet. The workout is still open on this device, so you can try again.");
       return false;
     }
     setWorkoutOpen(false);
@@ -1452,7 +1562,7 @@ const VNextAthleteApplication = ({
 
   if (accountOpen) {
     const AccountGate = deployment.AccountGate ?? VNextAccountGate;
-    return <AccountGate current={identity} onSelected={onIdentitySelected} onClose={() => setAccountOpen(false)} onSignedOut={onSignedOut} onResetProgress={resetProgress} presentation={deployment.accountPresentation} storageNamespace={storageNamespace} shadowDatabaseName={deployment.shadowDatabaseName} />;
+    return <AccountGate current={identity} onSelected={onIdentitySelected} onClose={() => setAccountOpen(false)} onSignedOut={onSignedOut} onResetProgress={resetProgress} onExportBackup={writeBackupFile} presentation={deployment.accountPresentation} storageNamespace={storageNamespace} shadowDatabaseName={deployment.shadowDatabaseName} />;
   }
 
   if (!snapshot) {
@@ -1491,7 +1601,10 @@ const VNextAthleteApplication = ({
 
   if (workoutOpen && plan) {
     const safetyProps = deployment.kind === "production" ? { onBeforeRun: checkWorkoutBeforeRun, safetyVersion: snapshot.sources.sourceFingerprint } : {};
-    if (isMixedWorkoutPlan(plan)) return <MixedWorkoutRunner plan={plan} bundle={workoutBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} {...safetyProps} onClose={closeWorkout} onFinish={finishWorkout} />;
+    // One-tap start applies only to a never-started preview opened by a Start tap.
+    const autoStart = workoutAutoStart && workoutRecovery?.stage === "preview";
+    if (isMixedWorkoutPlan(plan)) return <MixedWorkoutRunner plan={plan} bundle={workoutBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} {...safetyProps} onClose={closeWorkout} onFinish={finishWorkout} autoStart={autoStart} />;
+    if (deployment.kind === "production") return <ReliableWorkoutRunner plan={plan} bundle={workoutBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} {...safetyProps} onClose={closeWorkout} onFinish={finishWorkout} autoStart={autoStart} />;
     return <WorkoutRunner plan={plan} bundle={workoutBundle} origin={workoutRecovery?.origin ?? "today"} initialSelections={workoutRecovery?.selections} swapOptions={effectiveWorkoutSwapOptions} onStart={beginWorkout} {...safetyProps} onClose={closeWorkout} onFinish={finishWorkout} />;
   }
 
@@ -1598,7 +1711,32 @@ const VNextAthleteApplication = ({
           </details>
         </div>
       </aside>
-      <p className="vnext-sync-status" data-state={syncStatus.phase} role="status">{syncMessage}</p>
+      <p className="vnext-sync-status" data-state={syncStatus.phase}>{syncMessage}</p>
+      <p className="vnext-visually-hidden" role="status">{syncAnnouncement}</p>
+      {identity.mode === "account" && syncHolds.length > 0 && <section className="vnext-panel vnext-sync-attention" aria-labelledby="vnext-sync-attention-title">
+        <h2 id="vnext-sync-attention-title">Needs your choice</h2>
+        <ul>
+          {syncHolds.map((item) => {
+            const goalTie = item.kind === "athlete-intent" && item.hold?.detail === "intent-timestamp-conflict";
+            const otherGoals = goalTie && item.hold?.stashed.some(({ kind }) => kind === "athlete-intent");
+            return <li key={`${item.kind}:${item.id}`}>
+              <p><strong>{describeSyncItem(item)}</strong> · {describeHoldReason(item)}</p>
+              {goalTie ? <div className="vnext-actions">
+                <button type="button" className="vnext-action" disabled={busy} onClick={() => resolveSyncHold(item, "keep-local")}>Keep this device’s goals</button>
+                {otherGoals && <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={() => resolveSyncHold(item, "use-account-intent")}>Use the other device’s goals</button>}
+              </div> : item.hold?.reason === "conflict" ? <>
+                <p>It stays saved on this device. To use your account’s version here, save a backup, then sign out and sign in again.</p>
+                <div className="vnext-actions">
+                  <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={exportObservations}>Save a backup</button>
+                </div>
+              </> : <div className="vnext-actions">
+                <button type="button" className="vnext-action" disabled={busy} onClick={() => resolveSyncHold(item, "retry")}>Try again</button>
+                <button type="button" className="vnext-action" data-kind="secondary" disabled={busy} onClick={exportObservations}>Save a backup</button>
+              </div>}
+            </li>;
+          })}
+        </ul>
+      </section>}
       {appUpdate.availableBuild && <aside className="vnext-update-notice" aria-label="App update">
         <p><strong>Update ready</strong> · Your saved progress stays on this device.
           {workflowLocked ? " Finish saving your workout or check before updating." : ""}
@@ -1678,7 +1816,7 @@ const VNextAthleteApplication = ({
           return next;
         }) : undefined}
         onCustomSessionRequested={!workflowLocked && !busy ? () => { setError(undefined); setCustomOpen(true); } : undefined}
-        onDemandChange={!workflowLocked && !busy ? (demand) => runCommand(async () => { const updated = await runtime.selectDailyDemand({ ...refreshInput(), sessionDemand: demand }); dailyDemand.current = { day: updated.asOf.slice(0, 10), demand }; setWorkoutSelections({}); setSnapshot(updated); setMessage(`${demand === "technique" ? "Easier / Technique" : demand === "challenge" ? "Challenge" : "Standard"} selected for today’s workout.`); }) : undefined}
+        onDemandChange={!workflowLocked && !busy ? (demand) => runCommand(async () => { const before = snapshot.generated.plan; const updated = await runtime.selectDailyDemand({ ...refreshInput(), sessionDemand: demand }); dailyDemand.current = { day: updated.asOf.slice(0, 10), demand }; setWorkoutSelections({}); setSnapshot(updated); setMessage(demandChangeMessage({ demand, before, after: updated.generated.plan, bundleFor: (plan) => bundleFor(plan.catalogueVersion) })); }) : undefined}
         onGoalSelectionChange={!workflowLocked && !busy ? (selection) => new Promise<void>((resolve, reject) => {
           runCommand(async () => {
             try {
@@ -1778,7 +1916,7 @@ export const VNextReleaseCandidateApp = ({
   if (accountAccess === "checking") {
     return (
       <main className="vnext-experience vnext-rc-loading" aria-live="polite">
-        <div><p className="vnext-kicker">{deployment.productKicker}</p><h1>Checking secure access…</h1><p>Account observations remain locked until this device’s session is verified.</p></div>
+        <div><p className="vnext-kicker">{deployment.productKicker}</p><h1>Checking secure access…</h1><p>Your account’s training stays locked until this device’s sign-in is confirmed.</p></div>
       </main>
     );
   }

@@ -496,8 +496,15 @@ await assertRejects(
   /shadow-sync-conflict:evidence-event/u,
   "A divergent same-ID remote observation did not stop with an explicit conflict",
 );
-assert((await conflictDevice.store.readSyncUpload(athleteId, 10)).some(({ id }) => id === conflictingEvent.id),
-  "A conflicting observation was incorrectly removed from the local outbox");
+// The conflicting observation stays in the outbox, set aside for an explicit
+// decision; it is no longer re-sent, so independent rows can still upload.
+const conflictingRow = (await conflictDevice.store.readUnsyncedItems(athleteId))
+  .find(({ kind, id }) => kind === "evidence-event" && id === conflictingEvent.id);
+assert(conflictingRow?.state === "held" && conflictingRow.hold?.reason === "conflict"
+  && conflictingRow.hold.detail === "immutable-id-conflict",
+  "A conflicting observation was incorrectly removed from the local outbox or not set aside");
+assert(!(await conflictDevice.store.readSyncUpload(athleteId, 10)).some(({ id }) => id === conflictingEvent.id),
+  "A set-aside conflicting observation was offered for upload again");
 
 // A stale device may reconnect after another device resets progress. The
 // tombstone wins before replay and facts at/before the cutoff cannot return.

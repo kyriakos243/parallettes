@@ -55,10 +55,23 @@ export const placementEntryRules: readonly PlacementEntryRule[] = [
   entry(graphIds.planche, "foot-assisted-tuck-planche", [tallSupport, scapularControl, forwardLoading, hollowControl]),
 ];
 
+/**
+ * Goal-trust placement (projection 12) adds the two unassisted tuck variants
+ * with the same four readiness facets as the existing grounded Planche
+ * entries. Admission still needs the exact tuck check itself; it does not
+ * demonstrate any predecessor or make a harder successor eligible.
+ */
+export const goalTrustPlacementEntryRules: readonly PlacementEntryRule[] = [
+  ...placementEntryRules,
+  entry(graphIds.planche, "brief-floor-tuck-planche", [tallSupport, scapularControl, forwardLoading, hollowControl]),
+  entry(graphIds.planche, "stable-tuck-planche", [tallSupport, scapularControl, forwardLoading, hollowControl]),
+];
+
 export const placementEntryRuleFor = (
   subject: BenchmarkSubject,
+  rules: readonly PlacementEntryRule[] = placementEntryRules,
 ): PlacementEntryRule | undefined => subject.kind === "milestone"
-  ? placementEntryRules.find((rule) => rule.milestone.graphId === subject.milestone.graphId
+  ? rules.find((rule) => rule.milestone.graphId === subject.milestone.graphId
     && rule.milestone.nodeId === subject.milestone.nodeId)
   : undefined;
 
@@ -95,9 +108,10 @@ export const placementReadinessSatisfied = (
   rule: PlacementEntryRule | undefined,
   bundle: DefinitionBundle,
   state: DerivedAthleteState | undefined,
+  rules: readonly PlacementEntryRule[] = placementEntryRules,
 ): boolean => {
   if (!rule || !state) return false;
-  const canonical = placementEntryRuleFor({ kind: "milestone", milestone: rule.milestone });
+  const canonical = placementEntryRuleFor({ kind: "milestone", milestone: rule.milestone }, rules);
   if (!canonical) return false;
   const node = bundle.graphs.find((graph) => graph.id === canonical.milestone.graphId)
     ?.nodes.find((candidate) => candidate.id === canonical.milestone.nodeId);

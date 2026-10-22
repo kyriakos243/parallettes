@@ -44,15 +44,18 @@ import {
   type WorkoutReviewPrompt,
 } from "./contracts";
 import { vNextAssessmentPolicy } from "./policy";
-import { placementEntryRuleFor, placementReadinessSatisfied, placementSubjectDemonstrated } from "../placementEntry";
+import { placementEntryRuleFor, placementEntryRules, placementReadinessSatisfied, placementSubjectDemonstrated } from "../placementEntry";
 import { milestoneBenchmarkId } from "../definitions/ids";
 import type { ProjectionPolicy } from "../projection";
 import { currentCheckSafetyBlockers } from "./checkSafety";
 
-const placementRule = (draft: AssessmentDraft, protocol: BenchmarkProtocol) => {
+/** The current projection policy owns the bounded entry list; older policies keep the native list. */
+const placementRules = (policy?: ProjectionPolicy) => policy?.measuredPlacementEntries ?? placementEntryRules;
+
+const placementRule = (draft: AssessmentDraft, protocol: BenchmarkProtocol, policy?: ProjectionPolicy) => {
   if (draft.policyVersion !== 2 || !draft.answers.some((answer) => answer.value.kind === "inactivity" && answer.value.inactivity === "active")
     || !draft.answers.some((answer) => answer.value.kind === "skill-selection" && answer.value.protocolId === protocol.id && answer.value.response === "clean")) return undefined;
-  return placementEntryRuleFor(protocol.subject);
+  return placementEntryRuleFor(protocol.subject, placementRules(policy));
 };
 
 /** One UTC calendar day is one guided occasion, across reloads, retries and devices. */
@@ -181,7 +184,7 @@ const availabilityFor = (
     item.milestone.graphId === milestone.graphId
     && item.milestone.nodeId === milestone.nodeId) : undefined;
   const reconfirmingEstablished = reason === "reconfirm-existing" && existingFinding?.lifecycle === "established";
-  const entryReady = placementReadinessSatisfied(placementRule(draft, protocol), bundle, state);
+  const entryReady = placementReadinessSatisfied(placementRule(draft, protocol, currentPolicy), bundle, state, placementRules(currentPolicy));
   if (!entryReady && !protocolPrerequisitesSatisfied(protocol, bundle, state, reconfirmingEstablished)) {
     blockers.push("prerequisite-confirmation-needed");
   }
@@ -222,6 +225,9 @@ const placementReviewChecks = (draft: AssessmentDraft, bundle: DefinitionBundle,
     });
   const candidates: GuidedTestOffer[] = [];
   const seen = new Set<string>();
+  // Goal-trust review: remember which selected goal first required each check.
+  const rootGraphFor = new Map<string, string | undefined>();
+  let currentRootGraph: string | undefined;
   const completed = (protocol: BenchmarkProtocol, measured: boolean) => measured
     ? placementSubjectDemonstrated(protocol.subject, state) : stateSatisfiesSubject(protocol.subject, state);
   const forRef = (ref: PrerequisiteRef): BenchmarkProtocol | undefined => ref.kind === "benchmark"
@@ -231,7 +237,7 @@ const placementReviewChecks = (draft: AssessmentDraft, bundle: DefinitionBundle,
   const visit = (protocol: BenchmarkProtocol, measured = false): void => {
     if (completed(protocol, measured) || seen.has(protocol.id)) return;
     seen.add(protocol.id);
-    const entry = placementRule(draft, protocol);
+    const entry = placementRule(draft, protocol, currentPolicy);
     if (entry) {
       entry.readinessProtocolIds.forEach((id) => visit(protocolById(bundle, id), true));
     } else if (protocol.subject.kind === "milestone") {
@@ -253,18 +259,35 @@ const placementReviewChecks = (draft: AssessmentDraft, bundle: DefinitionBundle,
       }
     }
     const reason = draft.mode === "targeted-reconfirmation" ? "reconfirm-existing" as const : "confirm-provisional" as const;
+    rootGraphFor.set(protocol.id, currentRootGraph);
     candidates.push({ protocolId: protocol.id, subject: protocol.subject, label: protocol.label, reason,
       ...availabilityFor(draft, bundle, protocol, state, reason, currentPolicy, currentEquipment) });
   };
   let checkedCount = 0;
   for (const root of roots) {
-    const measured = Boolean(placementRule(draft, root));
+    currentRootGraph = root.subject.kind === "milestone" ? root.subject.milestone.graphId : undefined;
+    const measured = Boolean(placementRule(draft, root, currentPolicy));
     if (completed(root, measured)) checkedCount++;
     else visit(root, measured);
   }
   // Stable ordering retains goal/dependency priority rather than alphabetically burying useful checks.
-  const guidedTests = candidates.sort((a, b) => Number(a.availability === "blocked") - Number(b.availability === "blocked"))
-    .slice(0, vNextAssessmentPolicy.maximumGuidedTestsPerReview);
+  const byAvailability = [...candidates].sort((a, b) => Number(a.availability === "blocked") - Number(b.availability === "blocked"));
+  const mainGraph = selectedAssessmentGoals(draft)[0];
+  const ordered = currentPolicy?.mainGoalFirstPlacementReview && draft.mode !== "targeted-reconfirmation" && mainGraph
+    ? (() => {
+      // While the main goal has an available check, show it first and at most
+      // one supporting-goal check; supporting checks follow once it is done.
+      const isMain = (offer: GuidedTestOffer) => rootGraphFor.get(offer.protocolId) === mainGraph;
+      const mainAvailable = candidates.filter((offer) => isMain(offer) && offer.availability === "available");
+      const supportingAvailable = candidates.filter((offer) => !isMain(offer) && offer.availability === "available");
+      const mainBlocked = candidates.filter((offer) => isMain(offer) && offer.availability === "blocked");
+      const supportingBlocked = candidates.filter((offer) => !isMain(offer) && offer.availability === "blocked");
+      return mainAvailable.length
+        ? [...mainAvailable, ...supportingAvailable.slice(0, 1), ...mainBlocked]
+        : [...supportingAvailable, ...mainBlocked, ...supportingBlocked];
+    })()
+    : byAvailability;
+  const guidedTests = ordered.slice(0, vNextAssessmentPolicy.maximumGuidedTestsPerReview);
   return { guidedTests, checkedCount, remainingCheckCount: candidates.length, checksComplete: checkedCount === roots.length };
 };
 

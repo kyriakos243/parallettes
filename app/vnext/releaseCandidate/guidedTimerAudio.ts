@@ -44,11 +44,31 @@ export const createGuidedTimerAudio = () => {
       return true;
     } catch { cancel(); return false; }
   };
+  /** One short workout cue on the already-unlocked context; never creates or resumes audio. */
+  const tone = (frequency: number, seconds: number): boolean => {
+    if (!context || context.state !== "running" || document.visibilityState !== "visible") return false;
+    try {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const start = context.currentTime;
+      oscillator.frequency.value = frequency;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.1, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + seconds);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.onended = () => { active.delete(oscillator); oscillator.disconnect(); gain.disconnect(); };
+      active.add(oscillator);
+      oscillator.start(start);
+      oscillator.stop(start + seconds + 0.01);
+      return true;
+    } catch { return false; }
+  };
   const dispose = (): void => {
     cancel();
     const closing = context;
     context = undefined;
     if (closing) void closing.close().catch(() => undefined);
   };
-  return { prepare, play, cancel, dispose };
+  return { prepare, play, tone, cancel, dispose };
 };

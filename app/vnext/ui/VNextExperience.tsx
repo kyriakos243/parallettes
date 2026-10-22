@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { GraphId, PlanItemId, SessionDemand } from "../contracts";
-import { VNextMotionGuide } from "../media/VNextMotionGuide";
+import { DeferredMotionGuide as VNextMotionGuide } from "../media/deferredMotion";
 import { SkillRoadmap } from "./SkillRoadmap";
 import { useSectionNavigation } from "./sectionNavigation";
 import { HistoryView, WorkoutSavedSummary } from "./HistoryPanels";
@@ -469,6 +469,7 @@ const TodayView = ({
 
           {today.placementMessage && <p className="vnext-panel" role="status">{today.placementMessage}</p>}
           {today.durationMessage && <p className="vnext-panel">{today.durationMessage}</p>}
+          {today.goalNotice && <p className="vnext-panel" role="status">{today.goalNotice}</p>}
           {!completion && <div className="vnext-primary-workout-actions" aria-label="Workout actions">
             <button
               type="button"
@@ -478,15 +479,13 @@ const TodayView = ({
                 onStartWorkout?.();
                 announce(workoutRecoveryStage === "active"
                   ? `Your exact in-progress ${workoutOrigin === "custom" ? "Custom Session" : "workout"} is ready to resume.`
-                  : workoutRecoveryStage === "preview"
-                    ? `Your ${workoutOrigin === "custom" ? "Custom Session" : "workout"} preview is ready.`
-                    : "Your workout is ready to review and start.");
+                  : `Starting your ${workoutOrigin === "custom" ? "Custom Session" : "workout"}.`);
               }}
             >
               {workoutRecoveryStage === "active"
                 ? `Resume ${workoutOrigin === "custom" ? "Custom Session" : "today’s workout"}`
                 : workoutRecoveryStage === "preview"
-                  ? `Review ${workoutOrigin === "custom" ? "Custom Session" : "today’s workout"}`
+                  ? `Start ${workoutOrigin === "custom" ? "Custom Session" : "today’s workout"}`
                   : today.startActionLabel ?? "Start today’s workout"}
             </button>
             {onEndRecoveredWorkout && workoutRecoveryStage === "active" && (
@@ -1073,7 +1072,7 @@ export const VNextExperience = ({
     : workoutRecoveryStage === "active"
       ? `Your exact in-progress ${workoutOrigin === "custom" ? "Custom Session" : "workout"} is ready to resume.`
       : workoutRecoveryStage === "preview"
-        ? `Your ${workoutOrigin === "custom" ? "Custom Session" : "workout"} preview is ready to review.`
+        ? `Your ${workoutOrigin === "custom" ? "Custom Session" : "workout"} is ready. Check the exercises below, then start.`
         : "Today’s workout is ready.";
   const [historySelection, setHistorySelection] = useState<string>();
   const { section: view, changeSection: setView, hasVisited } = useSectionNavigation(initialView);
