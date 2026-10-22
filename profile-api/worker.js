@@ -278,19 +278,31 @@ const login = async (request, env, origin) => {
 
 const claimLegacy = async (request, env, origin) => {
   const body = await readJson(request);
+  // Claiming creates an account, so it shares registration's per-IP budget and
+  // every attempt counts. A separate IP-independent counter limits repeated
+  // verification failures against one profile ID.
+  const limiter = await rateKey(request, "register");
+  if (await rateLimited(env, limiter)) return json({ error: "Too many account-creation attempts. Wait 15 minutes, then try again." }, 429, origin);
+  await recordFailure(env, limiter);
   const username = sanitizeUsername(body.username);
   const profileId = String(body.profileId ?? "");
   if (!validUsername(username) || !/^[-\w]{8,80}$/u.test(profileId) || !validPassword(body.password)) {
     return json({ error: "Enter the current profile and a password of at least 10 characters." }, 400, origin);
   }
+  const profileLimiter = await digest(`claim-profile:${profileId}`);
+  if (await rateLimited(env, profileLimiter)) return json({ error: "Too many attempts for this profile. Wait 15 minutes, then try again." }, 429, origin);
   const key = usernameKey(username);
   if (await env.DB.prepare("SELECT profile_id FROM accounts WHERE username_key = ? OR profile_id = ?").bind(key, profileId).first()) {
     return json({ error: "This profile is already secured. Sign in instead." }, 409, origin);
   }
   const legacy = env.PROFILES ? await env.PROFILES.get(`profile:${profileId}`, "json") : null;
   const supplied = body.profile && body.profile.profileId === profileId && usernameKey(body.profile.username) === key ? body.profile : null;
-  if (!legacy && !supplied) return json({ error: "This legacy profile could not be verified on this device." }, 404, origin);
+  if (!legacy && !supplied) {
+    await recordFailure(env, profileLimiter);
+    return json({ error: "This legacy profile could not be verified on this device." }, 404, origin);
+  }
   if (legacy && (legacy.profileId !== profileId || usernameKey(legacy.username) !== key)) {
+    await recordFailure(env, profileLimiter);
     return json({ error: "The local profile does not match the saved account." }, 403, origin);
   }
   const source = !legacy ? supplied : !supplied ? legacy :
@@ -309,6 +321,7 @@ const claimLegacy = async (request, env, origin) => {
     if (String(error).includes("UNIQUE")) return json({ error: "This profile is already secured. Sign in instead." }, 409, origin);
     throw error;
   }
+  await clearFailures(env, profileLimiter);
   const account = await env.DB.prepare(`${accountSelect} WHERE profile_id = ?`).bind(profileId).first();
   const payload = await accountPayload(env, account);
   return json({ ...payload, recoveryCode: credentials.recoveryCode }, 201, origin);

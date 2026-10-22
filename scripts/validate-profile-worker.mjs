@@ -183,4 +183,38 @@ const deleted = await worker.fetch(request("/profiles/me", {
 }), env);
 if (deleted.status !== 200) throw new Error("Profile Worker failed password-confirmed account deletion");
 
-console.log("Profile Worker: non-mutating health, bounded bodies, private registration/login, unique usernames, recovery, legacy claim, revision safety and protected deletion passed.");
+// Claiming creates an account: it shares registration's per-IP budget, and
+// repeated verification failures for one profile ID are limited across IPs.
+const fromIp = (ip, path, body) => request(path, {
+  method: "POST",
+  headers: { "content-type": "application/json", "cf-connecting-ip": ip },
+  body: JSON.stringify(body),
+});
+const claimBody = (index) => {
+  const profileId = `claim-budget-${index}-qa`;
+  return { username: `Claim Budget ${index}`, profileId, password: "claim budget strong password",
+    profile: { profileId, username: `Claim Budget ${index}`, updatedAt: "2026-08-10T00:00:00.000Z" } };
+};
+const sharedStatuses = [];
+for (let index = 0; index < 4; index += 1) {
+  sharedStatuses.push((await worker.fetch(fromIp("192.0.2.10", "/auth/register", { username: `Budget Reg ${index}`, password: "budget strong password" }), env)).status);
+}
+for (let index = 0; index < 5; index += 1) {
+  sharedStatuses.push((await worker.fetch(fromIp("192.0.2.10", "/auth/claim", claimBody(index)), env)).status);
+}
+if (sharedStatuses.slice(0, 8).some((status) => status !== 201) || sharedStatuses[8] !== 429) {
+  throw new Error(`Claim did not share the registration budget: ${sharedStatuses.join(",")}`);
+}
+const otherIpClaim = await worker.fetch(fromIp("192.0.2.11", "/auth/claim", claimBody(20)), env);
+if (otherIpClaim.status !== 201) throw new Error("A separate IP was blocked by another IP's claim budget");
+
+const unverifiable = { username: "Unverifiable Claim", profileId: "claim-unverifiable-qa", password: "unverifiable strong password" };
+const profileStatuses = [];
+for (let index = 0; index < 9; index += 1) {
+  profileStatuses.push((await worker.fetch(fromIp(`198.51.100.${index + 1}`, "/auth/claim", unverifiable), env)).status);
+}
+if (profileStatuses.slice(0, 8).some((status) => status !== 404) || profileStatuses[8] !== 429) {
+  throw new Error(`Per-profile claim failures were not limited across IPs: ${profileStatuses.join(",")}`);
+}
+
+console.log("Profile Worker: non-mutating health, bounded bodies, private registration/login, unique usernames, recovery, legacy claim, claim rate limits, revision safety and protected deletion passed.");
